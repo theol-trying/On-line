@@ -1,0 +1,10 @@
+# Déploiement Render — "Blueprint" (déploiement automatique depuis le repo).
+# Render détecte ce fichier et crée le service tout seul. Sinon, voir DEPLOY.md (méthode manuelle).
+services:
+  - type: web
+    name: pong-line
+    runtime: node
+    plan: free
+    buildCommand: npm install   # aucune dépendance, mais Render attend une commande de build
+    startCommand: npm start
+    autoDeploy: true

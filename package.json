@@ -1,0 +1,13 @@
+{
+  "name": "pong-line",
+  "version": "1.0.0",
+  "description": "Pong 4 joueurs multijoueur en ligne — serveur Node.js autoritatif, ZERO dépendance (WebSocket natif). Déployable sur Render.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

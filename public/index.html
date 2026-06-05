@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#07070f">
+<title>Plateforme LAN</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ===== chrome du shell (commun à tous les jeux) ===== -->
+  <header>
+    <div class="logo">JEUX <span>LAN</span></div>
+    <div class="sub" id="sub">plateforme multijeux · réseau local</div>
+  </header>
+
+  <div id="msg"><span id="status-dot"></span><span id="msg-txt">Connexion…</span></div>
+  <div class="namebar"><input id="nameInput" maxlength="12" placeholder="Ton pseudo" autocomplete="off"></div>
+
+  <div class="shellrow">
+    <div id="gamemenu"></div>
+    <button id="setBtn" class="ghosttab" aria-label="réglages d'affichage">⚙️ Affichage</button>
+  </div>
+
+  <!-- ===== racine du jeu PONG ===== -->
+  <div id="pong-root" class="game-root">
+    <div class="stage">
+      <div><button class="touch" id="touchUp" aria-label="haut">▲</button></div>
+      <div class="canvas-wrap">
+        <canvas id="c" width="500" height="500"></canvas>
+        <div id="killfeed"></div>
+        <div id="banner"></div>
+        <div id="endscreen" class="hidden"></div>
+      </div>
+      <div><button class="touch" id="touchDn" aria-label="bas">▼</button></div>
+    </div>
+
+    <div id="hud"></div>
+
+    <div class="bar">
+      <button id="startBtn" class="primary" disabled>▶ Démarrer</button>
+      <button id="pauseBtn" disabled>⏸ Pause</button>
+      <span class="sep"></span>
+      <button id="botsBtn">🤖 Bots : 0</button>
+      <button id="modeBtn" disabled>⚔ FFA</button>
+      <button id="presetBtn">🎮 Rapide</button>
+      <button id="optBtn">⚙ Options</button>
+      <button id="puBtn">❔ Power-ups</button>
+      <span class="sep"></span>
+      <button id="lbBtn">🏆 Classement</button>
+      <button id="voteBtn" style="display:none">🎁 Power-up</button>
+    </div>
+
+    <div class="help">
+      Déplace ta raquette avec <b>↑ ↓</b> / <b>← →</b> (ou <b>W/S</b>, <b>A/D</b>, boutons ▲▼).
+      <b>Espace</b> = lancer · <b>P / Échap</b> = pause.
+    </div>
+
+    <button id="pauseFloat" aria-label="pause">⏸</button>
+
+    <div id="options" class="settings hidden">
+      <div class="shead"><h3>Options de partie</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody">
+        <h4>Partie</h4>
+        <div class="srow"><span>Vies</span><span class="stepper"><button id="optLivesMinus">−</button><b id="optLives">5</b><button id="optLivesPlus">+</button></span></div>
+        <div class="srow"><span>Vitesse</span><button id="optSpeed" class="cyc">Normale</button></div>
+        <label class="srow"><span>Power-ups</span><input type="checkbox" class="switch" id="optPu"></label>
+        <label class="srow"><span>Accélération</span><input type="checkbox" class="switch" id="optAccel"></label>
+        <div class="note">Modifier ces réglages bascule le preset sur « Personnalisé ».</div>
+        <h4>Règles de match</h4>
+        <div class="srow"><span>Victoire</span><button id="optWin" class="cyc">Dernier survivant</button></div>
+        <div class="srow" id="optTarRow"><span id="optTarLbl">Cible</span><span class="stepper"><button id="optTarMinus">−</button><b id="optTar">3</b><button id="optTarPlus">+</button></span></div>
+        <div class="srow"><span>Mort subite</span><button id="optSudden" class="cyc">Off</button></div>
+        <div class="srow"><span>Service</span><button id="optServe" class="cyc">Aléatoire</button></div>
+        <label class="srow"><span>Handicap (catch-up)</span><input type="checkbox" class="switch" id="optHandi"></label>
+        <label class="srow"><span>Power-ups négatifs</span><input type="checkbox" class="switch" id="optNeg"></label>
+        <div class="srow"><span>Bots (IA)</span><button id="optBot" class="cyc">Normal</button></div>
+      </div>
+    </div>
+
+    <div id="puhelp" class="settings hidden" style="width:min(94vw,420px);">
+      <div class="shead"><h3>Power-ups — Pong</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody">
+        <h4>Bonus (à toucher avec la balle)</h4>
+        <div class="legrow"><span>+1</span><b>Multi-balle</b> — la balle se divise en plusieurs</div>
+        <div class="legrow"><span>XL</span><b>Raquette XL</b> — agrandit ta raquette un moment</div>
+        <div class="legrow"><span>⛉</span><b>Bouclier</b> — un renvoi gratuit sur ton bord</div>
+        <div class="legrow"><span>◌</span><b>Balle fantôme</b> — la balle traverse une raquette une fois</div>
+        <div class="legrow"><span>⇄</span><b>Inversion</b> — inverse les contrôles d'un adversaire</div>
+        <div class="legrow"><span>▭</span><b>Raquette réduite</b> — rétrécit la raquette d'un adversaire</div>
+        <div class="legrow"><span>≈</span><b>Ralenti</b> — ralentit la balle un court instant</div>
+        <h4>Malus (icône rouge — si « Power-ups négatifs » activé)</h4>
+        <div class="legrow"><span>▽</span><b>Ta raquette rétrécit</b></div>
+        <div class="legrow"><span>✕</span><b>Tes contrôles s'inversent</b></div>
+        <div class="legrow"><span>»</span><b>Balle accélérée</b></div>
+        <div class="note">Le porteur du dernier renvoi récupère le bonus. Active/désactive les power-ups dans ⚙ Options.</div>
+      </div>
+    </div>
+
+    <div id="lbpanel" class="settings hidden" style="width:min(94vw,460px);">
+      <div class="shead"><h3>🏆 Classement</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody">
+        <div id="lbBody"></div>
+        <div class="lbsub"><h4>Historique</h4>
+          <span class="lbfilters">
+            <select id="histPreset"><option value="">Tous presets</option><option value="classique">Classique</option><option value="rapide">Rapide</option><option value="chaos">Chaos</option><option value="custom">Perso.</option></select>
+            <select id="histMode"><option value="">Tous modes</option><option value="ffa">FFA</option><option value="2v2">2v2</option><option value="2v2v2">2v2v2</option><option value="3v3">3v3</option></select>
+          </span></div>
+        <div id="lbHist"></div>
+        <button id="lbReset" class="ghostbtn">Réinitialiser le classement</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== racine du jeu TRON ===== -->
+  <div id="tron-root" class="game-root hidden">
+    <div class="canvas-wrap">
+      <canvas id="trc" width="500" height="500"></canvas>
+      <div id="trBanner" class="banner-mid"></div>
+      <div id="trEnd" class="endscreen hidden"></div>
+    </div>
+    <div id="trHud" class="hud"></div>
+    <div class="bar">
+      <button id="trStart" class="primary" disabled>▶ Démarrer</button>
+      <button id="trPause" disabled>⏸ Pause</button>
+      <span class="sep"></span>
+      <button id="trMode" disabled>⚔ FFA</button>
+      <button id="trFade">➖ Traînée ∞</button>
+      <button id="trHelp">❔ Bonus</button>
+      <button id="trLbBtn">🏆 Classement</button>
+    </div>
+    <div class="help">
+      Direction : <b>↑ ↓ ← →</b> / <b>W A S D</b> · <b>Maj</b> = boost (jauge) · <b>Espace</b> = lancer · <b>P / Échap</b> = pause.
+      Bonus : » vitesse · ◌ fantôme · ✄ coupe ta traînée. L'arène se referme avec le temps !
+    </div>
+    <div class="dpad">
+      <button id="trUp" class="touch" aria-label="haut">▲</button>
+      <div><button id="trLeft" class="touch" aria-label="gauche">◀</button><button id="trDown" class="touch" aria-label="bas">▼</button><button id="trRight" class="touch" aria-label="droite">▶</button></div>
+      <button id="trBoost" class="touch fire" aria-label="boost">⚡</button>
+    </div>
+    <button id="trPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
+    <div id="trLbPanel" class="settings hidden" style="width:min(94vw,460px);">
+      <div class="shead"><h3>🏆 Classement — Tron</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody"><div id="trLbBody"></div></div>
+    </div>
+    <div id="trHelpPanel" class="settings hidden" style="width:min(94vw,420px);">
+      <div class="shead"><h3>Bonus — Tron</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody">
+        <h4>Bonus sur la piste</h4>
+        <div class="legrow"><span>»</span><b>Vitesse</b> — ta moto avance 2× plus vite (quelques secondes)</div>
+        <div class="legrow"><span>◌</span><b>Fantôme</b> — tu traverses les traînées sans crasher (quelques secondes)</div>
+        <div class="legrow"><span>✄</span><b>Coupe</b> — efface immédiatement toute ta traînée actuelle</div>
+        <h4>Boost</h4>
+        <div class="legrow"><span>⚡</span><b>Boost</b> — touche <b>Maj</b> (ou bouton ⚡) : accélère à la demande tant que la jauge (en bas) tient, puis se régénère</div>
+        <div class="note">L'arène se referme avec le temps (mort subite). En mode « traînée courte », ta queue s'efface au fil du temps.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== racine du jeu TANKS ===== -->
+  <div id="tank-root" class="game-root hidden">
+    <div class="canvas-wrap">
+      <canvas id="tkc" width="600" height="600"></canvas>
+      <div id="tkBanner" class="banner-mid"></div>
+      <div id="tkEnd" class="endscreen hidden"></div>
+    </div>
+    <div id="tkHud" class="hud"></div>
+    <div class="bar">
+      <button id="tkStart" class="primary" disabled>▶ Démarrer</button>
+      <button id="tkPause" disabled>⏸ Pause</button>
+      <span class="sep"></span>
+      <button id="tkMode" disabled>⚔ FFA</button>
+      <button id="tkArena">🧱 Arène</button>
+      <button id="tkWin">🏁 1 manche</button>
+      <button id="tkFf" disabled>🤝 Tir allié : OFF</button>
+      <button id="tkHelp">❔ Power-ups</button>
+      <button id="tkLbBtn">🏆 Classement</button>
+    </div>
+    <div class="help">
+      Tourne <b>← →</b> (A/D), avance/recule <b>↑ ↓</b> (W/S), tire <b>Espace</b>, pose une mine <b>E / Maj</b>.
+      <b>P / Échap</b> = pause. Tirs à rebonds, murs cassables, power-ups » ⋔ ⛉ 👟 ➳ ◈ !
+    </div>
+    <div class="dpad">
+      <button id="tkFwd" class="touch" aria-label="avancer">▲</button>
+      <div>
+        <button id="tkLeft" class="touch" aria-label="tourner à gauche">↺</button>
+        <button id="tkFire" class="touch fire" aria-label="tirer">🔥</button>
+        <button id="tkRight" class="touch" aria-label="tourner à droite">↻</button>
+      </div>
+      <div>
+        <button id="tkBack" class="touch" aria-label="reculer">▼</button>
+        <button id="tkMine" class="touch" aria-label="poser une mine">◈</button>
+      </div>
+    </div>
+    <button id="tkPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
+    <div id="tkLbPanel" class="settings hidden" style="width:min(94vw,460px);">
+      <div class="shead"><h3>🏆 Classement — Tanks</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody"><div id="tkLbBody"></div></div>
+    </div>
+    <div id="tkHelpPanel" class="settings hidden" style="width:min(94vw,420px);">
+      <div class="shead"><h3>Power-ups — Tanks</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody">
+        <h4>Power-ups (à ramasser)</h4>
+        <div class="legrow"><span>»</span><b>Tir rapide</b> — cadence de tir doublée (quelques secondes)</div>
+        <div class="legrow"><span>⋔</span><b>Tir triple</b> — 3 obus en éventail (quelques secondes)</div>
+        <div class="legrow"><span>⛉</span><b>Bouclier</b> — encaisse un tir sans perdre de vie (cumulable ×2)</div>
+        <div class="legrow"><span>👟</span><b>Vitesse</b> — déplacement plus rapide (quelques secondes)</div>
+        <div class="legrow"><span>➳</span><b>Obus perçant</b> — traverse un mur cassable au lieu d'y exploser</div>
+        <div class="legrow"><span>◈</span><b>Mine</b> — à poser (E/Maj ou bouton ◈) ; explose au passage d'un ennemi</div>
+        <div class="note">❤ = vies restantes (3 par défaut). Les obus rebondissent (3 fois max) ; les murs clairs sont destructibles.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== racine du jeu BOMBERMAN ===== -->
+  <div id="bomb-root" class="game-root hidden">
+    <div class="canvas-wrap">
+      <canvas id="bmc" width="520" height="520"></canvas>
+      <div id="bmBanner" class="banner-mid"></div>
+      <div id="bmEnd" class="endscreen hidden"></div>
+    </div>
+    <div id="bmHud" class="hud"></div>
+    <div class="bar">
+      <button id="bmStart" class="primary" disabled>▶ Démarrer</button>
+      <button id="bmPause" disabled>⏸ Pause</button>
+      <span class="sep"></span>
+      <button id="bmMode" disabled>⚔ FFA</button>
+      <button id="bmGen">🧱 Map</button>
+      <button id="bmFf" disabled>🤝 Tir allié : OFF</button>
+      <button id="bmHelp">❔ Bonus</button>
+      <button id="bmLbBtn">🏆 Classement</button>
+    </div>
+    <div class="help">
+      Déplace-toi <b>↑ ↓ ← →</b> / <b>W A S D</b>, bombe <b>Espace</b> (B), action <b>X / Maj</b> (lancer/détonateur).
+      <b>P / Échap</b> = pause. Bonus 💣🔥👟🦵📡👻🧤🛡 · malus 🔀🐌⏱ · l'arène se referme (mort subite) !
+    </div>
+    <div class="dpad">
+      <button id="bmUp" class="touch" aria-label="haut">▲</button>
+      <div><button id="bmLeft" class="touch" aria-label="gauche">◀</button><button id="bmBomb" class="touch fire" aria-label="bombe">💣</button><button id="bmRight" class="touch" aria-label="droite">▶</button></div>
+      <div><button id="bmDown" class="touch" aria-label="bas">▼</button><button id="bmAct" class="touch" aria-label="action">🧤</button></div>
+    </div>
+    <button id="bmPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
+    <div id="bmLbPanel" class="settings hidden" style="width:min(94vw,460px);">
+      <div class="shead"><h3>🏆 Classement — Bomberman</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody"><div id="bmLbBody"></div></div>
+    </div>
+    <div id="bmHelpPanel" class="settings hidden" style="width:min(94vw,420px);">
+      <div class="shead"><h3>Bonus &amp; malus — Bomberman</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody">
+        <h4>Bonus (à ramasser)</h4>
+        <div class="legrow"><span>💣</span><b>Bombe +1</b> — pose une bombe de plus à la fois</div>
+        <div class="legrow"><span>🔥</span><b>Flamme +1</b> — explosions plus longues (portée)</div>
+        <div class="legrow"><span>👟</span><b>Vitesse</b> — tu te déplaces plus vite</div>
+        <div class="legrow"><span>🦵</span><b>Coup de pied</b> — pousse les bombes en marchant dessus</div>
+        <div class="legrow"><span>📡</span><b>Détonateur</b> — fais exploser tes bombes à la demande (action)</div>
+        <div class="legrow"><span>👻</span><b>Fantôme</b> — traverse les murs destructibles</div>
+        <div class="legrow"><span>🧤</span><b>Gant</b> — lance la bombe devant toi (action)</div>
+        <div class="legrow"><span>🛡</span><b>Bouclier</b> — encaisse une explosion sans mourir</div>
+        <h4>Malus (icône rouge)</h4>
+        <div class="legrow"><span>🔀</span><b>Inversé</b> — tes commandes sont inversées</div>
+        <div class="legrow"><span>🐌</span><b>Ralenti</b> — tu te déplaces moins vite</div>
+        <div class="legrow"><span>⏱</span><b>Pose auto</b> — tu poses des bombes automatiquement</div>
+        <div class="note">Action = touche <b>X / Maj</b> (ou bouton 🧤). Les effets durent quelques secondes ; les bonus d'équipement (💣🔥👟🦵📡👻🧤🛡) restent jusqu'à ta mort.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== réglages d'affichage (shell, partagés) ===== -->
+  <button id="setFloat" aria-label="réglages d'affichage">⚙️</button>
+  <button id="quitFloat" aria-label="quitter la partie en cours">✕ Quitter</button>
+  <div id="scrim" class="hidden"></div>
+  <div id="settings" class="settings hidden">
+    <div class="shead"><h3>Affichage &amp; accessibilité</h3><button class="sclose" aria-label="fermer">✕</button></div>
+    <div class="sbody">
+      <h4>Affichage</h4>
+      <div class="srow"><span>Thème</span>
+        <select id="setTheme"><option value="neon">Néon</option><option value="crt">Rétro CRT</option><option value="light">Clair</option></select></div>
+      <label class="srow"><span>Musique d'ambiance</span><input type="checkbox" class="switch" id="setMusic"></label>
+      <h4>Accessibilité</h4>
+      <div class="srow"><span>Palette</span>
+        <select id="setPalette"><option value="normal">Normale</option><option value="cb">Daltonien</option></select></div>
+      <label class="srow"><span>Contraste renforcé</span><input type="checkbox" class="switch" id="setContrast"></label>
+      <label class="srow"><span>Réduire les effets</span><input type="checkbox" class="switch" id="setFx"></label>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
