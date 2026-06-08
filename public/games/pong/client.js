@@ -252,10 +252,11 @@ export default (function () {
   function startMusic() { if (musicOn || !actx) return; musicOn = true; mStep = 0; musicLoop(); }
   function stopMusic() { musicOn = false; if (musicTimer) { clearTimeout(musicTimer); musicTimer = null; } }
   function tone(freq, dur, type = 'square', gain = 0.05, delay = 0) {
-    if (!actx) return;
+    const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1;
+    if (!actx || _v <= 0) return;
     const t0 = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
     o.type = type; o.frequency.setValueAtTime(freq, t0);
-    g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    g.gain.setValueAtTime(gain * _v, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     o.connect(g); g.connect(actx.destination); o.start(t0); o.stop(t0 + dur);
   }
   function sound(kind) {
@@ -276,6 +277,7 @@ export default (function () {
     rings.push({ x: f.x, y: f.y, born: now, color: col, big: f.type === 'death', kind: f.type });
     flashes.push({ x: f.x, y: f.y, born: now, color: col, r: f.type === 'death' ? 34 : 18 });
     ballPopUntil = now + 90;
+    if (f.type === 'hit') edgeFlash[f.side] = now;   // flash d'impact sur la raquette à chaque renvoi
     if (f.type === 'death') {
       shakeMag = Math.max(shakeMag, 7);
       edgeFlash[f.side] = now;

@@ -102,7 +102,7 @@ export default (function () {
   }
 
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { if (!actx) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
+  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
   function sound(k) { if (!actx) return; if (k === 'shot') tone(320, 0.05, 'square', 0.03); else if (k === 'hit') tone(200, 0.08, 'square', 0.05); else if (k === 'pickup') { tone(660, 0.07, 'square', 0.05); tone(990, 0.08, 'square', 0.05, 0.06); } else if (k === 'boom') { tone(150, 0.25, 'sawtooth', 0.06); tone(80, 0.32, 'sawtooth', 0.05, 0.05); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
     if (f.type === 'shot') return sound('shot');
@@ -170,6 +170,22 @@ export default (function () {
       (snap.shells || []).forEach(s => { const col = s.p ? '#ff9be0' : colSeat(s.o); ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 12 * FX; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s.x, s.y, SHELL_R, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = col; ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.arc(s.x, s.y, SHELL_R + (s.p ? 2.5 : 1.5), 0, Math.PI * 2); ctx.fill(); ctx.restore(); });
     }
     if (!A.reduceFx) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; for (let i = particles.length - 1; i >= 0; i--) { const q = particles[i], t = (now - q.born) / q.life; if (t >= 1) { particles.splice(i, 1); continue; } q.x += q.vx; q.y += q.vy; q.vx *= 0.95; q.vy *= 0.95; ctx.globalAlpha = 1 - t; ctx.fillStyle = q.color; ctx.beginPath(); ctx.arc(q.x, q.y, 2.5 * (1 - t) + 0.5, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); } else particles.length = 0;
+
+    // jauge de munitions (joueur local) : pastilles = obus disponibles (MAX 2)
+    const meTk = (snap && mySeat >= 0) ? snap.players[mySeat] : null;
+    if (meTk && meTk.playing && meTk.alive && snap.gs === 'play') {
+      const MAXS = 2, used = (snap.shells || []).filter(s => s.o === mySeat).length, avail = Math.max(0, MAXS - used);
+      const r = 5, gap = 7, total = MAXS * (r * 2) + (MAXS - 1) * gap, x0 = (ARENA - total) / 2 + r, y = ARENA - 16;
+      ctx.save();
+      for (let i = 0; i < MAXS; i++) {
+        const cxp = x0 + i * (r * 2 + gap);
+        ctx.beginPath(); ctx.arc(cxp, y, r, 0, Math.PI * 2);
+        if (i < avail) { ctx.fillStyle = '#ffd36e'; ctx.shadowColor = '#ffd36e'; ctx.shadowBlur = A.reduceFx ? 0 : 8; ctx.fill(); }
+        else { ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1; ctx.stroke(); }
+      }
+      ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText('MUNITIONS', ARENA / 2, y - r - 3);
+      ctx.restore();
+    }
 
     if (snap && snap.gs === 'countdown') { ctx.fillStyle = 'rgba(4,5,12,0.34)'; ctx.fillRect(0, 0, ARENA, ARENA); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; const c = snap.count || 0, pulse = 1 + 0.08 * Math.sin(now / 110); ctx.save(); ctx.translate(ARENA / 2, ARENA / 2 - 4); ctx.scale(pulse, pulse); if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,180,120,.7)'; ctx.shadowBlur = 26; } ctx.fillStyle = '#fff'; ctx.font = 'bold 96px system-ui,sans-serif'; ctx.fillText(c > 0 ? c : 'FEU', 0, 0); ctx.restore(); ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '13px system-ui,sans-serif'; ctx.fillText('Chargement des canons…', ARENA / 2, ARENA / 2 + 66); }
     if (snap && (snap.gs === 'lobby' || snap.gs === 'paused')) {

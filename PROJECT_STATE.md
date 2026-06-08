@@ -123,6 +123,7 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
   contraste, réduction des effets. Pseudo persistant `pong-lan-name`, token `pong-lan-token`.
 - **Plateau adaptatif** : taille calculée par écran ; s'agrandit en jeu (chrome masqué) ; ⏸ flottant en jeu, ⚙️ flottant en pause.
 - **Juice** : interpolation client (lerp), particules, shake, décompte 3·2·1, écran de fin + classement.
+- **Pack « quick-wins » (polish)** : 🎉 **confettis** de victoire (overlay global, déclenché par `state.gs==='over' && winner>=0`) · **fondu de transition** entre jeux (`#xfade`) · **volume SFX** (slider `a11y.sfx`, branché dans chaque `tone()`) + **plein écran** + **vibration tactile** mobile (réglages shell). Par jeu : Pong = flash d'impact ; Tron = bloom renforcé + cœur de traînée ; Tanks = jauge de munitions ; Bomberman = étincelle de mèche animée + cases « danger » clignotantes ; Snake = yeux + tête arrondie. Tout respecte `reduceFx`.
 - **Optimisation hub** : diffusion plein régime en jeu, ~4 Hz en lobby/pause/fin, boucle suspendue si 0 membre.
 
 ## Bugs corrigés (historique)

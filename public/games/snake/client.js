@@ -104,7 +104,7 @@ export default (function () {
   }
 
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { if (!actx) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
+  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
   function sound(k) { if (!actx) return; if (k === 'crash') { tone(180, 0.22, 'sawtooth', 0.06); tone(90, 0.3, 'sawtooth', 0.05, 0.04); } else if (k === 'eat') { tone(620, 0.06, 'square', 0.05); tone(880, 0.07, 'square', 0.05, 0.05); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
     if (f.type === 'eat') { if (f.seat === mySeat) sound('eat'); return; }
@@ -175,11 +175,20 @@ export default (function () {
         const path = p.path || [];
         if (path.length) { ctx.beginPath(); ctx.moveTo(px(path[0][0]), px(path[0][1])); for (let i = 1; i < path.length; i++) ctx.lineTo(px(path[i][0]), px(path[i][1])); ctx.lineTo(hx, hy); ctx.stroke(); }
         ctx.restore();
-        // tête
-        ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 14 * FX; ctx.fillStyle = '#fff';
-        ctx.fillRect(hx - CELL / 2, hy - CELL / 2, CELL, CELL);
-        ctx.fillStyle = col; ctx.globalAlpha = 0.5; ctx.fillRect(hx - CELL / 2, hy - CELL / 2, CELL, CELL); ctx.restore();
-        if (p.seat === mySeat) { ctx.save(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(now / 200); ctx.strokeRect(hx - CELL / 2 - 2, hy - CELL / 2 - 2, CELL + 4, CELL + 4); ctx.restore(); }
+        // tête arrondie + yeux orientés selon la direction
+        let dx = 0, dy = 0;
+        if (path.length >= 2) { const a = path[path.length - 2], b = path[path.length - 1]; dx = Math.sign(b[0] - a[0]); dy = Math.sign(b[1] - a[1]); }
+        if (!dx && !dy) dx = 1;
+        ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 12 * FX; ctx.fillStyle = col;
+        ctx.beginPath(); ctx.arc(hx, hy, CELL * 0.55, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+        const perpx = -dy, perpy = dx, fwd = CELL * 0.12, side = CELL * 0.2, er = CELL * 0.14;
+        for (const s of [-1, 1]) {
+          const ex = hx + dx * fwd + perpx * side * s, ey = hy + dy * fwd + perpy * side * s;
+          ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(ex, ey, er, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#10131c'; ctx.beginPath(); ctx.arc(ex + dx * er * 0.4, ey + dy * er * 0.4, er * 0.55, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore();
+        if (p.seat === mySeat) { ctx.save(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(now / 200); ctx.beginPath(); ctx.arc(hx, hy, CELL * 0.62, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
       });
     }
     if (!A.reduceFx) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; for (let i = particles.length - 1; i >= 0; i--) { const q = particles[i], t = (now - q.born) / q.life; if (t >= 1) { particles.splice(i, 1); continue; } q.x += q.vx; q.y += q.vy; q.vx *= 0.95; q.vy *= 0.95; ctx.globalAlpha = 1 - t; ctx.fillStyle = q.color; ctx.beginPath(); ctx.arc(q.x, q.y, 2.5 * (1 - t) + 0.5, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); } else particles.length = 0;

@@ -103,7 +103,7 @@ export default (function () {
   }
 
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { if (!actx) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
+  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
   function sound(k) { if (!actx) return; if (k === 'place') tone(330, 0.05, 'square', 0.03); else if (k === 'wall') tone(240, 0.07, 'square', 0.04); else if (k === 'pickup') { tone(660, 0.07, 'square', 0.05); tone(880, 0.08, 'square', 0.05, 0.06); } else if (k === 'bad') { tone(300, 0.1, 'sawtooth', 0.05); tone(180, 0.18, 'sawtooth', 0.05, 0.08); } else if (k === 'boom') { tone(140, 0.28, 'sawtooth', 0.07); tone(70, 0.34, 'sawtooth', 0.05, 0.05); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
     if (f.type === 'place' || f.type === 'throw') return sound('place');
@@ -154,7 +154,12 @@ export default (function () {
         }
       }
       // prévisualisation de portée des bombes
-      (snap.bombs || []).forEach(b => { rangeCells(g, b.x, b.y, b.p).forEach(([gx, gy]) => { ctx.fillStyle = 'rgba(255,160,60,0.10)'; ctx.fillRect(gx * CELL + 3, gy * CELL + 3, CELL - 6, CELL - 6); }); });
+      (snap.bombs || []).forEach(b => {
+        const danger = b.f <= 30;                                   // mèche < ~1 s : on alerte
+        const a = danger ? (A.reduceFx ? 0.3 : 0.14 + 0.22 * (0.5 + 0.5 * Math.sin(now / 80))) : 0.10;
+        const gch = danger ? 90 : 160;
+        rangeCells(g, b.x, b.y, b.p).forEach(([gx, gy]) => { ctx.fillStyle = `rgba(255,${gch},60,${a})`; ctx.fillRect(gx * CELL + 3, gy * CELL + 3, CELL - 6, CELL - 6); });
+      });
       // bonus / malus
       (snap.pickups || []).forEach(pk => {
         const x = cpx(pk.x), y = cpx(pk.y), pulse = 1 + 0.08 * Math.sin(now / 220);
@@ -168,7 +173,10 @@ export default (function () {
         const x = cpx(b.x), y = cpx(b.y), pulse = 1 + 0.16 * Math.sin(now / (60 + b.f * 3));
         ctx.save(); ctx.fillStyle = b.r ? '#243' : '#1a1a22'; ctx.shadowColor = '#000'; ctx.shadowBlur = 6;
         ctx.beginPath(); ctx.arc(x, y, CELL * 0.32 * pulse, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#ff5a5a'; ctx.beginPath(); ctx.arc(x - 3, y - 3, 2.5, 0, Math.PI * 2); ctx.fill();
+        const fl = 0.5 + 0.5 * Math.sin(now / (40 + b.f)), sr = 2 + fl * 1.7;   // étincelle de mèche qui crépite
+        ctx.save(); if (!A.reduceFx) { ctx.globalCompositeOperation = 'lighter'; ctx.shadowColor = '#ffb43b'; ctx.shadowBlur = 8; }
+        ctx.fillStyle = '#ffd36e'; ctx.beginPath(); ctx.arc(x - 3, y - 4, sr, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x - 3, y - 4, sr * 0.5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
         ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(b.r ? '📡' : ('' + Math.max(1, Math.ceil(b.f / 30))), x, y + 0.5); ctx.restore();
       });
