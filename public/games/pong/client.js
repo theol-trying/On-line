@@ -530,6 +530,7 @@ export default (function () {
     if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('c'); ctx = cv.getContext('2d');
     hud = $('hud');
+    hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = [0, 1, 2, 3, 4, 5].map(i => {
       const el = document.createElement('div');
       el.className = 'pc hidden';
