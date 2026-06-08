@@ -88,7 +88,7 @@ function setStatus(txt, cls) { msgTxt.innerHTML = txt; statusDot.className = cls
 
 function connect() {
   setStatus('Connexion…', '');
-  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';   // wss en ligne (HTTPS), ws en LAN local
+  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';   // wss en ligne (HTTPS Render), ws en LAN local
   ws = new WebSocket(`${wsProto}//${location.host}${you.token ? '/?t=' + encodeURIComponent(you.token) : ''}`);
   ws.onopen = () => { if (myName) send({ t: 'name', name: myName }); };
   ws.onmessage = e => {

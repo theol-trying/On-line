@@ -94,6 +94,17 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
 - Commandes : ↑↓←→ / WASD, **Espace/B** bombe, **X/Maj** action, **P** pause ; tactile : dpad + 💣 + 🧤.
 - Messages C→S : input{up,down,left,right}, bomb, action, start, pause, mode, gen, ff, lbreset.
 
+## Jeu : SNAKE  (`snake`, 1–6, tickHz 12)
+- Grille 30×30 (CELL 17, ARENA 510). Chaque joueur = un serpent (file de cellules). FFA ou équipes (⚔, dernier **camp** en vie).
+- **Manger** : pastilles 🍎 (`FOOD_COUNT=4` en permanence) → +`GROW_PER_FOOD=2` segments + score. Longueur de départ `INIT_LEN=4`.
+- **Mort** : tête qui sort de la grille **ou** entre dans un corps de serpent (le sien ou un autre) ; choc frontal (même case) = les deux meurent.
+  Crédit kill au propriétaire de la cellule touchée. Un serpent mort **disparaît** (n'est plus un obstacle).
+- Résolution **simultanée** (têtes calculées d'un coup) ; la **queue se libère** dans le tick (on peut suivre une queue) sauf si croissance.
+- **Solo** (1 joueur) = entraînement/score (hors classement). Dernier en vie gagne en multi.
+- Commandes : ↑↓←→ / WASD (pas de demi-tour), **Espace** lancer, **P/Échap** pause ; tactile : dpad. Pas de bonus/boost (pur classique).
+- Snapshot : `food[]`, `players[{head,path(corners),len,score,kills,…}]`. Messages C→S : dir{d}, start, pause, abort, mode, lbreset.
+- Leaderboard : games, wins, kills, K/D, **meilleur score** 🍎, meilleure survie.
+
 ---
 
 ## Communs aux jeux
@@ -105,6 +116,9 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
 - **Reconnexion** par token : **période de grâce de 12 s** côté hub (le siège et l'état du jeu sont conservés à la coupure ;
   un F5 réutilise le même membre). Au-delà, élimination via `onLeave`. Chaque jeu garde aussi `seatByMid` (reprise après grâce).
 - **Quitter en cours** : bouton flottant ✕ → `abort` → `backToLobby()` (retour lobby sans perdre les sièges).
+- **Identité visuelle propre par jeu** (FIXE, constante `SKIN` dans chaque client, pas de sélecteur) :
+  Tanks → **Désert** (sable, acier riveté, caisses bois) ; Snake → **Jardin** (herbe en damier, pommes) ; Bomberman → **Cartoon** (herbe pastel, murs arrondis) ; Pong & Tron → **Néon**.
+  Le sélecteur de thème global (Néon/CRT/Clair) ne pilote plus que le **shell** + Pong/Tron. `reduceFx` (réduire les effets) et la palette daltonien restent appliqués dans tous les jeux.
 - **Accessibilité** (⚙️ shell, persisté localStorage `pong-lan-a11y`) : thèmes Néon/CRT/Clair, musique (Pong), palette daltonien,
   contraste, réduction des effets. Pseudo persistant `pong-lan-name`, token `pong-lan-token`.
 - **Plateau adaptatif** : taille calculée par écran ; s'agrandit en jeu (chrome masqué) ; ⏸ flottant en jeu, ⚙️ flottant en pause.
@@ -133,6 +147,10 @@ Refactor plateforme : tampon de messages shell (welcome/1er state non perdus) ; 
 - **Quitter une partie en cours** — bouton flottant **✕ Quitter** (shell) → message `abort` → `backToLobby()` par jeu (même s'il ne reste que des bots).
 - **Pong** : bots *facile* assouplis (`spd 0.52`, `dz 34`) ; **anti-blocage dans un coin** : le bot recentre quand la balle s'éloigne du bord.
 - **Légendes d'icônes** : panneau **❔** dans chaque jeu (Pong, Tron, Tank, Bomberman) expliquant bonus/malus/glyphes. **Tank** : pavé tactile en **croix** (format flèches) au lieu d'une rangée.
+- **« P1 » qui se multiplie** en alternant les jeux sans lancer — `init()` (module réutilisé) ré-`appendChild` les cartes de HUD
+  sans vider l'existant. Corrigé : `hud.innerHTML = ''` au début de chaque `init()` (les 4 jeux).
+- **Leaderboard vide au changement de jeu** (sans recharger) — le hub n'envoyait que `lbMsg(activeId)` à la connexion. Corrigé :
+  envoi de **tous** les classements à la connexion ; bufferisés par jeu côté client (`pend[g].lb`) et affichés au switch (les MAJ `dirty` continuent de les rafraîchir).
 
 ## Limites connues (assumées)
 - Identité par **pseudo** sans comptes (mêmes pseudos = stats fusionnées). Reconnexion best-effort.

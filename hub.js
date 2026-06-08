@@ -6,8 +6,9 @@ import pong from './games/pong/server.js';
 import tron from './games/tron/server.js';
 import tank from './games/tank/server.js';
 import bomb from './games/bomb/server.js';
+import snake from './games/snake/server.js';
 
-const GAMES = { [pong.meta.id]: pong, [tron.meta.id]: tron, [tank.meta.id]: tank, [bomb.meta.id]: bomb };   // registre : ajouter un jeu = l'importer et l'ajouter ici
+const GAMES = { [pong.meta.id]: pong, [tron.meta.id]: tron, [tank.meta.id]: tank, [bomb.meta.id]: bomb, [snake.meta.id]: snake };   // registre : ajouter un jeu = l'importer et l'ajouter ici
 const META = Object.values(GAMES).map(g => g.meta);
 const DEFAULT_ID = pong.meta.id;
 
@@ -100,7 +101,7 @@ function onConnection(conn, token) {
     ensureGame();
     conn.send(JSON.stringify({ t: 'hello', you: { id: member.id, name: member.name, token: member.token }, games: META, active: activeId }));
     joinGame(member);                           // onJoin idempotent -> renvoie le même siège (welcome)
-    conn.send(lbMsg(activeId));
+    for (const meta of META) conn.send(lbMsg(meta.id)); // tous les classements (sinon vides au changement de jeu sans recharger)
     broadcastRoom();
     wire(member);
     return;
@@ -113,7 +114,7 @@ function onConnection(conn, token) {
   ensureGame();
   conn.send(JSON.stringify({ t: 'hello', you: { id: member.id, name: member.name, token: tok }, games: META, active: activeId }));
   joinGame(member);
-  conn.send(lbMsg(activeId));
+  for (const meta of META) conn.send(lbMsg(meta.id)); // tous les classements (sinon vides au changement de jeu sans recharger)
   broadcastRoom();
   wire(member);
 }

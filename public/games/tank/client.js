@@ -7,17 +7,14 @@ const TEAM_LETTER = ['A', 'B', 'C'];
 const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3' };
 const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
 const PU = { rapid: { i: '»', c: '#9fe6ff' }, triple: { i: '⋔', c: '#ffd76b' }, shield: { i: '⛉', c: '#7fd1ff' }, speed: { i: '👟', c: '#7ff0bd' }, pierce: { i: '➳', c: '#ff9be0' }, mine: { i: '◈', c: '#ff8e6e' } };
-const THEMES = {
-  neon: { bg: '#0a0a14', floor: '#10121f', floor2: '#14172a', solid: '#3a4066', soft: '#7a5a3c', softTop: '#9a744c', grid: 'rgba(255,255,255,0.04)' },
-  crt: { bg: '#04140b', floor: '#08200f', floor2: '#0a2814', solid: '#1d5234', soft: '#3a5a2c', softTop: '#4c7438', grid: 'rgba(120,255,170,0.06)' },
-  light: { bg: '#e4e8f3', floor: '#cdd4e6', floor2: '#c2cae0', solid: '#9aa3bf', soft: '#caa06a', softTop: '#dcb27c', grid: 'rgba(0,0,0,0.05)' },
-};
+// identité visuelle propre au jeu (fixe) : Désert / Champ de bataille
+const SKIN = { bg: '#14130c', floor: '#2b2818', floor2: '#262313', solid: '#564f45', soft: '#8a6a3c', softTop: '#b58a4c', grid: 'rgba(255,220,150,0.045)', border: 'rgba(210,180,120,0.3)', steel: true, crate: true };
 const INTERP_MS = 55;
 const KEYMAP = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowUp: 'fwd', KeyW: 'fwd', ArrowDown: 'back', KeyS: 'back' };
 
 export default (function () {
   let A, send, root, cv, ctx, togglePanel = () => {}, closePanels = () => {};
-  let CC = PAL.normal, TEAMCC = TEAMPAL.normal, TH = THEMES.neon, FX = 1;
+  let CC = PAL.normal, TEAMCC = TEAMPAL.normal, TH = SKIN, FX = 1;
   let mySeat = -1, snap = null, prevGs = 'lobby', teamMode = false, endShown = false, inGamePrev = false;
   let board = [], buf = [];
   const particles = [];
@@ -27,7 +24,7 @@ export default (function () {
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; };
-  function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; FX = A.reduceFx ? 0 : 1; TH = THEMES[A.theme] || THEMES.neon; }
+  function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; FX = A.reduceFx ? 0 : 1; TH = SKIN; }
 
   function resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
@@ -141,10 +138,16 @@ export default (function () {
       for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
         const c = g[gy * G + gx], x = gx * BLK, y = gy * BLK;
         ctx.fillStyle = ((gx + gy) & 1) ? TH.floor : TH.floor2; ctx.fillRect(x, y, BLK, BLK);
-        if (c === '1') { ctx.fillStyle = TH.solid; ctx.fillRect(x + 1, y + 1, BLK - 2, BLK - 2); ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(x + 1, y + 1, BLK - 2, 4); }
-        else if (c === '2') { ctx.fillStyle = TH.soft; ctx.fillRect(x + 2, y + 2, BLK - 4, BLK - 4); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 2, y + 2, BLK - 4, 5); }
+        if (c === '1') {
+          ctx.fillStyle = TH.solid; ctx.fillRect(x + 1, y + 1, BLK - 2, BLK - 2); ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(x + 1, y + 1, BLK - 2, 4);
+          if (TH.steel) { ctx.fillStyle = 'rgba(0,0,0,0.34)'; for (const rx of [x + 6, x + BLK - 6]) for (const ry of [y + 6, y + BLK - 6]) { ctx.beginPath(); ctx.arc(rx, ry, 2.1, 0, Math.PI * 2); ctx.fill(); } ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1; ctx.strokeRect(x + 2.5, y + 2.5, BLK - 5, BLK - 5); } // plaque d'acier rivetée
+        }
+        else if (c === '2') {
+          ctx.fillStyle = TH.soft; ctx.fillRect(x + 2, y + 2, BLK - 4, BLK - 4); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 2, y + 2, BLK - 4, 5);
+          if (TH.crate) { ctx.strokeStyle = 'rgba(0,0,0,0.22)'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 3, y + 3, BLK - 6, BLK - 6); ctx.beginPath(); ctx.moveTo(x + 3, y + 3); ctx.lineTo(x + BLK - 3, y + BLK - 3); ctx.moveTo(x + BLK - 3, y + 3); ctx.lineTo(x + 3, y + BLK - 3); ctx.stroke(); } // caisse en bois
+        }
       }
-      ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, ARENA - 3, ARENA - 3);
+      ctx.strokeStyle = TH.border || 'rgba(255,255,255,0.2)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, ARENA - 3, ARENA - 3);
       // power-ups
       (snap.pickups || []).forEach(k => { const d = PU[k.t] || { i: '?', c: '#fff' }, pulse = 1 + 0.1 * Math.sin(now / 200); ctx.save(); ctx.shadowColor = d.c; ctx.shadowBlur = 12 * FX; ctx.fillStyle = d.c + '22'; ctx.strokeStyle = d.c; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(k.x, k.y, 13 * pulse, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0; ctx.fillStyle = d.c; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(d.i, k.x, k.y + 1); ctx.restore(); });
       // mines
@@ -197,6 +200,7 @@ export default (function () {
     A = ctx0.a11y; send = ctx0.send; root = ctx0.root;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('tkc'); ctx = cv.getContext('2d'); hud = $('tkHud'); endEl = $('tkEnd');
+    hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = [0, 1, 2, 3, 4, 5].map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('tkStart'); pauseBtn = $('tkPause'); modeBtn = $('tkMode'); arenaBtn = $('tkArena'); winBtn = $('tkWin'); ffBtn = $('tkFf'); pauseFloat = $('tkPauseFloat');
     lbBtn = $('tkLbBtn'); lbPanel = $('tkLbPanel'); lbBody = $('tkLbBody');

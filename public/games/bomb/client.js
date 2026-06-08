@@ -10,15 +10,12 @@ const PICK_ICON = { bomb: '💣', flame: '🔥', speed: '👟', kick: '🦵', re
 const INTERP_MS = 55;
 const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-const THEMES = {
-  neon: { bg: '#0a0a14', floor: '#15172a', floor2: '#191c33', solid: '#3a4066', soft: '#7a5a3c', softTop: '#9a744c' },
-  crt: { bg: '#04140b', floor: '#08210f', floor2: '#0a2814', solid: '#1d5234', soft: '#3a5a2c', softTop: '#4c7438' },
-  light: { bg: '#e4e8f3', floor: '#d3d9ea', floor2: '#c8cfe3', solid: '#9aa3bf', soft: '#caa06a', softTop: '#dcb27c' },
-};
+// identité visuelle propre au jeu (fixe) : Cartoon / Candy
+const SKIN = { bg: '#173a2a', floor: '#2f8f5b', floor2: '#36a268', solid: '#8a93a6', solidTop: '#aab2c4', soft: '#c98a4a', softTop: '#e0b06a', round: true };
 
 export default (function () {
   let A, send, root, cv, ctx, togglePanel = () => {}, closePanels = () => {};
-  let CC = PAL.normal, TEAMCC = TEAMPAL.normal, TH = THEMES.neon, FX = 1;
+  let CC = PAL.normal, TEAMCC = TEAMPAL.normal, TH = SKIN, FX = 1;
   let mySeat = -1, snap = null, prevGs = 'lobby', teamMode = false, endShown = false, inGamePrev = false, prevRound = -1;
   let board = [], buf = [];
   const particles = [];
@@ -29,7 +26,8 @@ export default (function () {
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; };
   const cpx = c => (c + 0.5) * CELL;
-  function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; FX = A.reduceFx ? 0 : 1; TH = THEMES[A.theme] || THEMES.neon; }
+  function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; FX = A.reduceFx ? 0 : 1; TH = SKIN; }
+  function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
   function resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
@@ -146,8 +144,14 @@ export default (function () {
       for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
         const c = g[gy * GW + gx], x = gx * CELL, y = gy * CELL;
         ctx.fillStyle = ((gx + gy) & 1) ? TH.floor : TH.floor2; ctx.fillRect(x, y, CELL, CELL);
-        if (c === '1') { ctx.fillStyle = TH.solid; ctx.fillRect(x + 1, y + 1, CELL - 2, CELL - 2); ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(x + 1, y + 1, CELL - 2, 4); }
-        else if (c === '2') { ctx.fillStyle = TH.soft; ctx.fillRect(x + 2, y + 2, CELL - 4, CELL - 4); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 2, y + 2, CELL - 4, 5); ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.strokeRect(x + 2.5, y + 2.5, CELL - 5, CELL - 5); }
+        if (c === '1') {
+          if (TH.round) { ctx.fillStyle = TH.solid; rrect(x + 2, y + 2, CELL - 4, CELL - 4, 6); ctx.fill(); ctx.fillStyle = TH.solidTop || 'rgba(255,255,255,0.12)'; ctx.fillRect(x + 6, y + 5, CELL - 12, 3); } // pierre arrondie (cartoon)
+          else { ctx.fillStyle = TH.solid; ctx.fillRect(x + 1, y + 1, CELL - 2, CELL - 2); ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(x + 1, y + 1, CELL - 2, 4); }
+        }
+        else if (c === '2') {
+          if (TH.round) { ctx.fillStyle = TH.soft; rrect(x + 3, y + 3, CELL - 6, CELL - 6, 5); ctx.fill(); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 7, y + 6, CELL - 14, 3); ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1.5; rrect(x + 3, y + 3, CELL - 6, CELL - 6, 5); ctx.stroke(); } // caisse bois arrondie
+          else { ctx.fillStyle = TH.soft; ctx.fillRect(x + 2, y + 2, CELL - 4, CELL - 4); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 2, y + 2, CELL - 4, 5); ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.strokeRect(x + 2.5, y + 2.5, CELL - 5, CELL - 5); }
+        }
       }
       // prévisualisation de portée des bombes
       (snap.bombs || []).forEach(b => { rangeCells(g, b.x, b.y, b.p).forEach(([gx, gy]) => { ctx.fillStyle = 'rgba(255,160,60,0.10)'; ctx.fillRect(gx * CELL + 3, gy * CELL + 3, CELL - 6, CELL - 6); }); });
@@ -214,6 +218,7 @@ export default (function () {
     A = ctx0.a11y; send = ctx0.send; root = ctx0.root;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('bmc'); ctx = cv.getContext('2d'); hud = $('bmHud'); endEl = $('bmEnd');
+    hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = [0, 1, 2, 3, 4, 5].map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('bmStart'); pauseBtn = $('bmPause'); modeBtn = $('bmMode'); genBtn = $('bmGen'); ffBtn = $('bmFf'); pauseFloat = $('bmPauseFloat'); lbBtn = $('bmLbBtn'); lbPanel = $('bmLbPanel'); lbBody = $('bmLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
