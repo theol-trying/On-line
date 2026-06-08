@@ -18,9 +18,10 @@ const settingsPanel = document.getElementById('settings');
 const setBtn = document.getElementById('setBtn'), setFloat = document.getElementById('setFloat');
 const setTheme = document.getElementById('setTheme'), setMusic = document.getElementById('setMusic');
 const setPalette = document.getElementById('setPalette'), setContrast = document.getElementById('setContrast'), setFx = document.getElementById('setFx');
+const setSfx = document.getElementById('setSfx'), setFull = document.getElementById('setFull');
 
 /* ---------- accessibilité (partagée, persistée) ---------- */
-const a11y = Object.assign({ palette: 'normal', contrast: false, reduceFx: false, theme: 'neon', music: false },
+const a11y = Object.assign({ palette: 'normal', contrast: false, reduceFx: false, theme: 'neon', music: false, sfx: 1 },
   JSON.parse(localStorage.getItem('pong-lan-a11y') || localStorage.getItem('pong-a11y') || '{}'));
 function applyA11y() {
   document.body.classList.toggle('flat', a11y.reduceFx);
@@ -28,6 +29,7 @@ function applyA11y() {
   document.body.classList.add('theme-' + (a11y.theme || 'neon'));
   setTheme.value = a11y.theme; setMusic.checked = a11y.music;
   setPalette.value = a11y.palette; setContrast.checked = a11y.contrast; setFx.checked = a11y.reduceFx;
+  if (setSfx) setSfx.value = Math.round((a11y.sfx == null ? 1 : a11y.sfx) * 100);
   localStorage.setItem('pong-lan-a11y', JSON.stringify(a11y));
   if (mod && mod.onA11y) mod.onA11y();
 }
@@ -36,6 +38,10 @@ setContrast.onchange = () => { a11y.contrast = setContrast.checked; applyA11y();
 setFx.onchange = () => { a11y.reduceFx = setFx.checked; applyA11y(); };
 setTheme.onchange = () => { a11y.theme = setTheme.value; applyA11y(); };
 setMusic.onchange = () => { a11y.music = setMusic.checked; applyA11y(); };
+if (setSfx) setSfx.oninput = () => { a11y.sfx = (parseInt(setSfx.value, 10) || 0) / 100; applyA11y(); };
+if (setFull) setFull.onclick = () => { if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen(); else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); };
+/* vibration tactile (mobile) sur les boutons de contrôle .touch */
+document.addEventListener('pointerdown', e => { if (e.target.closest && e.target.closest('.touch')) { try { navigator.vibrate && navigator.vibrate(8); } catch {} } }, { passive: true });
 
 /* ---------- panneaux modaux (partagés shell + jeu) ---------- */
 function closePanels() { document.querySelectorAll('.settings').forEach(p => p.classList.add('hidden')); scrim.classList.add('hidden'); }
@@ -64,6 +70,7 @@ function renderMenu() {
 async function loadModule(id) {
   if (modId === id || loadingId === id) return;
   loadingId = id;
+  const xf = document.getElementById('xfade'); if (xf) xf.style.opacity = '1';   // fondu de transition entre jeux
   if (mod && mod.teardown) { try { mod.teardown(); } catch {} }
   mod = null; modId = null; modReady = false;
   document.querySelectorAll('.game-root').forEach(r => r.classList.add('hidden'));
@@ -78,7 +85,41 @@ async function loadModule(id) {
     if (mod.onA11y) mod.onA11y();
     const p = pend[id];                           // vider le tampon de ce jeu
     if (p) { p.msgs.forEach(x => mod.onMessage && mod.onMessage(x)); if (p.lb && mod.onLb) mod.onLb(p.lb); if (p.state && mod.onState) mod.onState(p.state); delete pend[id]; }
-  } catch (e) { loadingId = null; msgTxt.textContent = 'Jeu « ' + id + ' » indisponible'; }
+    if (xf) xf.style.opacity = '0';               // révèle le nouveau jeu
+  } catch (e) { loadingId = null; if (xf) xf.style.opacity = '0'; msgTxt.textContent = 'Jeu « ' + id + ' » indisponible'; }
+}
+
+/* ---------- confettis de victoire (overlay global, zéro dépendance) ---------- */
+const confettiCv = document.getElementById('confetti');
+let confettiRaf = 0;
+const lastGs = {};                 // g -> dernier gameState vu (pour ne déclencher qu'une fois)
+function fireConfetti() {
+  if (!confettiCv || a11y.reduceFx) return;                       // respecte « réduire les effets »
+  const dpr = window.devicePixelRatio || 1, W = innerWidth, H = innerHeight;
+  confettiCv.width = Math.round(W * dpr); confettiCv.height = Math.round(H * dpr);
+  confettiCv.style.width = W + 'px'; confettiCv.style.height = H + 'px';
+  const cx = confettiCv.getContext('2d');
+  const cols = ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0', '#ffd36e'];
+  const parts = [];
+  for (let i = 0; i < 140; i++) parts.push({ x: W * (0.15 + Math.random() * 0.7), y: -20 - Math.random() * H * 0.4, vx: (Math.random() * 2 - 1) * 3, vy: 2 + Math.random() * 4, r: 3 + Math.random() * 4, rot: Math.random() * 6.28, vr: (Math.random() * 2 - 1) * 0.3, c: cols[(Math.random() * cols.length) | 0], life: 1 });
+  const t0 = performance.now();
+  cancelAnimationFrame(confettiRaf);
+  const step = () => {
+    const age = performance.now() - t0;
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.clearRect(0, 0, W, H);
+    let alive = 0;
+    for (const p of parts) {
+      p.vy += 0.08; p.x += p.vx; p.y += p.vy; p.rot += p.vr; p.vx *= 0.995;
+      if (age > 2200) p.life -= 0.04;
+      if (p.life <= 0 || p.y > H + 30) continue;
+      alive++;
+      cx.save(); cx.globalAlpha = Math.max(0, p.life); cx.translate(p.x, p.y); cx.rotate(p.rot);
+      cx.fillStyle = p.c; cx.fillRect(-p.r, -p.r * 0.5, p.r * 2, p.r); cx.restore();
+    }
+    if (alive > 0 && age < 4500) confettiRaf = requestAnimationFrame(step);
+    else cx.clearRect(0, 0, W, H);
+  };
+  confettiRaf = requestAnimationFrame(step);
 }
 
 /* ---------- réseau ---------- */
@@ -111,6 +152,8 @@ function connect() {
       if (modReady && modId === m.g) { if (mod.onLb) mod.onLb({ board: m.board || [], history: m.history || [] }); } else pfor(m.g).lb = { board: m.board || [], history: m.history || [] };
     } else if (m.t === 'state') {
       const g = m.g; const s = { ...m }; delete s.t; delete s.g;
+      if (s.gs === 'over' && typeof s.winner === 'number' && s.winner >= 0 && lastGs[g] !== 'over') fireConfetti();  // 🎉 victoire (pas une égalité)
+      lastGs[g] = s.gs;
       if (modId !== g) loadModule(g);
       if (modReady && modId === g) { if (mod.onState) mod.onState(s); } else pfor(g).state = s;
     }

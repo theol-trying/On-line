@@ -306,6 +306,8 @@
       <div class="srow"><span>Thème</span>
         <select id="setTheme"><option value="neon">Néon</option><option value="crt">Rétro CRT</option><option value="light">Clair</option></select></div>
       <label class="srow"><span>Musique d'ambiance</span><input type="checkbox" class="switch" id="setMusic"></label>
+      <div class="srow"><span>Volume des effets</span><input type="range" id="setSfx" min="0" max="100" value="100" class="rng" aria-label="volume des effets sonores"></div>
+      <div class="srow"><span>Plein écran</span><button id="setFull" class="ghostbtn" style="margin:0;width:auto;padding:8px 14px;">⛶ Activer</button></div>
       <h4>Accessibilité</h4>
       <div class="srow"><span>Palette</span>
         <select id="setPalette"><option value="normal">Normale</option><option value="cb">Daltonien</option></select></div>
@@ -313,6 +315,10 @@
       <label class="srow"><span>Réduire les effets</span><input type="checkbox" class="switch" id="setFx"></label>
     </div>
   </div>
+
+  <!-- calques globaux : fondu de transition entre jeux + confettis de victoire -->
+  <div id="xfade"></div>
+  <canvas id="confetti"></canvas>
 
   <script type="module" src="app.js"></script>
 </body>

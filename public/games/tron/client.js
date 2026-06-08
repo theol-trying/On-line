@@ -108,7 +108,7 @@ export default (function () {
   }
 
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { if (!actx) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
+  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
   function sound(k) { if (!actx) return; if (k === 'crash') { tone(180, 0.22, 'sawtooth', 0.06); tone(90, 0.3, 'sawtooth', 0.05, 0.04); } else if (k === 'pickup') { tone(660, 0.07, 'square', 0.05); tone(990, 0.08, 'square', 0.05, 0.06); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
     if (f.type === 'pickup') return sound('pickup');
@@ -168,9 +168,12 @@ export default (function () {
         ctx.save();
         ctx.globalAlpha = dead ? 0.35 : (p.ghost ? 0.55 : 1);
         ctx.strokeStyle = col; ctx.lineWidth = CELL - 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-        ctx.shadowColor = col; ctx.shadowBlur = (dead ? 0 : (p.speed ? 16 : 8)) * FX;
+        ctx.shadowColor = col; ctx.shadowBlur = (dead ? 0 : (p.speed ? 24 : 14)) * FX;   // bloom néon renforcé
         const path = p.path || [];
-        if (path.length) { ctx.beginPath(); ctx.moveTo(px(path[0][0]), px(path[0][1])); for (let i = 1; i < path.length; i++) ctx.lineTo(px(path[i][0]), px(path[i][1])); ctx.lineTo(hx, hy); ctx.stroke(); }
+        if (path.length) {
+          ctx.beginPath(); ctx.moveTo(px(path[0][0]), px(path[0][1])); for (let i = 1; i < path.length; i++) ctx.lineTo(px(path[i][0]), px(path[i][1])); ctx.lineTo(hx, hy); ctx.stroke();
+          if (!dead && !A.reduceFx) { ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = Math.max(2, (CELL - 2) * 0.32); ctx.shadowBlur = 6 * FX; ctx.stroke(); } // cœur lumineux
+        }
         ctx.restore();
         if (!dead) {
           ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 14 * FX; ctx.fillStyle = p.ghost ? col : '#fff';
