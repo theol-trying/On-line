@@ -55,6 +55,78 @@ setFloat.onclick = () => togglePanel(settingsPanel);
 const quitFloat = document.getElementById('quitFloat');
 if (quitFloat) quitFloat.onclick = () => { closePanels(); gameSend({ t: 'abort' }); };
 
+/* ---------- émotes (flottant, broadcast à tous) ---------- */
+const EMOTES = ['👍', '😂', '😮', '😡', '🎉', '🔥', '😎', '🤝', '💀', '🫡'];
+const emoteFloat = document.getElementById('emoteFloat');
+const emoteBar = document.getElementById('emoteBar');
+const emoteToasts = document.getElementById('emoteToasts');
+if (emoteBar) emoteBar.innerHTML = EMOTES.map(e => `<button class="emo" data-e="${e}">${e}</button>`).join('');
+if (emoteFloat) emoteFloat.onclick = () => { if (emoteBar) emoteBar.classList.toggle('hidden'); };
+if (emoteBar) emoteBar.querySelectorAll('.emo').forEach(b => b.onclick = () => { send({ t: 'emote', e: b.dataset.e }); emoteBar.classList.add('hidden'); });
+function showEmote(name, e) {
+  if (!emoteToasts) return;
+  const el = document.createElement('div'); el.className = 'etoast';
+  el.innerHTML = `<span class="en"></span> <span class="ee"></span>`;
+  el.querySelector('.en').textContent = (name || 'Joueur'); el.querySelector('.ee').textContent = e;
+  emoteToasts.appendChild(el);
+  while (emoteToasts.children.length > 6) emoteToasts.removeChild(emoteToasts.firstChild);
+  setTimeout(() => el.remove(), 2600);
+}
+
+/* ---------- classement global cross-jeux ---------- */
+const boards = {};            // gid -> [entrées de classement]
+const globalBtn = document.getElementById('globalBtn');
+const globalPanel = document.getElementById('globalPanel');
+const globalBody = document.getElementById('globalBody');
+if (globalBtn) globalBtn.onclick = () => { togglePanel(globalPanel); renderGlobal(); };
+function renderGlobal() {
+  if (!globalBody) return;
+  const agg = {};
+  for (const gid in boards) for (const e of (boards[gid] || [])) {
+    const a = agg[e.name] || (agg[e.name] = { name: e.name, games: 0, wins: 0, kills: 0, jeux: 0 });
+    a.games += e.games || 0; a.wins += e.wins || 0; a.kills += e.kills || 0; a.jeux++;
+  }
+  const list = Object.values(agg).sort((x, y) => y.wins - x.wins || y.kills - x.kills || y.games - x.games);
+  if (!list.length) { globalBody.innerHTML = '<div class="lbnote">Aucune partie enregistrée pour l\'instant.</div>'; return; }
+  const medal = ['🥇', '🥈', '🥉'];
+  globalBody.innerHTML = list.map((e, i) => `<div class="lbrow"><span class="lbn">${medal[i] || ('#' + (i + 1))} ${esc(e.name)}</span><span title="parties">🎮${e.games}</span><span title="victoires">🏆${e.wins}</span><span title="éliminations">⚡${e.kills}</span><span title="jeux différents joués">🎲${e.jeux}</span></div>`).join('');
+}
+const esc = s => ('' + s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+/* ---------- ping ---------- */
+const pingTxt = document.getElementById('pingTxt');
+let pingTimer = null;
+function startPing() { if (pingTimer) clearInterval(pingTimer); pingTimer = setInterval(() => send({ t: 'png', ts: Math.round(performance.now()) }), 3000); }
+
+/* ---------- système « Prêt » (gate de démarrage, transverse aux 6 jeux) ---------- */
+let roomPlayers = [], roomHost = null;
+const readyBar = document.getElementById('readyBar');
+const readyList = document.getElementById('readyList');
+const readyCount = document.getElementById('readyCount');
+const readyBtn = document.getElementById('readyBtn');
+const forceBtn = document.getElementById('forceBtn');
+const myEntry = () => roomPlayers.find(p => p.id === you.id);
+function renderReady() {
+  if (!readyBar) return;
+  const gs = lastGs[activeId] || 'lobby';
+  const idle = gs === 'lobby' || gs === 'over';
+  const players = roomPlayers.filter(p => p.role === 'player');
+  const me = myEntry();
+  if (!idle || !me || players.length < 1) { readyBar.classList.add('hidden'); return; }
+  readyBar.classList.remove('hidden');
+  const nready = players.filter(p => p.ready).length;
+  readyList.innerHTML = players.map(p => `<span class="rdy ${p.ready ? 'on' : ''}">${p.ready ? '✅' : '⚪'} ${esc(p.name || 'Joueur')}${p.id === roomHost ? ' 👑' : ''}</span>`).join('');
+  if (readyCount) readyCount.textContent = `Prêts : ${nready}/${players.length}`;
+  const meReady = !!me.ready;
+  readyBtn.style.display = me.role === 'player' ? '' : 'none';
+  readyBtn.textContent = meReady ? '✅ Prêt' : '☐ Pas prêt';
+  readyBtn.classList.toggle('on', meReady);
+  forceBtn.style.display = (you.id === roomHost) ? '' : 'none';
+}
+if (readyBtn) readyBtn.onclick = () => { const me = myEntry(); send({ t: 'ready', v: !(me && me.ready) }); };
+if (forceBtn) forceBtn.onclick = () => send({ t: 'forcestart' });
+function note(txt) { if (!emoteToasts) return; const el = document.createElement('div'); el.className = 'etoast'; el.textContent = txt; emoteToasts.appendChild(el); while (emoteToasts.children.length > 6) emoteToasts.removeChild(emoteToasts.firstChild); setTimeout(() => el.remove(), 2200); }
+
 /* ---------- pseudo ---------- */
 nameInput.value = myName;
 nameInput.onchange = () => { myName = nameInput.value.trim().slice(0, 12); localStorage.setItem('pong-lan-name', myName); send({ t: 'name', name: myName }); };
@@ -131,7 +203,7 @@ function connect() {
   setStatus('Connexion…', '');
   const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';   // wss en ligne (HTTPS Render), ws en LAN local
   ws = new WebSocket(`${wsProto}//${location.host}${you.token ? '/?t=' + encodeURIComponent(you.token) : ''}`);
-  ws.onopen = () => { if (myName) send({ t: 'name', name: myName }); };
+  ws.onopen = () => { if (myName) send({ t: 'name', name: myName }); startPing(); };
   ws.onmessage = e => {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.t === 'hello') {
@@ -142,18 +214,30 @@ function connect() {
     } else if (m.t === 'room') {
       activeId = m.active; renderMenu(); loadModule(activeId);
       const ps = m.players || [];
+      roomPlayers = ps; roomHost = m.host || null;
       const me = ps.find(p => p.id === you.id);
       const human = ps.filter(p => p.role !== 'spectator').length;
-      setStatus(`${me && me.role === 'spectator' ? 'Spectateur · ' : ''}${human} connecté${human > 1 ? 's' : ''}`, 'ok');
+      const specs = ps.filter(p => p.role === 'spectator').length;
+      setStatus(`${me && me.role === 'spectator' ? 'Spectateur · ' : ''}${human} connecté${human > 1 ? 's' : ''}${specs ? ' · 👁 ' + specs : ''}`, 'ok');
+      renderReady();
     } else if (m.t === 'g') {
       const g = m.g || activeId;
       if (modReady && modId === g) { if (mod.onMessage) mod.onMessage(m.m); } else pfor(g).msgs.push(m.m);
     } else if (m.t === 'lb') {
+      boards[m.g] = m.board || [];                  // mémorise pour le classement global cross-jeux
       if (modReady && modId === m.g) { if (mod.onLb) mod.onLb({ board: m.board || [], history: m.history || [] }); } else pfor(m.g).lb = { board: m.board || [], history: m.history || [] };
+    } else if (m.t === 'emote') {
+      showEmote(m.name, m.e);
+    } else if (m.t === 'png') {
+      const rtt = Math.max(0, Math.round(performance.now() - m.ts)); if (pingTxt) pingTxt.textContent = ' · ⚡ ' + rtt + ' ms';
+    } else if (m.t === 'notready') {
+      note('⏳ En attente que tous les joueurs soient prêts');
     } else if (m.t === 'state') {
       const g = m.g; const s = { ...m }; delete s.t; delete s.g;
+      const prevGs = lastGs[g];
       if (s.gs === 'over' && typeof s.winner === 'number' && s.winner >= 0 && lastGs[g] !== 'over') fireConfetti();  // 🎉 victoire (pas une égalité)
       lastGs[g] = s.gs;
+      if (g === activeId && prevGs !== s.gs) renderReady();   // gs du jeu actif changé : montre/cache la barre « Prêt »
       if (modId !== g) loadModule(g);
       if (modReady && modId === g) { if (mod.onState) mod.onState(s); } else pfor(g).state = s;
     }

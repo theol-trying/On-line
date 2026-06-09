@@ -6,7 +6,7 @@ const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E
 const TEAM_LETTER = ['A', 'B', 'C'];
 const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3' };
 const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
-const PU = { rapid: { i: '»', c: '#9fe6ff' }, triple: { i: '⋔', c: '#ffd76b' }, shield: { i: '⛉', c: '#7fd1ff' }, speed: { i: '👟', c: '#7ff0bd' }, pierce: { i: '➳', c: '#ff9be0' }, mine: { i: '◈', c: '#ff8e6e' } };
+const PU = { rapid: { i: '»', c: '#9fe6ff' }, triple: { i: '⋔', c: '#ffd76b' }, shield: { i: '⛉', c: '#7fd1ff' }, speed: { i: '👟', c: '#7ff0bd' }, pierce: { i: '➳', c: '#ff9be0' }, mine: { i: '◈', c: '#ff8e6e' }, repair: { i: '🔧', c: '#7ff0bd' }, emp: { i: '⚡', c: '#9fe6ff' }, homing: { i: '🚀', c: '#ff7a7a' }, camo: { i: '👁', c: '#b9a6ff' }, radar: { i: '📡', c: '#7ff0bd' } };
 // identité visuelle propre au jeu (fixe) : Désert / Champ de bataille
 const SKIN = { bg: '#14130c', floor: '#2b2818', floor2: '#262313', solid: '#564f45', soft: '#8a6a3c', softTop: '#b58a4c', grid: 'rgba(255,220,150,0.045)', border: 'rgba(210,180,120,0.3)', steel: true, crate: true };
 const INTERP_MS = 55;
@@ -17,10 +17,10 @@ export default (function () {
   let CC = PAL.normal, TEAMCC = TEAMPAL.normal, TH = SKIN, FX = 1;
   let mySeat = -1, snap = null, prevGs = 'lobby', teamMode = false, endShown = false, inGamePrev = false;
   let board = [], buf = [];
-  const particles = [];
+  const particles = [], puffs = [], lastPos = {};      // puffs = poussière/fumée (rendu opaque) ; lastPos = pour détecter le mouvement
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null;
   const input = { left: false, right: false, fwd: false, back: false, fire: false };
-  let hud, cards, startBtn, pauseBtn, modeBtn, arenaBtn, winBtn, ffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
+  let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, arenaBtn, winBtn, ffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; };
@@ -43,11 +43,13 @@ export default (function () {
       cards[i].style.color = col; cards[i].classList.toggle('dead', p.playing && !p.alive); cards[i].classList.toggle('me', i === mySeat);
       const tags = [];
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
-      if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
+      if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
+      else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       cards[i].querySelector('.pn').innerHTML = `${p.name || ('P' + (i + 1))} <span class="sc">🏆${p.score} · ${p.kills}⚡</span> ${tags.join('')}`;
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
-      const pu = [p.shield ? '⛉' + p.shield : '', p.rapid ? '»' : '', p.triple ? '⋔' : '', p.speed ? '👟' : '', p.pierce ? '➳' : '', p.mineN ? '◈' + p.mineN : ''].filter(Boolean).join(' ');
-      lv.innerHTML = p.playing ? (p.alive ? ('❤'.repeat(p.lives) + (pu ? ' · ' + pu : '')) : '✖ détruit') : 'prêt';
+      const counts = [p.shield ? '⛉' + p.shield : '', p.mineN ? '◈' + p.mineN : ''].filter(Boolean).join(' ');
+      const bars = (p.buffs || []).map(([k, fr]) => { const d = PU[k] || { i: '?', c: '#fff' }, pct = Math.max(0, Math.min(100, Math.round(fr * 100))); return `<span class="buff" style="background:linear-gradient(90deg,${d.c} ${pct}%,rgba(255,255,255,.12) ${pct}%);border-color:${d.c}66">${d.i}</span>`; }).join('');
+      lv.innerHTML = p.playing ? (p.alive ? ('❤'.repeat(p.lives) + (counts ? ' · ' + counts : '') + (p.emp ? ' ⚡' : '') + (bars ? ' ' + bars : '')) : '✖ détruit') : 'prêt';
     });
   }
   function renderLB() {
@@ -92,10 +94,12 @@ export default (function () {
     prevGs = m.gs; refreshHUD();
     if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } } else { endShown = false; endEl.classList.add('hidden'); }
     const idle = m.gs === 'lobby' || m.gs === 'over';
-    startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 2); startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
+    const total = m.connected + (m.botCount || 0);
+    startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1 && total >= 2); startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused'); pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
-    modeBtn.disabled = !(idle && (m.connected === 4 || m.connected === 6)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
+    if (botsBtn) { botsBtn.disabled = !idle; botsBtn.textContent = '🤖 Bots : ' + (m.botCount || 0); botsBtn.classList.toggle('on', (m.botCount || 0) > 0); }
+    modeBtn.disabled = !(idle && (total === 4 || total === 6)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     arenaBtn.disabled = !idle; arenaBtn.textContent = '🧱 ' + (GEN_NAMES[m.gen] || 'Arène');
     winBtn.disabled = !idle; winBtn.textContent = '🏁 ' + (m.winTarget === 1 ? '1 manche' : m.winTarget + ' manches');
     ffBtn.disabled = !(idle && teamMode); ffBtn.textContent = '🤝 Tir allié : ' + (m.ff ? 'ON' : 'OFF'); ffBtn.classList.toggle('on', !!m.ff);
@@ -105,9 +109,10 @@ export default (function () {
   function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
   function sound(k) { if (!actx) return; if (k === 'shot') tone(320, 0.05, 'square', 0.03); else if (k === 'hit') tone(200, 0.08, 'square', 0.05); else if (k === 'pickup') { tone(660, 0.07, 'square', 0.05); tone(990, 0.08, 'square', 0.05, 0.06); } else if (k === 'boom') { tone(150, 0.25, 'sawtooth', 0.06); tone(80, 0.32, 'sawtooth', 0.05, 0.05); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
-    if (f.type === 'shot') return sound('shot');
+    if (f.type === 'shot') { sound('shot'); if (!A.reduceFx) { const now = performance.now(); for (let k = 0; k < 6; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.6; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 150 + Math.random() * 120, color: '#ffe08a' }); } } return; } // flash de bouche
     if (f.type === 'hit') return sound('hit');
     if (f.type === 'pickup' || f.type === 'mineset') return sound('pickup');
+    if (f.type === 'barrel') { sound('boom'); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 9); const now = performance.now(); for (let k = 0; k < 26; k++) { const a = Math.random() * Math.PI * 2, sp = 1.5 + Math.random() * 5; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 320, color: Math.random() < 0.5 ? '#ff8a3a' : '#ffd23f' }); } return; } // explosion de baril (orange/jaune)
     if (f.type === 'boom') {
       sound('boom'); if (A.reduceFx) return;
       if (!f.small) shakeMag = Math.max(shakeMag, 7);
@@ -148,27 +153,49 @@ export default (function () {
         }
       }
       ctx.strokeStyle = TH.border || 'rgba(255,255,255,0.2)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, ARENA - 3, ARENA - 3);
+      // zones de boue (ralentissent)
+      (snap.mud || []).forEach(idx => { const gx = idx % G, gy = (idx / G) | 0, x = gx * BLK, y = gy * BLK; ctx.save(); ctx.fillStyle = 'rgba(86,60,28,0.6)'; ctx.fillRect(x, y, BLK, BLK); ctx.fillStyle = 'rgba(54,38,16,0.7)'; ctx.beginPath(); ctx.arc(x + BLK * 0.32, y + BLK * 0.4, 4, 0, Math.PI * 2); ctx.arc(x + BLK * 0.68, y + BLK * 0.62, 5, 0, Math.PI * 2); ctx.arc(x + BLK * 0.5, y + BLK * 0.8, 3, 0, Math.PI * 2); ctx.fill(); ctx.restore(); });
+      // barils explosifs
+      (snap.barrels || []).forEach(b => { ctx.save(); ctx.translate(b.x, b.y); const r = 11; ctx.shadowColor = '#000'; ctx.shadowBlur = 4 * FX; ctx.fillStyle = '#b5532a'; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0; ctx.strokeStyle = '#3a1d0e'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.moveTo(-r + 1, -r * 0.32); ctx.lineTo(r - 1, -r * 0.32); ctx.moveTo(-r + 1, r * 0.32); ctx.lineTo(r - 1, r * 0.32); ctx.stroke(); ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', 0, 1); ctx.restore(); });
       // power-ups
       (snap.pickups || []).forEach(k => { const d = PU[k.t] || { i: '?', c: '#fff' }, pulse = 1 + 0.1 * Math.sin(now / 200); ctx.save(); ctx.shadowColor = d.c; ctx.shadowBlur = 12 * FX; ctx.fillStyle = d.c + '22'; ctx.strokeStyle = d.c; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(k.x, k.y, 13 * pulse, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0; ctx.fillStyle = d.c; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(d.i, k.x, k.y + 1); ctx.restore(); });
       // mines
       (snap.mines || []).forEach(mn => { const col = colSeat(mn.o); ctx.save(); ctx.fillStyle = mn.armed ? '#ff5a5a' : '#888'; ctx.globalAlpha = mn.armed ? 0.6 + 0.4 * Math.sin(now / 120) : 0.6; ctx.beginPath(); ctx.arc(mn.x, mn.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.7; ctx.stroke(); ctx.restore(); });
       // tanks
       const tv = viewTanks(now);
+      const me = mySeat >= 0 ? snap.players[mySeat] : null, myRadar = !!(me && me.radar);
       snap.players.forEach(p => {
         if (!p.playing || !p.alive) return;
         const t = (tv && tv[p.seat]) || p, col = colSeat(p.seat);
+        let alpha = 1;                               // camouflage : quasi invisible pour les ennemis (sauf radar)
+        if (p.camo) { if (p.seat === mySeat) alpha = 0.5; else { const enemy = !teamMode || (me && p.team !== me.team); alpha = (enemy && !myRadar) ? 0.1 : 0.5; } }
+        if (!A.reduceFx && alpha > 0.3) {
+          const lp = lastPos[p.seat];
+          if (lp && Math.hypot(t.x - lp.x, t.y - lp.y) > 0.6 && Math.random() < 0.5) puffs.push({ x: t.x - Math.cos(t.angle) * TANK_R, y: t.y - Math.sin(t.angle) * TANK_R, vx: (Math.random() * 2 - 1) * 0.3, vy: (Math.random() * 2 - 1) * 0.3 - 0.15, born: now, life: 340 + Math.random() * 220, r0: 3 + Math.random() * 3, col: '210,190,140' }); // poussière
+          if (p.lives <= 1 && Math.random() < 0.12) puffs.push({ x: t.x + (Math.random() * 2 - 1) * 4, y: t.y - TANK_R * 0.4, vx: (Math.random() * 2 - 1) * 0.2, vy: -0.5 - Math.random() * 0.4, born: now, life: 600 + Math.random() * 400, r0: 3 + Math.random() * 3, col: '70,70,76' }); // fumée (tank endommagé)
+          lastPos[p.seat] = { x: t.x, y: t.y };
+        }
         ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.angle);
-        if (p.invuln) ctx.globalAlpha = 0.35 + 0.35 * Math.sin(now / 60);
+        ctx.globalAlpha = alpha;
+        if (p.invuln) ctx.globalAlpha *= 0.35 + 0.35 * Math.sin(now / 60);
         ctx.shadowColor = col; ctx.shadowBlur = 10 * FX; ctx.fillStyle = col;
         ctx.fillRect(-TANK_R, -TANK_R * 0.8, TANK_R * 2, TANK_R * 1.6);
         ctx.fillStyle = '#fff'; ctx.globalAlpha *= 0.9; ctx.fillRect(TANK_R * 0.2, -2.5, TANK_R + 6, 5);
         ctx.restore();
-        if (p.shield) { ctx.save(); ctx.strokeStyle = '#7fd1ff'; ctx.shadowColor = '#7fd1ff'; ctx.shadowBlur = 12 * FX; ctx.globalAlpha = 0.6 + 0.3 * Math.sin(now / 200); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(t.x, t.y, TANK_R + 5, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+        if (p.shield && alpha > 0.2) { ctx.save(); ctx.strokeStyle = '#7fd1ff'; ctx.shadowColor = '#7fd1ff'; ctx.shadowBlur = 12 * FX; ctx.globalAlpha = 0.6 + 0.3 * Math.sin(now / 200); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(t.x, t.y, TANK_R + 5, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+        if (p.emp && alpha > 0.2) { ctx.save(); ctx.strokeStyle = '#9fe6ff'; ctx.globalAlpha = 0.5 + 0.5 * Math.sin(now / 40); ctx.lineWidth = 2; for (let k = 0; k < 4; k++) { const a = now / 80 + k * Math.PI / 2; ctx.beginPath(); ctx.moveTo(t.x + Math.cos(a) * (TANK_R + 2), t.y + Math.sin(a) * (TANK_R + 2)); ctx.lineTo(t.x + Math.cos(a) * (TANK_R + 9), t.y + Math.sin(a) * (TANK_R + 9)); ctx.stroke(); } ctx.restore(); } // étourdi (EMP)
+        if (myRadar && p.seat !== mySeat && (!teamMode || (me && p.team !== me.team))) { ctx.save(); ctx.strokeStyle = '#7ff0bd'; ctx.globalAlpha = 0.4 + 0.3 * Math.sin(now / 150); ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(t.x, t.y, TANK_R + 7, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); } // détecté au radar
         if (p.seat === mySeat) { ctx.save(); ctx.strokeStyle = '#fff'; ctx.globalAlpha = 0.5 + 0.4 * Math.sin(now / 220); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(t.x, t.y, TANK_R + 3, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+        if (alpha > 0.3) { const MAXL = 3, bw = TANK_R * 2, bh = 3, bx0 = t.x - bw / 2, by0 = t.y - TANK_R - 8, seg = bw / MAXL; ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(bx0 - 1, by0 - 1, bw + 2, bh + 2); for (let l = 0; l < MAXL; l++) { ctx.fillStyle = l < p.lives ? (p.lives === 1 ? '#ff5a5a' : col) : 'rgba(255,255,255,0.16)'; ctx.fillRect(bx0 + l * seg + 0.5, by0, seg - 1, bh); } ctx.restore(); } // barre de vie
       });
       // obus
-      (snap.shells || []).forEach(s => { const col = s.p ? '#ff9be0' : colSeat(s.o); ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 12 * FX; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s.x, s.y, SHELL_R, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = col; ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.arc(s.x, s.y, SHELL_R + (s.p ? 2.5 : 1.5), 0, Math.PI * 2); ctx.fill(); ctx.restore(); });
+      (snap.shells || []).forEach(s => {
+        const col = s.h ? '#ff6a6a' : (s.p ? '#ff9be0' : colSeat(s.o));
+        if (!A.reduceFx && (s.vx || s.vy)) { const m = Math.hypot(s.vx, s.vy) || 1; ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = col; ctx.globalAlpha = 0.4; ctx.lineWidth = SHELL_R * 1.3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x - s.vx / m * 14, s.y - s.vy / m * 14); ctx.stroke(); ctx.restore(); } // traînée d'obus
+        ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 12 * FX; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s.x, s.y, SHELL_R, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = col; ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.arc(s.x, s.y, SHELL_R + (s.p ? 2.5 : 1.5), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      });
     }
+    if (!A.reduceFx) { ctx.save(); for (let i = puffs.length - 1; i >= 0; i--) { const q = puffs[i], tt = (now - q.born) / q.life; if (tt >= 1) { puffs.splice(i, 1); continue; } q.x += q.vx; q.y += q.vy; ctx.globalAlpha = (1 - tt) * 0.5; ctx.fillStyle = `rgb(${q.col})`; ctx.beginPath(); ctx.arc(q.x, q.y, q.r0 + tt * 5, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); } else puffs.length = 0;
     if (!A.reduceFx) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; for (let i = particles.length - 1; i >= 0; i--) { const q = particles[i], t = (now - q.born) / q.life; if (t >= 1) { particles.splice(i, 1); continue; } q.x += q.vx; q.y += q.vy; q.vx *= 0.95; q.vy *= 0.95; ctx.globalAlpha = 1 - t; ctx.fillStyle = q.color; ctx.beginPath(); ctx.arc(q.x, q.y, 2.5 * (1 - t) + 0.5, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); } else particles.length = 0;
 
     // jauge de munitions (joueur local) : pastilles = obus disponibles (MAX 2)
@@ -191,7 +218,7 @@ export default (function () {
     if (snap && (snap.gs === 'lobby' || snap.gs === 'paused')) {
       ctx.fillStyle = 'rgba(4,5,12,0.66)'; ctx.fillRect(0, 0, ARENA, ARENA); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if (snap.gs === 'paused') { ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', ARENA / 2, ARENA / 2 + 28); }
-      else { ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,180,120,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 30px system-ui,sans-serif'; ctx.fillText('TANKS', ARENA / 2, ARENA / 2 - 36); ctx.restore(); const n = snap.connected; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''} · ${snap.winTarget === 1 ? '1 manche' : snap.winTarget + ' manches'}`, ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText(n >= 2 ? '▶ Espace / clic pour lancer' : 'En attente d\'un 2ᵉ pilote…', ARENA / 2, ARENA / 2 + 24); }
+      else { ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,180,120,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 30px system-ui,sans-serif'; ctx.fillText('TANKS', ARENA / 2, ARENA / 2 - 36); ctx.restore(); const n = snap.connected, nb = snap.botCount || 0, tot = n + nb; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''} · ${snap.winTarget === 1 ? '1 manche' : snap.winTarget + ' manches'}`, ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText(tot >= 2 ? '▶ Espace / clic pour lancer' : 'En attente d\'un 2ᵉ pilote… (ou ajoute un bot 🤖)', ARENA / 2, ARENA / 2 + 24); }
     }
     rafId = requestAnimationFrame(draw);
   }
@@ -218,11 +245,12 @@ export default (function () {
     cv = $('tkc'); ctx = cv.getContext('2d'); hud = $('tkHud'); endEl = $('tkEnd');
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = [0, 1, 2, 3, 4, 5].map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
-    startBtn = $('tkStart'); pauseBtn = $('tkPause'); modeBtn = $('tkMode'); arenaBtn = $('tkArena'); winBtn = $('tkWin'); ffBtn = $('tkFf'); pauseFloat = $('tkPauseFloat');
+    startBtn = $('tkStart'); pauseBtn = $('tkPause'); modeBtn = $('tkMode'); botsBtn = $('tkBots'); arenaBtn = $('tkArena'); winBtn = $('tkWin'); ffBtn = $('tkFf'); pauseFloat = $('tkPauseFloat');
     lbBtn = $('tkLbBtn'); lbPanel = $('tkLbPanel'); lbBody = $('tkLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' }); pauseFloat.onclick = () => send({ t: 'pause' });
     modeBtn.onclick = () => send({ t: 'mode' }); arenaBtn.onclick = () => send({ t: 'arena' }); winBtn.onclick = () => send({ t: 'wintarget' }); ffBtn.onclick = () => send({ t: 'ff' });
+    if (botsBtn) botsBtn.onclick = () => send({ t: 'bots' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('tkHelp'), helpPanel = $('tkHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
     cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });

@@ -13,8 +13,9 @@ const SOFT_PROB = 0.72, PICK_PROB = 0.42, MALUS_RATIO = 0.22;
 const DUR = 8 * TICK_HZ, AUTO_EVERY = 18, THROW_DIST = 4, SHIELD_CAP = 1;
 const SD_START = 65 * TICK_HZ, SD_EVERY = 10;
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-const GOOD = ['bomb', 'flame', 'speed', 'kick', 'remote', 'shield', 'ghost', 'throw'];
-const BAD = ['reverse', 'slow', 'auto'];
+const GOOD = ['bomb', 'flame', 'speed', 'kick', 'remote', 'shield', 'ghost', 'throw', 'line'];
+const BAD = ['reverse', 'slow', 'auto', 'skull'];
+const SKULL_KINDS = ['reverse', 'slow', 'auto'];   // affliction aléatoire infligée par le skull (contagieux)
 const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
 function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
@@ -23,6 +24,9 @@ const ccx = c => (c + 0.5) * CELL;
 const SPAWNS = [[1, 1], [GW - 2, GH - 2], [GW - 2, 1], [1, GH - 2], [(GW - 1) / 2 | 0, 1], [(GW - 1) / 2 | 0, GH - 2]];
 const SD_SPIRAL = (() => { const res = []; let x0 = 1, y0 = 1, x1 = GW - 2, y1 = GH - 2; while (x0 <= x1 && y0 <= y1) { for (let x = x0; x <= x1; x++) res.push([x, y0]); for (let y = y0 + 1; y <= y1; y++) res.push([x1, y]); if (y1 > y0) for (let x = x1 - 1; x >= x0; x--) res.push([x, y1]); if (x1 > x0) for (let y = y1 - 1; y >= y0 + 1; y--) res.push([x0, y]); x0++; y0++; x1--; y1--; } return res; })();
 const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
+// mode revanche : anneau des cases du cadre (sens horaire) où les morts viennent bombarder l'arène
+const RING = (() => { const r = []; for (let x = 0; x < GW - 1; x++) r.push([x, 0]); for (let y = 0; y < GH - 1; y++) r.push([GW - 1, y]); for (let x = GW - 1; x > 0; x--) r.push([x, GH - 1]); for (let y = GH - 1; y > 0; y--) r.push([0, y]); return r; })();
+const RING_LEN = RING.length, REV_MOVE_EVERY = 5;
 // génération procédurale des murs solides (sym180 / aléatoire / 4 coins) avec connectivité garantie
 function genSolidSetB(style, density, safe) {
   const cache = new Map();
@@ -46,7 +50,7 @@ function bombConnected(solid, spawns) {
 }
 
 export function createBomb(room) {
-  let players, cells, bombs, blasts, pickups, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, sdIndex, sd, genStyle, ff;
+  let players, cells, bombs, blasts, pickups, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, sdIndex, sd, genStyle, ff, warpOf, revenge;
   let seatByMid = {};
 
   function lbEntry(name) {
@@ -75,14 +79,15 @@ export function createBomb(room) {
     return Array.from({ length: MAX_SEATS }, (_, seat) => ({
       seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false,
       x: ccx(1), y: ccx(1), face: { x: 0, y: 1 }, maxBombs: 1, power: FLAME_BASE, speed: SPD_BASE, bombsActive: 0,
-      kick: false, remote: false, ghost: false, throw: false, shield: 0, reverseUntil: 0, slowUntil: 0, autoUntil: 0,
+      kick: false, remote: false, ghost: false, throw: false, line: false, shield: 0, reverseUntil: 0, slowUntil: 0, autoUntil: 0,
+      skullUntil: 0, skullKind: '', warpCd: 0, lastCell: -1, revenant: false, ring: 0,
       inputs: { up: false, down: false, left: false, right: false }, invulnUntil: 0,
       kills: 0, score: 0, place: 0, elimTick: -1, spawn: { gx: 1, gy: 1 },
     }));
   }
   function fullReset() {
     players = makePlayers(); cells = new Array(GW * GH).fill(0); bombs = []; blasts = []; pickups = [];
-    gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; sdIndex = 0; sd = false; genStyle = 0; ff = false; seatByMid = {};
+    gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; sdIndex = 0; sd = false; genStyle = 0; ff = false; warpOf = {}; revenge = false; seatByMid = {};
   }
 
   const connectedCount = () => players.filter(p => p.member).length;
@@ -105,6 +110,15 @@ export function createBomb(room) {
     for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) if (gx === 0 || gy === 0 || gx === GW - 1 || gy === GH - 1) cells[idx(gx, gy)] = 1; // cadre
     for (const k of solid) cells[k] = 1;
     for (let i = 0; i < cells.length; i++) { const gx = i % GW, gy = (i / GW) | 0; if (gx > 0 && gy > 0 && gx < GW - 1 && gy < GH - 1 && cells[i] === 0 && !safe.has(i) && Math.random() < SOFT_PROB) cells[i] = 2; }
+    // téléporteurs (tuile 3) : 1 paire sur deux cases vides éloignées — sol traversable, connectivité préservée
+    warpOf = {};
+    const empties = [];
+    for (let i = 0; i < cells.length; i++) { const gx = i % GW, gy = (i / GW) | 0; if (cells[i] === 0 && !safe.has(i) && gx > 1 && gy > 1 && gx < GW - 2 && gy < GH - 2) empties.push(i); }
+    if (empties.length >= 2) {
+      const a = empties[Math.floor(Math.random() * empties.length)];
+      let b = a; for (let t = 0; t < 24 && (b === a || Math.abs((b % GW) - (a % GW)) + Math.abs(((b / GW) | 0) - ((a / GW) | 0)) < 6); t++) b = empties[Math.floor(Math.random() * empties.length)];
+      if (b !== a) { cells[a] = 3; cells[b] = 3; warpOf[a] = b; warpOf[b] = a; }
+    }
   }
   function startGame() {
     if (!editable() || !canStart()) return;
@@ -120,7 +134,8 @@ export function createBomb(room) {
       const [sx, sy] = SPAWNS[i];
       p.playing = true; p.alive = true; p.spawn = { gx: sx, gy: sy }; p.x = ccx(sx); p.y = ccx(sy); p.face = { x: 0, y: 1 };
       p.maxBombs = 1; p.power = FLAME_BASE; p.speed = SPD_BASE; p.bombsActive = 0;
-      p.kick = p.remote = p.ghost = p.throw = false; p.shield = 0; p.reverseUntil = p.slowUntil = p.autoUntil = 0; p.invulnUntil = 0;
+      p.kick = p.remote = p.ghost = p.throw = p.line = false; p.shield = 0; p.reverseUntil = p.slowUntil = p.autoUntil = 0; p.invulnUntil = 0;
+      p.skullUntil = 0; p.skullKind = ''; p.warpCd = 0; p.lastCell = -1; p.revenant = false; p.ring = 0;
       p.team = i % nteams; p.kills = 0; p.place = 0; p.elimTick = -1;
       p.inputs = { up: false, down: false, left: false, right: false };
     });
@@ -133,6 +148,15 @@ export function createBomb(room) {
   }
   function endRound() {
     gameState = 'over'; endTick = tick;
+    if (revenge && nParts >= 2) {
+      const present = [...new Set(players.filter(p => p.playing && (p.alive || p.revenant)).map(p => p.team))];
+      if (present.length === 1) winner = present[0];
+      else { const byTeam = {}; for (const p of players) if (p.playing) byTeam[p.team] = (byTeam[p.team] || 0) + p.kills; let bt = -1, bv = -1, tie = false; for (const k in byTeam) { const v = byTeam[k]; if (v > bv) { bv = v; bt = +k; tie = false; } else if (v === bv) tie = true; } winner = tie ? -1 : bt; }
+      if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
+      const order = players.filter(p => p.playing).sort((a, b) => ((b.alive ? 1 : 0) - (a.alive ? 1 : 0)) || ((b.elimTick || 0) - (a.elimTick || 0)));
+      order.forEach((p, i) => p.place = i + 1);
+      recordRound(); return;
+    }
     const s = aliveTeams();
     winner = s.size === 1 ? [...s][0] : -1;
     if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
@@ -182,16 +206,22 @@ export function createBomb(room) {
     fx.push({ type: 'place', x: tx, y: ty });
     return true;
   }
-  function placeBomb(p) {
-    if (!active(p) || gameState !== 'play') return;
-    if (p.bombsActive >= p.maxBombs) return;
-    const gx = Math.floor(p.x / CELL), gy = Math.floor(p.y / CELL);
-    if (bombAt(gx, gy) || cells[idx(gx, gy)] !== 0) return;
+  function placeBombAt(p, gx, gy) {
+    if (p.bombsActive >= p.maxBombs) return false;
+    if (gx < 1 || gy < 1 || gx >= GW - 1 || gy >= GH - 1) return false;
+    if (bombAt(gx, gy) || cells[idx(gx, gy)] !== 0) return false;
     const pass = new Set();
     for (const q of players) if (active(q) && Math.floor(q.x / CELL) === gx && Math.floor(q.y / CELL) === gy) pass.add(q.seat);
     bombs.push({ gx, gy, owner: p.seat, fuse: BOMB_FUSE, power: p.power, pass, dead: false, remote: p.remote });
     p.bombsActive++;
     fx.push({ type: 'place', x: gx, y: gy });
+    return true;
+  }
+  function placeBomb(p) {
+    if (!active(p) || gameState !== 'play') return;
+    const gx = Math.floor(p.x / CELL), gy = Math.floor(p.y / CELL);
+    if (!placeBombAt(p, gx, gy)) return;
+    if (p.line) for (let d = 1; d <= 6; d++) { if (!placeBombAt(p, gx + p.face.x * d, gy + p.face.y * d)) break; } // bombe en ligne : pose en chaîne devant soi tant qu'il reste des bombes et que c'est libre
   }
   function action(p) {                             // gant (lancer) sinon détonateur
     if (!active(p)) return;
@@ -202,6 +232,49 @@ export function createBomb(room) {
       if (tx !== gx || ty !== gy) { b.gx = tx; b.gy = ty; b.pass = new Set(); fx.push({ type: 'throw', x: tx, y: ty }); return; }
     }
     if (p.remote) { const q = []; for (const bb of bombs) if (!bb.dead && bb.owner === p.seat && bb.remote) q.push(bb); while (q.length) detonate(q.shift(), q); bombs = bombs.filter(b2 => !b2.dead); }
+  }
+
+  // ---- mode revanche : un mort rejoint le bord et bombarde l'arène ; un kill depuis le bord le ressuscite ----
+  function innerCell(gx, gy) { let ix = gx, iy = gy; if (gy === 0) iy = 1; else if (gy === GH - 1) iy = GH - 2; if (gx === 0) ix = 1; else if (gx === GW - 1) ix = GW - 2; return [ix, iy]; }
+  function occupiedByLiving(gx, gy) { for (const q of players) if (active(q) && Math.floor(q.x / CELL) === gx && Math.floor(q.y / CELL) === gy) return true; return false; }
+  function freeInteriorCell() { for (let t = 0; t < 200; t++) { const gx = 1 + Math.floor(Math.random() * (GW - 2)), gy = 1 + Math.floor(Math.random() * (GH - 2)); if (cells[idx(gx, gy)] === 0 && !occupiedByLiving(gx, gy) && !bombAt(gx, gy)) return [gx, gy]; } return null; }
+  function toRevenant(p) {
+    p.revenant = true; p.alive = false; p.elimTick = tick;
+    p.reverseUntil = p.slowUntil = p.autoUntil = 0; p.skullUntil = 0; p.skullKind = '';
+    p.inputs = { up: false, down: false, left: false, right: false };
+    const dgx = Math.floor(p.x / CELL), dgy = Math.floor(p.y / CELL); let best = 0, bd = Infinity;
+    for (let i = 0; i < RING_LEN; i++) { const dd = (RING[i][0] - dgx) ** 2 + (RING[i][1] - dgy) ** 2; if (dd < bd) { bd = dd; best = i; } }
+    p.ring = best; p.x = ccx(RING[best][0]); p.y = ccx(RING[best][1]);
+  }
+  function reviveRevenant(p) {
+    const cell = (cells[idx(p.spawn.gx, p.spawn.gy)] === 0 && !occupiedByLiving(p.spawn.gx, p.spawn.gy)) ? [p.spawn.gx, p.spawn.gy] : freeInteriorCell();
+    if (!cell) return;                               // arène pleine (mort subite) : reste revenant
+    p.revenant = false; p.alive = true; p.elimTick = -1; p.invulnUntil = tick + 2 * TICK_HZ; p.bombsActive = 0;
+    p.x = ccx(cell[0]); p.y = ccx(cell[1]); p.face = { x: 0, y: 1 };
+    fx.push({ type: 'spawn', x: cell[0], y: cell[1], seat: p.seat });
+  }
+  function revMove(p) {
+    if (tick % REV_MOVE_EVERY !== 0) return;
+    const d = (p.inputs.left || p.inputs.up) ? -1 : (p.inputs.right || p.inputs.down) ? 1 : 0;
+    if (!d) return;
+    p.ring = (p.ring + d + RING_LEN) % RING_LEN; p.x = ccx(RING[p.ring][0]); p.y = ccx(RING[p.ring][1]);
+  }
+  function revBomb(p) {
+    if (gameState !== 'play' || p.bombsActive >= p.maxBombs) return;
+    const [rx, ry] = RING[p.ring], [ix, iy] = innerCell(rx, ry);
+    if (cells[idx(ix, iy)] !== 0 || bombAt(ix, iy)) return;
+    const pass = new Set(); for (const q of players) if (active(q) && Math.floor(q.x / CELL) === ix && Math.floor(q.y / CELL) === iy) pass.add(q.seat);
+    bombs.push({ gx: ix, gy: iy, owner: p.seat, fuse: BOMB_FUSE, power: p.power, pass, dead: false, remote: false });
+    p.bombsActive++; fx.push({ type: 'place', x: ix, y: iy });
+  }
+  function roundOver() {
+    if (revenge && nParts >= 2) {
+      const living = players.some(active);
+      const present = new Set(players.filter(p => p.playing && (p.alive || p.revenant)).map(p => p.team));
+      return !living || present.size <= 1;
+    }
+    if (nParts >= 2) return aliveTeams().size <= 1;
+    return aliveN() === 0;
   }
 
   function addBlast(gx, gy, owner) { blasts.push({ gx, gy, until: tick + BLAST_TIME, owner }); }
@@ -237,10 +310,12 @@ export function createBomb(room) {
   }
   function kill(p, killer, gx, gy) {
     if (p.shield > 0) { p.shield--; fx.push({ type: 'guard', x: gx, y: gy, seat: p.seat }); return; }
-    p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++;
-    if (killer >= 0 && killer !== p.seat && players[killer]) players[killer].kills++;
+    const kp = (killer >= 0 && killer !== p.seat && players[killer]) ? players[killer] : null;
+    if (kp) kp.kills++;
     for (const b of bombs) if (!b.dead && b.owner === p.seat && b.remote) { b.remote = false; b.fuse = Math.min(b.fuse, 2 * TICK_HZ); } // bombes télécommandées du mort : repassent en minutées (plus d'orphelines)
     fx.push({ type: 'boom', x: gx, y: gy, seat: p.seat });
+    if (revenge && nParts >= 2) { toRevenant(p); if (kp && kp.revenant) reviveRevenant(kp); return; } // revanche : pas d'élimination, on passe au bord (et le tueur revenant ressuscite)
+    p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++;
   }
   function applyPick(p, pk) {
     switch (pk.type) {
@@ -251,11 +326,19 @@ export function createBomb(room) {
       case 'remote': p.remote = true; break;
       case 'ghost': p.ghost = true; break;
       case 'throw': p.throw = true; break;
+      case 'line': p.line = true; break;
       case 'shield': p.shield = Math.min(SHIELD_CAP, p.shield + 1); break;
       case 'reverse': p.reverseUntil = tick + DUR; break;
       case 'slow': p.slowUntil = tick + DUR; break;
       case 'auto': p.autoUntil = tick + DUR; break;
+      case 'skull': applySkull(p, SKULL_KINDS[Math.floor(Math.random() * SKULL_KINDS.length)]); break;
     }
+  }
+  function applySkull(p, kind) {                    // skull : affliction aléatoire, contagieuse au contact
+    p.skullUntil = tick + DUR; p.skullKind = kind;
+    if (kind === 'reverse') p.reverseUntil = tick + DUR;
+    else if (kind === 'slow') p.slowUntil = tick + DUR;
+    else if (kind === 'auto') p.autoUntil = tick + DUR;
   }
 
   function update() {
@@ -274,6 +357,19 @@ export function createBomb(room) {
     blasts = blasts.filter(bl => bl.until > tick);
     // déplacements + pose auto (malus)
     for (const p of players) if (active(p)) { movePlayer(p); if (p.autoUntil > tick && tick % AUTO_EVERY === 0) placeBomb(p); }
+    for (const p of players) if (p.revenant) revMove(p);     // revanche : déplacement le long du bord
+    // téléporteurs : on warpe à l'ENTRÉE d'une case 3 (pas de ping-pong), si la sortie n'est pas un bloc tombé (mort subite)
+    for (const p of players) if (active(p)) {
+      const cur = idx(Math.floor(p.x / CELL), Math.floor(p.y / CELL));
+      if (cells[cur] === 3 && p.lastCell !== cur && warpOf[cur] !== undefined && cells[warpOf[cur]] !== 1) {
+        const dst = warpOf[cur]; p.x = ccx(dst % GW); p.y = ccx((dst / GW) | 0); p.lastCell = dst; fx.push({ type: 'warp', x: dst % GW, y: (dst / GW) | 0, seat: p.seat });
+      } else p.lastCell = cur;
+    }
+    // skull : contagion au contact (transmet l'affliction aux voisins non infectés)
+    for (const p of players) {
+      if (!active(p) || p.skullUntil <= tick) continue;
+      for (const q of players) if (q !== p && active(q) && q.skullUntil <= tick && (p.x - q.x) ** 2 + (p.y - q.y) ** 2 < (PR * 1.6) ** 2) applySkull(q, p.skullKind);
+    }
     for (const b of bombs) for (const s of [...b.pass]) { const q2 = players[s]; if (!q2 || !active(q2) || !overlapsCell(q2, b.gx, b.gy)) b.pass.delete(s); } // on ne reste "traversant" que tant que la hitbox touche encore la bombe (sinon on restait coincé à cheval dessus)
     // explosions : qui meurt ? (pas de tir allié)
     if (blasts.length) {
@@ -293,13 +389,13 @@ export function createBomb(room) {
       const gx = Math.floor(p.x / CELL), gy = Math.floor(p.y / CELL);
       for (let i = pickups.length - 1; i >= 0; i--) { const pk = pickups[i]; if (pk.gx === gx && pk.gy === gy) { applyPick(p, pk); pickups.splice(i, 1); fx.push({ type: 'pickup', x: gx, y: gy, kind: pk.type, bad: !!pk.bad, seat: p.seat }); } }
     }
-    if (nParts >= 2) { if (aliveTeams().size <= 1) endRound(); } else if (aliveN() === 0) endRound();
+    if (roundOver()) endRound();
   }
 
   function snapshot() {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount: 0, maxBots: 0, mode, nteams, sd, gen: genStyle, ff,
+      round, winner, fx, connected: connectedCount(), botCount: 0, maxBots: 0, mode, nteams, sd, gen: genStyle, ff, revenge,
       grid: cells.join(''),
       bombs: bombs.map(b => ({ x: b.gx, y: b.gy, f: b.fuse, p: b.power, r: !!b.remote })),
       blasts: blasts.map(bl => ({ x: bl.gx, y: bl.gy })),
@@ -309,8 +405,8 @@ export function createBomb(room) {
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive,
         x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10,
         bombs: p.maxBombs, power: p.power, speed: Math.round((p.speed - SPD_BASE) / SPD_STEP),
-        kick: p.kick, remote: p.remote, ghost: p.ghost, throw: p.throw, shield: p.shield,
-        rev: p.reverseUntil > tick, slow: p.slowUntil > tick, auto: p.autoUntil > tick, invuln: p.invulnUntil > tick,
+        kick: p.kick, remote: p.remote, ghost: p.ghost, throw: p.throw, line: p.line, shield: p.shield,
+        rev: p.reverseUntil > tick, slow: p.slowUntil > tick, auto: p.autoUntil > tick, skull: p.skullUntil > tick, invuln: p.invulnUntil > tick, rvn: p.revenant,
         kills: p.kills, score: p.score, place: p.place, elimTick: p.elimTick,
       })),
     };
@@ -332,8 +428,9 @@ export function createBomb(room) {
     const p = players[seat]; p.member = null; p.inputs = { up: false, down: false, left: false, right: false };
     if (gameState === 'play' || gameState === 'countdown' || gameState === 'paused') {
       if (p.alive) { p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++; }
+      p.revenant = false;                              // un partant ne reste pas revenant
       if (connectedCount() === 0) fullReset();
-      else if (gameState === 'play') { if (nParts >= 2 ? aliveTeams().size <= 1 : aliveN() === 0) endRound(); }
+      else if (gameState === 'play') { if (roundOver()) endRound(); }
     } else if (connectedCount() === 0) fullReset();
   }
   function onRename(member) { const s = seatOf(member); if (s >= 0) players[s].name = member.name || ''; }
@@ -341,7 +438,7 @@ export function createBomb(room) {
     if (!m || typeof m !== 'object') return;
     const seat = seatOf(member); const p = seat >= 0 ? players[seat] : null;
     if (m.t === 'input' && p) p.inputs = { up: !!m.up, down: !!m.down, left: !!m.left, right: !!m.right };
-    else if (m.t === 'bomb' && p) placeBomb(p);
+    else if (m.t === 'bomb' && p) { if (p.revenant) revBomb(p); else placeBomb(p); }
     else if (m.t === 'action' && p) action(p);
     else if (m.t === 'start') startGame();
     else if (m.t === 'pause') { if (gameState === 'play') gameState = 'paused'; else if (gameState === 'paused') gameState = 'play'; }
@@ -349,6 +446,7 @@ export function createBomb(room) {
     else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; } }
     else if (m.t === 'gen') { if (editable()) genStyle = (genStyle + 1) % 3; }
     else if (m.t === 'ff') { if (editable()) ff = !ff; }
+    else if (m.t === 'revenge') { if (editable()) revenge = !revenge; }
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

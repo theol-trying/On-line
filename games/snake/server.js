@@ -11,7 +11,11 @@ const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 },
 const key = (x, y) => y * GW + x;
 const INIT_LEN = 4;            // longueur de départ
 const GROW_PER_FOOD = 2;       // segments gagnés par pastille
-const FOOD_COUNT = 4;          // pastilles présentes en permanence
+const FOOD_COUNT = 4;          // pastilles présentes en permanence (mode Survie)
+const RUSH_FOOD = 12;          // food-rush : beaucoup plus de pastilles
+const RUSH_TARGET = 20;        // food-rush : premier à ce score gagne
+const GHOST_TICKS = 5 * TICK_HZ, SHRINK_AMT = 4, ROCK_COUNT = 16;
+const VARIANT_NAMES = ['Classique', 'Murs traversants', 'Obstacles'];   // 0 / 1 / 2
 const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
 function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
@@ -31,7 +35,7 @@ function corners(cells) {
 }
 
 export function createSnake(room) {
-  let players, food, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick;
+  let players, food, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, variant, rocks, rush;
   let seatByMid = {};
 
   function lbEntry(name) {
@@ -60,14 +64,14 @@ export function createSnake(room) {
   function makePlayers() {
     return Array.from({ length: MAX_SEATS }, (_, seat) => ({
       seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false,
-      dir: DIRS.right, pendingDir: null, cells: [], grow: 0, score: 0,
+      dir: DIRS.right, pendingDir: null, cells: [], grow: 0, score: 0, ghostUntil: 0,
       kills: 0, place: 0, elimTick: -1,
     }));
   }
   function fullReset() {
-    players = makePlayers(); food = [];
+    players = makePlayers(); food = []; rocks = new Set();
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = [];
-    mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; seatByMid = {};
+    mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; variant = 0; rush = false; seatByMid = {};
   }
 
   const connectedCount = () => players.filter(p => p.member).length;
@@ -80,16 +84,20 @@ export function createSnake(room) {
   const head = p => p.cells[p.cells.length - 1];
 
   const foodAt = (x, y) => food.some(f => f.x === x && f.y === y);
+  const foodTypeAt = (x, y) => { const f = food.find(f => f.x === x && f.y === y); return f ? (f.t || 'apple') : 'apple'; };
   function removeFood(x, y) { for (let i = food.length - 1; i >= 0; i--) if (food[i].x === x && food[i].y === y) food.splice(i, 1); }
   function occupiedBySnake(x, y) { for (const p of players) if (p.alive) for (const c of p.cells) if (c.x === x && c.y === y) return true; return false; }
+  const cellFree = (x, y) => !occupiedBySnake(x, y) && !foodAt(x, y) && !rocks.has(key(x, y));
+  function pickFoodType() { const r = Math.random(); return r < 0.08 ? 'gold' : r < 0.13 ? 'shrink' : r < 0.18 ? 'ghost' : 'apple'; }
   function replenishFood() {
+    const target = rush ? RUSH_FOOD : FOOD_COUNT;
     let guard = 0;
-    while (food.length < FOOD_COUNT && guard++ < FOOD_COUNT) {
+    while (food.length < target && guard++ < target) {
       let placed = false;
       for (let tries = 0; tries < 60; tries++) {
         const x = Math.floor(Math.random() * GW), y = Math.floor(Math.random() * GH);
-        if (occupiedBySnake(x, y) || foodAt(x, y)) continue;
-        food.push({ x, y }); placed = true; break;
+        if (!cellFree(x, y)) continue;
+        food.push({ x, y, t: pickFoodType() }); placed = true; break;
       }
       if (!placed) break;
     }
@@ -108,8 +116,19 @@ export function createSnake(room) {
       const dir = Math.abs(dx) >= Math.abs(dy) ? { x: Math.sign(dx) || 1, y: 0 } : { x: 0, y: Math.sign(dy) || 1 };
       p.dir = dir; p.pendingDir = null; p.cells = [];
       for (let k = 0; k < INIT_LEN; k++) p.cells.push({ x: hx - dir.x * (INIT_LEN - 1 - k), y: hy - dir.y * (INIT_LEN - 1 - k) });
-      p.alive = true; p.grow = 0; p.score = 0; p.kills = 0; p.place = 0; p.elimTick = -1;
+      p.alive = true; p.grow = 0; p.score = 0; p.kills = 0; p.place = 0; p.elimTick = -1; p.ghostUntil = 0;
     });
+  }
+  function placeRocks() {                            // variante Obstacles : rochers loin des têtes
+    rocks = new Set();
+    const heads = players.filter(p => p.playing).map(p => head(p));
+    let placed = 0, guard = 0;
+    while (placed < ROCK_COUNT && guard++ < 400) {
+      const x = 1 + Math.floor(Math.random() * (GW - 2)), y = 1 + Math.floor(Math.random() * (GH - 2)), k = key(x, y);
+      if (rocks.has(k) || occupiedBySnake(x, y)) continue;
+      let near = false; for (const h of heads) if (Math.abs(h.x - x) + Math.abs(h.y - y) < 4) { near = true; break; }
+      if (!near) { rocks.add(k); placed++; }
+    }
   }
 
   function startGame() {
@@ -122,19 +141,21 @@ export function createSnake(room) {
     nteams = numTeamsFor(mode, N);
     parts.forEach((p, i) => { p.playing = true; p.team = i % nteams; });
     nParts = N; deaths = 0; endTick = 0; winner = null; fx = [];
-    spawnPlayers(parts); replenishFood();
+    spawnPlayers(parts); rocks = new Set(); if (variant === 2) placeRocks(); replenishFood();
     round++; tick = 0; countdownUntil = COUNTDOWN_TICKS; gameState = 'countdown';
   }
-  function endRound() {
+  const bestScoreTeam = () => { let champ = null; for (const p of players) if (p.playing) { if (!champ || p.score > champ.score) champ = p; } return champ ? champ.team : -1; };
+  function endRound(forced) {
     gameState = 'over'; endTick = tick;
-    const s = aliveTeams();
-    winner = s.size === 1 ? [...s][0] : -1;
-    players.forEach(p => { if (p.playing && p.alive) p.place = 1; });
+    if (forced != null) winner = forced;
+    else { const s = aliveTeams(); winner = s.size === 1 ? [...s][0] : -1; }
+    if (rush) { const order = players.filter(p => p.playing).sort((a, b) => ((b.alive ? 1 : 0) - (a.alive ? 1 : 0)) || (b.score - a.score)); order.forEach((p, i) => p.place = i + 1); } // food-rush : classement au score
+    else players.forEach(p => { if (p.playing && p.alive) p.place = 1; });
     recordRound();
   }
   function backToLobby() {            // abandon : retour au lobby en pleine partie
     if (gameState !== 'play' && gameState !== 'countdown' && gameState !== 'paused') return;
-    gameState = 'lobby'; winner = null; fx = []; food = [];
+    gameState = 'lobby'; winner = null; fx = []; food = []; rocks = new Set();
     for (const p of players) { p.playing = false; p.alive = false; p.cells = []; p.pendingDir = null; }
   }
 
@@ -142,6 +163,8 @@ export function createSnake(room) {
     p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++;
     if (killer >= 0 && players[killer] && killer !== p.seat) players[killer].kills++;
     fx.push({ type: 'crash', seat: p.seat, x, y, by: killer });
+    let dropped = 0;                                  // le corps devient de la nourriture (slither-like), 1 cellule sur 2, plafonné
+    for (let i = p.cells.length - 1; i >= 0 && dropped < 15; i -= 2) { const c = p.cells[i]; if (cellFree(c.x, c.y)) { food.push({ x: c.x, y: c.y, t: 'apple' }); dropped++; } }
   }
 
   function update() {
@@ -154,7 +177,7 @@ export function createSnake(room) {
     for (const p of alive) { const pd = p.pendingDir; if (pd && !(pd.x === -p.dir.x && pd.y === -p.dir.y)) p.dir = pd; p.pendingDir = null; }
     // têtes suivantes + croissance prévue (mange une pastille ou reste à digérer)
     const nh = new Map(), willGrow = new Map();
-    for (const p of alive) { const h = head(p), n = { x: h.x + p.dir.x, y: h.y + p.dir.y }; nh.set(p, n); willGrow.set(p, p.grow > 0 || foodAt(n.x, n.y)); }
+    for (const p of alive) { const h = head(p); let nx = h.x + p.dir.x, ny = h.y + p.dir.y; if (variant === 1) { nx = (nx + GW) % GW; ny = (ny + GH) % GH; } const n = { x: nx, y: ny }; nh.set(p, n); willGrow.set(p, p.grow > 0 || foodAt(n.x, n.y)); }
     // cellules solides APRÈS mouvement (corps moins la queue libérée si pas de croissance) + propriétaire
     const solid = new Map();
     for (const p of alive) { const body = p.cells, start = willGrow.get(p) ? 0 : 1; for (let i = start; i < body.length; i++) solid.set(key(body[i].x, body[i].y), p.seat); }
@@ -166,9 +189,10 @@ export function createSnake(room) {
     for (const p of alive) {
       if (doomed.has(p)) continue;
       const n = nh.get(p);
-      if (n.x < 0 || n.y < 0 || n.x >= GW || n.y >= GH) { doomed.add(p); killerOf.set(p, -1); continue; } // mur
+      if (variant !== 1 && (n.x < 0 || n.y < 0 || n.x >= GW || n.y >= GH)) { doomed.add(p); killerOf.set(p, -1); continue; } // mur (sauf murs traversants)
+      if (rocks.has(key(n.x, n.y))) { doomed.add(p); killerOf.set(p, -1); continue; }                // rocher (variante Obstacles)
       const o = solid.get(key(n.x, n.y));
-      if (o !== undefined) { doomed.add(p); killerOf.set(p, o !== p.seat ? o : -1); }                // serpent (soi ou autre)
+      if (o !== undefined && !(p.ghostUntil > tick)) { doomed.add(p); killerOf.set(p, o !== p.seat ? o : -1); } // serpent (sauf fantôme)
     }
     for (const p of doomed) { const n = nh.get(p); killSnake(p, killerOf.has(p) ? killerOf.get(p) : -1, n.x, n.y); }
     // déplacement des survivants
@@ -176,23 +200,35 @@ export function createSnake(room) {
       if (doomed.has(p)) continue;
       const n = nh.get(p);
       p.cells.push(n);
-      if (foodAt(n.x, n.y)) { removeFood(n.x, n.y); p.grow += GROW_PER_FOOD; p.score++; fx.push({ type: 'eat', x: n.x, y: n.y, seat: p.seat }); }
+      if (foodAt(n.x, n.y)) {
+        const ft = foodTypeAt(n.x, n.y); removeFood(n.x, n.y);
+        if (ft === 'gold') { p.grow += GROW_PER_FOOD; p.score += 3; }                                  // pomme dorée : gros score
+        else if (ft === 'shrink') { p.score += 1; const cut = Math.max(0, Math.min(SHRINK_AMT, p.cells.length - 3)); for (let s = 0; s < cut; s++) p.cells.shift(); } // champignon : raccourcit
+        else if (ft === 'ghost') { p.grow += GROW_PER_FOOD; p.score += 1; p.ghostUntil = tick + GHOST_TICKS; } // fantôme : traverse les corps un moment
+        else { p.grow += GROW_PER_FOOD; p.score++; }
+        fx.push({ type: 'eat', x: n.x, y: n.y, seat: p.seat, ft });
+      }
       if (p.grow > 0) p.grow--; else p.cells.shift();
     }
     replenishFood();
-    if (nParts >= 2) { if (aliveTeams().size <= 1) endRound(); } else if (aliveCount() === 0) endRound();
+    if (rush) {                                       // food-rush : premier à RUSH_TARGET points gagne tout de suite
+      let champ = null; for (const p of players) if (p.playing && p.score >= RUSH_TARGET) { if (!champ || p.score > champ.score) champ = p; }
+      if (champ) { endRound(champ.team); return; }
+    }
+    if (nParts >= 2) { if (aliveTeams().size <= 1) endRound(rush ? bestScoreTeam() : undefined); }
+    else if (aliveCount() === 0) endRound(rush ? bestScoreTeam() : undefined);
   }
 
   function snapshot() {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount: 0, maxBots: 0, mode, nteams,
-      food: food.map(f => ({ x: f.x, y: f.y })),
+      round, winner, fx, connected: connectedCount(), botCount: 0, maxBots: 0, mode, nteams, variant, rush, rushTarget: RUSH_TARGET, rocks: [...rocks],
+      food: food.map(f => ({ x: f.x, y: f.y, t: f.t || 'apple' })),
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, solo: nParts < 2 } : null,
       players: players.map(p => ({
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive,
         head: p.cells.length ? { x: head(p).x, y: head(p).y } : { x: 0, y: 0 },
-        path: corners(p.cells), len: p.cells.length, score: p.score,
+        path: corners(p.cells), len: p.cells.length, score: p.score, ghost: p.ghostUntil > tick,
         kills: p.kills, place: p.place, elimTick: p.elimTick,
       })),
     };
@@ -227,6 +263,8 @@ export function createSnake(room) {
     else if (m.t === 'pause') { if (gameState === 'play') gameState = 'paused'; else if (gameState === 'paused') gameState = 'play'; }
     else if (m.t === 'abort') backToLobby();
     else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; } }
+    else if (m.t === 'variant') { if (editable()) variant = (variant + 1) % 3; }
+    else if (m.t === 'rush') { if (editable()) rush = !rush; }
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

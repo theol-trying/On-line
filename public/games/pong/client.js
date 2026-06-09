@@ -4,9 +4,11 @@
 import { W, H, BALL_R, PAD_W, PAD_OFF, PU_R } from './shared.js';
 
 const SHAPE = { 2: 'Face à face', 3: 'Triangle', 4: 'Carré', 5: 'Pentagone', 6: 'Hexagone' };
-const PU_GLYPH = { multi: '+1', grow: 'XL', shield: '⛉', ghost: '◌', invert: '⇄', shrinkT: '▭', slow: '≈', mini: '▽', flip: '✕', speed: '»' };
-const PU_COL = { multi: '#fff', grow: '#ffd76b', shield: '#7fd1ff', ghost: '#cbb3ff', invert: '#ff9be0', shrinkT: '#ffb36b', slow: '#9fe6ff', mini: '#ff5a5a', flip: '#ff5a5a', speed: '#ff5a5a' };
-const PU_NAME = { multi: 'Multi-balle', grow: 'Raquette XL', shield: 'Bouclier', ghost: 'Balle fantôme', invert: 'Inversion (adversaire)', shrinkT: 'Raquette réduite (adversaire)', slow: 'Ralenti', mini: 'Malus : ta raquette réduit', flip: 'Malus : tes contrôles inversés', speed: 'Malus : balle accélérée' };
+const PU_GLYPH = { multi: '+1', grow: 'XL', shield: '⛉', ghost: '◌', invert: '⇄', shrinkT: '▭', slow: '≈', mini: '▽', flip: '✕', speed: '»', blocker: '🧱', magnet: '🧲', invis: '∅' };
+const PU_COL = { multi: '#fff', grow: '#ffd76b', shield: '#7fd1ff', ghost: '#cbb3ff', invert: '#ff9be0', shrinkT: '#ffb36b', slow: '#9fe6ff', mini: '#ff5a5a', flip: '#ff5a5a', speed: '#ff5a5a', blocker: '#c9a06a', magnet: '#ff8e6e', invis: '#ff5a5a' };
+const PU_NAME = { multi: 'Multi-balle', grow: 'Raquette XL', shield: 'Bouclier', ghost: 'Balle fantôme', invert: 'Inversion (adversaire)', shrinkT: 'Raquette réduite (adversaire)', slow: 'Ralenti', mini: 'Malus : ta raquette réduit', flip: 'Malus : tes contrôles inversés', speed: 'Malus : balle accélérée', blocker: 'Mur-bloqueur', magnet: 'Aimant', invis: 'Malus : balle invisible' };
+const BUFF_ICON = { grow: 'XL', shield: '⛉', invert: '⇄', shrink: '▭', magnet: '🧲' };           // effets affichés sur les cartes (barres dégressives)
+const BUFF_COL = { grow: '#ffd76b', shield: '#7fd1ff', invert: '#ff9be0', shrink: '#ffb36b', magnet: '#ff8e6e' };
 const TEAM_LETTER = ['A', 'B', 'C'];
 const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3' };
 const PRESET_LABEL = { classique: 'Classique', rapide: 'Rapide', chaos: 'Chaos', custom: 'Personnalisé' };
@@ -15,7 +17,7 @@ const SPEED_LABEL = { lente: 'Lente', normale: 'Normale', rapide: 'Rapide' };
 const WINMODE_LABEL = { survivor: 'Dernier survivant', rounds: 'Manches', kills: 'Éliminations' };
 const SUDDEN_LABEL = { off: 'Off', shrink: 'Terrain rétrécit', accel: 'Balle accélère' };
 const SERVE_LABEL = { random: 'Aléatoire', loser: 'Dernier perdant' };
-const BOTDIFF_LABEL = { easy: 'Facile', normal: 'Normal', hard: 'Difficile' };
+const BOTDIFF_LABEL = { easy: 'Facile', normal: 'Normal', hard: 'Difficile', insane: 'Insane' };
 const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9'] };
 const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E69F00', '#009E73'] };
 const THEMES = {
@@ -40,7 +42,7 @@ export default (function () {
   // DOM refs
   let hud, cards, startBtn, pauseBtn, botsBtn, modeBtn, presetBtn, pauseFloat;
   let optBtn, optionsPanel, optLives, optSpeed, optPu, optAccel, optWin, optSudden, optServe, optHandi;
-  let optTarRow, optTar, optTarLbl, optNeg, optBot, lbBtn, lbPanel, voteBtn, histPreset, histMode;
+  let optTarRow, optTar, optTarLbl, optNeg, optBot, optBump, lbBtn, lbPanel, voteBtn, histPreset, histMode;
 
   const $ = id => root.querySelector('#' + id) || document.getElementById(id);
   function colSeat(s) { if (s < 0 || !snap) return '#ffffff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; }
@@ -73,7 +75,8 @@ export default (function () {
       cards[i].style.color = col;
       const l = Math.max(0, p.lives);
       const lvEl = document.getElementById('lv' + i); lvEl.style.color = col;
-      lvEl.textContent = '●'.repeat(l) + '○'.repeat(Math.max(0, maxLives - l));
+      const buffs = (p.buffs || []).map(([k, fr]) => { const c = BUFF_COL[k] || '#fff', pct = Math.max(0, Math.min(100, Math.round(fr * 100))); return `<span class="buff" style="background:linear-gradient(90deg,${c} ${pct}%,rgba(255,255,255,.12) ${pct}%);border-color:${c}66">${BUFF_ICON[k] || '?'}</span>`; }).join('');
+      lvEl.innerHTML = '●'.repeat(l) + '○'.repeat(Math.max(0, maxLives - l)) + (buffs ? ' ' + buffs : '');
       const tags = [];
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
@@ -215,12 +218,13 @@ export default (function () {
       optServe.textContent = SERVE_LABEL[m.opts.serve] || m.opts.serve;
       optHandi.checked = m.opts.handicap;
       optNeg.checked = m.opts.negatives;
+      if (optBump) optBump.checked = !!m.opts.bumpers;
       optBot.textContent = BOTDIFF_LABEL[m.opts.botDiff] || m.opts.botDiff;
       optSudden.classList.toggle('on', m.opts.sudden !== 'off');
       const showTar = m.opts.winMode !== 'survivor';
       optTarRow.style.display = showTar ? '' : 'none';
       if (showTar) { optTarLbl.textContent = m.opts.winMode === 'kills' ? 'Élim. cible' : 'Manches à gagner'; optTar.textContent = m.opts.winMode === 'kills' ? m.opts.killsTarget : m.opts.roundsTarget; }
-      [optLives, optSpeed, optPu, optAccel, optWin, optSudden, optServe, optHandi, optNeg, optBot,
+      [optLives, optSpeed, optPu, optAccel, optWin, optSudden, optServe, optHandi, optNeg, optBot, optBump,
        $('optLivesMinus'), $('optLivesPlus'), $('optTarMinus'), $('optTarPlus')].forEach(el => { if (el) el.disabled = !idle; });
       optBtn.classList.toggle('on', m.preset === 'custom');
     }
@@ -268,6 +272,7 @@ export default (function () {
     else if (kind === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.30, 'triangle', 0.06, 0.24); }
     else if (kind === 'bad') { tone(330, 0.12, 'sawtooth', 0.05); tone(220, 0.20, 'sawtooth', 0.05, 0.10); }
     else if (kind === 'ghost') tone(880, 0.10, 'sine', 0.04);
+    else if (kind === 'bump') tone(300, 0.05, 'square', 0.04);
   }
   function playFx(f) {
     sound(f.type === 'powerup' ? (f.bad ? 'bad' : 'powerup') : f.type);
@@ -278,6 +283,7 @@ export default (function () {
     flashes.push({ x: f.x, y: f.y, born: now, color: col, r: f.type === 'death' ? 34 : 18 });
     ballPopUntil = now + 90;
     if (f.type === 'hit') edgeFlash[f.side] = now;   // flash d'impact sur la raquette à chaque renvoi
+    if (f.type === 'powerup') for (let k = 0; k < 10; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.5; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 200, color: col }); }
     if (f.type === 'death') {
       shakeMag = Math.max(shakeMag, 7);
       edgeFlash[f.side] = now;
@@ -322,9 +328,9 @@ export default (function () {
     let balls;
     if (sa.balls.length === sb.balls.length)
       balls = sa.balls.map((ba, i) => { const bb = sb.balls[i];
-        if (Math.hypot(bb.x - ba.x, bb.y - ba.y) > 60) return { x: bb.x, y: bb.y, o: bb.o, gh: bb.gh };
-        return { x: ba.x + (bb.x - ba.x) * al, y: ba.y + (bb.y - ba.y) * al, o: bb.o, gh: bb.gh }; });
-    else balls = sb.balls.map(b => ({ x: b.x, y: b.y, o: b.o, gh: b.gh }));
+        if (Math.hypot(bb.x - ba.x, bb.y - ba.y) > 60) return { x: bb.x, y: bb.y, o: bb.o, gh: bb.gh, iv: bb.iv };
+        return { x: ba.x + (bb.x - ba.x) * al, y: ba.y + (bb.y - ba.y) * al, o: bb.o, gh: bb.gh, iv: bb.iv }; });
+    else balls = sb.balls.map(b => ({ x: b.x, y: b.y, o: b.o, gh: b.gh, iv: b.iv }));
     const pos = {};
     sb.players.forEach((pb, i) => { const pa = sa.players[i]; pos[i] = (pa && pa.edge === pb.edge) ? pa.pos + (pb.pos - pa.pos) * al : pb.pos; });
     return { balls, pos };
@@ -364,6 +370,11 @@ export default (function () {
           ctx.save(); ctx.globalAlpha = 1 - (now - ef) / 240;
           ctx.shadowColor = colSeat(e.owner); ctx.shadowBlur = 18; ctx.strokeStyle = '#fff'; ctx.lineWidth = 4;
           ctx.beginPath(); ctx.moveTo(e.ax, e.ay); ctx.lineTo(e.bx, e.by); ctx.stroke(); ctx.restore();
+        }
+        if (e.owner >= 0 && !A.reduceFx && snap.balls) {            // lueur du bord quand une balle le frôle
+          let near = 0;
+          for (const b of snap.balls) { const d = (b.x - e.ax) * e.nx + (b.y - e.ay) * e.ny, s = (b.x - e.ax) * e.tx + (b.y - e.ay) * e.ty; if (d > 0 && d < 55 && s > -12 && s < e.len + 12) near = Math.max(near, 1 - d / 55); }
+          if (near > 0) { ctx.save(); ctx.globalAlpha = near * 0.8; ctx.shadowColor = colSeat(e.owner); ctx.shadowBlur = 16 * near; ctx.strokeStyle = colSeat(e.owner); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(e.ax, e.ay); ctx.lineTo(e.bx, e.by); ctx.stroke(); ctx.restore(); }
         }
       });
       const me = mySeat >= 0 ? snap.players[mySeat] : null;
@@ -435,11 +446,18 @@ export default (function () {
         }
         ctx.restore();
       } else particles.length = 0;
+      (snap.bumpers || []).forEach(bm => {                 // bumpers (orbiteurs) + mur-bloqueur temporaire
+        ctx.save(); ctx.shadowColor = '#a9b4d6'; ctx.shadowBlur = 14 * FX;
+        ctx.fillStyle = bm.t ? '#caa06a' : '#8893b8'; ctx.beginPath(); ctx.arc(bm.x, bm.y, bm.r, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0; ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.beginPath(); ctx.arc(bm.x - bm.r * 0.25, bm.y - bm.r * 0.25, bm.r * 0.4, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      });
       if (snap.gs === 'play' || snap.gs === 'paused' || snap.gs === 'countdown') {
         const pop = (!A.reduceFx && now < ballPopUntil) ? 0.45 * ((ballPopUntil - now) / 90) : 0;
         const playing = snap.gs === 'play';
         if (trails.length !== vballs.length) trails = vballs.map(() => []);
         vballs.forEach((b, i) => {
+          if (b.iv) { if (!A.reduceFx) { ctx.save(); ctx.globalAlpha = 0.12; ctx.fillStyle = TH.ball; ctx.beginPath(); ctx.arc(b.x, b.y, BALL_R, 0, Math.PI * 2); ctx.fill(); ctx.restore(); } return; } // balle invisible : à peine perceptible
           const tr = trails[i] || (trails[i] = []), last = tr[tr.length - 1];
           if (last && Math.hypot(b.x - last.x, b.y - last.y) > 60) tr.length = 0;
           tr.push({ x: b.x, y: b.y }); if (tr.length > 12) tr.shift();
@@ -470,6 +488,13 @@ export default (function () {
       ctx.fillText(c > 0 ? c : 'GO', 0, 0); ctx.restore();
       ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '13px system-ui,sans-serif';
       ctx.fillText('Prépare-toi…', W / 2, H / 2 + 64);
+      const sb = snap.balls && snap.balls[0];                        // flèche : sens du service
+      if (sb && (sb.vx || sb.vy)) {
+        const mag = Math.hypot(sb.vx, sb.vy), ux = sb.vx / mag, uy = sb.vy / mag, len = 48, hx = sb.x + ux * len, hy = sb.y + uy * len, ang = Math.atan2(uy, ux);
+        ctx.save(); ctx.globalAlpha = 0.75 + 0.25 * Math.sin(now / 150); ctx.strokeStyle = '#fff'; ctx.fillStyle = '#fff'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(sb.x, sb.y); ctx.lineTo(hx, hy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx - Math.cos(ang - 0.4) * 11, hy - Math.sin(ang - 0.4) * 11); ctx.lineTo(hx - Math.cos(ang + 0.4) * 11, hy - Math.sin(ang + 0.4) * 11); ctx.closePath(); ctx.fill(); ctx.restore();
+      }
     }
     if (snap && (snap.gs === 'lobby' || snap.gs === 'paused')) {
       ctx.fillStyle = 'rgba(4,5,12,0.66)'; ctx.fillRect(0, 0, W, H);
@@ -543,7 +568,7 @@ export default (function () {
     optBtn = $('optBtn'); optionsPanel = $('options');
     optLives = $('optLives'); optSpeed = $('optSpeed'); optPu = $('optPu'); optAccel = $('optAccel');
     optWin = $('optWin'); optSudden = $('optSudden'); optServe = $('optServe'); optHandi = $('optHandi');
-    optTarRow = $('optTarRow'); optTar = $('optTar'); optTarLbl = $('optTarLbl'); optNeg = $('optNeg'); optBot = $('optBot');
+    optTarRow = $('optTarRow'); optTar = $('optTar'); optTarLbl = $('optTarLbl'); optNeg = $('optNeg'); optBot = $('optBot'); optBump = $('optBump');
     lbBtn = $('lbBtn'); lbPanel = $('lbpanel'); voteBtn = $('voteBtn'); histPreset = $('histPreset'); histMode = $('histMode');
 
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
@@ -567,6 +592,7 @@ export default (function () {
     $('optTarMinus').onclick = () => send({ t: 'opt', op: curWinMode === 'kills' ? 'ktar' : 'rtar', d: -1 });
     $('optTarPlus').onclick = () => send({ t: 'opt', op: curWinMode === 'kills' ? 'ktar' : 'rtar', d: 1 });
     optNeg.onchange = () => send({ t: 'opt', op: 'negatives' });
+    if (optBump) optBump.onchange = () => send({ t: 'opt', op: 'bumpers' });
     optBot.onclick = () => send({ t: 'opt', op: 'botdiff' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); renderHist(); };
     $('lbReset').onclick = () => { if (confirm('Réinitialiser le classement ?')) send({ t: 'lbreset' }); };

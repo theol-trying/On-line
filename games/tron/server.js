@@ -10,8 +10,9 @@ const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 },
 const key = (x, y) => y * GW + x;
 const WALL = -2;                          // cellule "mur" (rétrécissement)
 // bonus
-const PU_TYPES = ['speed', 'ghost', 'cut'];
+const PU_TYPES = ['speed', 'ghost', 'cut', 'blink', 'breaker', 'invert'];
 const PU_EVERY = 3 * TICK_HZ, MAX_PU = 4, SPEED_TICKS = 4 * TICK_HZ, GHOST_TICKS = 2 * TICK_HZ;
+const INVERT_TICKS = 4 * TICK_HZ, BLINK_DIST = 4;   // invert = contrôles adverses inversés ; blink = téléport court
 // boost à la demande
 const BOOST_MAX = 100, BOOST_REGEN = 0.7, BOOST_COST = 2.6;
 // rétrécissement (mort subite)
@@ -66,6 +67,7 @@ export function createTron(room) {
     return Array.from({ length: MAX_SEATS }, (_, seat) => ({
       seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false,
       dir: DIRS.right, pendingDir: null, cells: [], boost: BOOST_MAX, boostHeld: false, speedUntil: 0, ghostUntil: 0,
+      invertUntil: 0, breaker: false,
       kills: 0, place: 0, elimTick: -1, score: 0,
     }));
   }
@@ -94,7 +96,7 @@ export function createTron(room) {
       const tx = -Math.sin(ang), ty = Math.cos(ang);
       const dir = Math.abs(tx) >= Math.abs(ty) ? { x: Math.sign(tx) || 1, y: 0 } : { x: 0, y: Math.sign(ty) || 1 };
       p.dir = dir; p.pendingDir = null; p.cells = [{ x, y }];
-      p.alive = true; p.boost = BOOST_MAX; p.boostHeld = false; p.speedUntil = 0; p.ghostUntil = 0;
+      p.alive = true; p.boost = BOOST_MAX; p.boostHeld = false; p.speedUntil = 0; p.ghostUntil = 0; p.invertUntil = 0; p.breaker = false;
       p.kills = 0; p.place = 0; p.elimTick = -1;
       occupied.set(key(x, y), p.seat);
     });
@@ -138,7 +140,11 @@ export function createTron(room) {
     const o = occupied.get(k);
     if (o !== undefined) {
       const ghost = p.ghostUntil > tick;
-      if (!(o >= 0 && ghost)) { killCycle(p, (o >= 0 && o !== p.seat) ? o : -1, nx, ny); return false; } // mur/-2 ou pas de fantôme => crash
+      const ally = o >= 0 && o !== p.seat && nteams > 0 && nteams < nParts && players[o] && players[o].team === p.team; // traînée d'un coéquipier : traversable
+      if (!(o >= 0 && ghost) && !ally) {
+        if (o >= 0 && p.breaker) { p.breaker = false; occupied.delete(k); fx.push({ type: 'break', x: nx, y: ny, seat: p.seat }); } // casse-mur : traverse/détruit une traînée une fois (pas les murs de rétrécissement)
+        else { killCycle(p, (o >= 0 && o !== p.seat) ? o : -1, nx, ny); return false; } // mur/-2 ou pas de fantôme/allié => crash
+      }
     }
     occupied.set(k, p.seat);
     p.cells.push({ x: nx, y: ny });
@@ -152,6 +158,9 @@ export function createTron(room) {
         if (pk.type === 'speed') p.speedUntil = tick + SPEED_TICKS;
         else if (pk.type === 'ghost') p.ghostUntil = tick + GHOST_TICKS;
         else if (pk.type === 'cut') { for (const c of p.cells) { const k = key(c.x, c.y); if (occupied.get(k) === p.seat) occupied.delete(k); } p.cells = [h]; occupied.set(key(h.x, h.y), p.seat); }
+        else if (pk.type === 'blink') { for (let d = BLINK_DIST; d >= 1; d--) { const tx = h.x + p.dir.x * d, ty = h.y + p.dir.y * d; if (tx < 0 || ty < 0 || tx >= GW || ty >= GH) continue; if (occupied.get(key(tx, ty)) === undefined) { occupied.set(key(tx, ty), p.seat); p.cells.push({ x: tx, y: ty }); break; } } } // téléport court vers la case libre la plus avancée
+        else if (pk.type === 'breaker') p.breaker = true;
+        else if (pk.type === 'invert') { for (const q of players) if (q !== p && q.alive && (nteams >= nParts || q.team !== p.team)) q.invertUntil = tick + INVERT_TICKS; } // inverse les contrôles des adversaires
         pickups.splice(i, 1);
         fx.push({ type: 'pickup', x: h.x, y: h.y, kind: pk.type, seat: p.seat });
       }
@@ -183,7 +192,7 @@ export function createTron(room) {
     tick++;
     if (tick >= SHRINK_START && (tick - SHRINK_START) % SHRINK_EVERY === 0) { shrinkLevel++; applyShrink(); }
     const alive = players.filter(p => p.alive);
-    for (const p of alive) { const pd = p.pendingDir; if (pd && !(pd.x === -p.dir.x && pd.y === -p.dir.y)) p.dir = pd; p.pendingDir = null; }
+    for (const p of alive) { let pd = p.pendingDir; if (pd && p.invertUntil > tick) pd = { x: -pd.x, y: -pd.y }; if (pd && !(pd.x === -p.dir.x && pd.y === -p.dir.y)) p.dir = pd; p.pendingDir = null; }
     // résolution SIMULTANÉE des chocs frontaux (même case) et des croisements (échange de cases), avant tout déplacement
     const fn = new Map();
     for (const p of alive) fn.set(p, { x: head(p).x + p.dir.x, y: head(p).y + p.dir.y });
@@ -216,7 +225,7 @@ export function createTron(room) {
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive,
         head: p.cells.length ? { x: head(p).x, y: head(p).y } : { x: 0, y: 0 },
         path: corners(p.cells),
-        boost: Math.round(p.boost), ghost: p.ghostUntil > tick, speed: p.speedUntil > tick,
+        boost: Math.round(p.boost), ghost: p.ghostUntil > tick, speed: p.speedUntil > tick, boosting: p.boostHeld && p.boost > 0, inv: p.invertUntil > tick, brk: p.breaker,
         kills: p.kills, place: p.place, elimTick: p.elimTick,
       })),
     };

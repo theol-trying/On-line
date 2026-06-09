@@ -17,7 +17,7 @@ let game = null;                              // instance du jeu actif
 let members = [];                             // membres connectés { id, name, conn, token, role }
 const identities = new Map();                 // token -> { id, name }  (reprise après coupure)
 let idSeq = 1;
-let loop = null, curHz = 0, idleTick = 0;
+let loop = null, curHz = 0, idleTick = 0, wasIdle = true;
 const RECONNECT_GRACE = 12000;                 // délai pour reprendre son siège après une coupure (F5) en pleine partie
 const pendingLeaves = new Map();               // token -> { member, timer } : joueurs déconnectés dont le siège est gardé
 const newToken = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -30,7 +30,9 @@ const room = {
 };
 
 function ensureGame() { if (!game) game = GAMES[activeId].create(room); }
-function roomMsg() { return { t: 'room', active: activeId, players: members.map(m => ({ id: m.id, name: m.name, role: m.role })) }; }
+function roomMsg() { return { t: 'room', active: activeId, host: hostId(), players: members.map(m => ({ id: m.id, name: m.name, role: m.role, ready: !!m.ready })) }; }
+function hostId() { const p = members.find(m => m.role === 'player'); return (p || members[0] || {}).id || null; }   // hôte = 1er joueur connecté
+function allReady() { const ps = members.filter(m => m.role === 'player'); return ps.length >= 1 && ps.every(m => m.ready); } // bots = non-membres → exclus → jamais bloquants
 function broadcastRoom() { room.broadcast(roomMsg()); }
 function setLoop() { const hz = GAMES[activeId].meta.tickHz || 60; if (hz === curHz && loop) return; if (loop) clearInterval(loop); curHz = hz; loop = setInterval(step, 1000 / hz); }
 
@@ -53,6 +55,9 @@ function step() {
   if (members.length === 0) return;                 // personne connecté : rien à simuler/diffuser
   ensureGame();
   const snap = game.tick();
+  const idleNow = game.isIdle();
+  if (wasIdle && !idleNow) { let ch = false; for (const m of members) if (m.ready) { m.ready = false; ch = true; } if (ch) broadcastRoom(); } // manche lancée : on réarme les « Prêt »
+  wasIdle = idleNow;
   if (snap) {
     // plein régime en jeu ; en lobby/pause/fin on diffuse ~4×/s (économie CPU/réseau)
     const live = snap.gs === 'play' || snap.gs === 'countdown';
@@ -76,7 +81,17 @@ function wire(member) {                          // (re)branche les handlers d'u
     } else if (m.t === 'pick') {
       pick(m.id);
     } else if (m.t === 'g') {
-      ensureGame(); game.onMessage(member, m.m);
+      ensureGame();
+      if (m.m && m.m.t === 'start' && game.isIdle() && !allReady()) { room.send(member, { t: 'notready' }); return; } // gate « Prêt » : démarrage seulement si tous les joueurs sont prêts
+      game.onMessage(member, m.m);
+    } else if (m.t === 'ready') {
+      member.ready = !!m.v; broadcastRoom();
+    } else if (m.t === 'forcestart') {
+      if (member.id === hostId()) { ensureGame(); if (game.isIdle()) game.onMessage(member, { t: 'start' }); } // l'hôte force le départ malgré des joueurs pas prêts
+    } else if (m.t === 'emote') {
+      if (typeof m.e === 'string' && Date.now() - (member.lastEmote || 0) > 700) { member.lastEmote = Date.now(); room.broadcast({ t: 'emote', id: member.id, name: member.name, e: m.e.slice(0, 8) }); } // émote diffusée à tous (anti-spam 700 ms)
+    } else if (m.t === 'png') {
+      if (member.conn.readyState === 1) member.conn.send(JSON.stringify({ t: 'png', ts: m.ts })); // echo pour mesurer le ping
     }
   });
   member.conn.onClose(() => {
@@ -97,7 +112,7 @@ function onConnection(conn, token) {
   const pend = token && pendingLeaves.get(token);
   if (pend) {
     clearTimeout(pend.timer); pendingLeaves.delete(token);
-    const member = pend.member; member.conn = conn; members.push(member);
+    const member = pend.member; member.conn = conn; member.ready = false; members.push(member);
     ensureGame();
     conn.send(JSON.stringify({ t: 'hello', you: { id: member.id, name: member.name, token: member.token }, games: META, active: activeId }));
     joinGame(member);                           // onJoin idempotent -> renvoie le même siège (welcome)
@@ -109,7 +124,7 @@ function onConnection(conn, token) {
   let ident = token && identities.get(token);
   let tok = token;
   if (!ident) { tok = newToken(); ident = { id: 'm' + (idSeq++), name: '' }; identities.set(tok, ident); }
-  const member = { id: ident.id, name: ident.name, conn, token: tok, role: null, ident };
+  const member = { id: ident.id, name: ident.name, conn, token: tok, role: null, ident, ready: false };
   members.push(member);
   ensureGame();
   conn.send(JSON.stringify({ t: 'hello', you: { id: member.id, name: member.name, token: tok }, games: META, active: activeId }));

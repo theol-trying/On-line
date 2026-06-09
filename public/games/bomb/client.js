@@ -6,7 +6,7 @@ const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E
 const TEAM_LETTER = ['A', 'B', 'C'];
 const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3' };
 const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
-const PICK_ICON = { bomb: '💣', flame: '🔥', speed: '👟', kick: '🦵', remote: '📡', ghost: '👻', throw: '🧤', shield: '🛡', reverse: '🔀', slow: '🐌', auto: '⏱' };
+const PICK_ICON = { bomb: '💣', flame: '🔥', speed: '👟', kick: '🦵', remote: '📡', ghost: '👻', throw: '🧤', shield: '🛡', line: '📏', reverse: '🔀', slow: '🐌', auto: '⏱', skull: '💀' };
 const INTERP_MS = 55;
 const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -21,7 +21,7 @@ export default (function () {
   const particles = [];
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null;
   const input = { up: false, down: false, left: false, right: false };
-  let hud, cards, startBtn, pauseBtn, modeBtn, genBtn, ffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
+  let hud, cards, startBtn, pauseBtn, modeBtn, genBtn, ffBtn, revBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; };
@@ -42,14 +42,14 @@ export default (function () {
       const shown = p.connected || p.playing;
       cards[i].classList.toggle('hidden', !shown);
       if (!shown) return;
-      const col = colSeat(i); cards[i].style.color = col; cards[i].classList.toggle('dead', p.playing && !p.alive); cards[i].classList.toggle('me', i === mySeat);
+      const col = colSeat(i); cards[i].style.color = col; cards[i].classList.toggle('dead', p.playing && !p.alive && !p.rvn); cards[i].classList.toggle('me', i === mySeat);
       const tags = [];
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       cards[i].querySelector('.pn').innerHTML = `${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
-      const ab = [p.kick ? '🦵' : '', p.remote ? '📡' : '', p.ghost ? '👻' : '', p.throw ? '🧤' : '', p.shield ? '🛡' : '', p.rev ? '🔀' : '', p.slow ? '🐌' : '', p.auto ? '⏱' : ''].filter(Boolean).join('');
-      lv.innerHTML = p.playing ? (p.alive ? `💣${p.bombs} 🔥${p.power} 👟${p.speed}${ab ? ' · ' + ab : ''}` : '✖ éliminé') : 'prêt';
+      const ab = [p.kick ? '🦵' : '', p.remote ? '📡' : '', p.ghost ? '👻' : '', p.throw ? '🧤' : '', p.line ? '📏' : '', p.shield ? '🛡' : '', p.rev ? '🔀' : '', p.slow ? '🐌' : '', p.auto ? '⏱' : '', p.skull ? '💀' : ''].filter(Boolean).join('');
+      lv.innerHTML = p.playing ? (p.alive ? `💣${p.bombs} 🔥${p.power} 👟${p.speed}${ab ? ' · ' + ab : ''}` : (p.rvn ? '☠ revanche (bord)' : '✖ éliminé')) : 'prêt';
     });
   }
   function renderLB() {
@@ -100,6 +100,7 @@ export default (function () {
     modeBtn.disabled = !(idle && (m.connected === 4 || m.connected === 6)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     genBtn.disabled = !idle; genBtn.textContent = '🧱 ' + (GEN_NAMES[m.gen] || 'Map');
     ffBtn.disabled = !(idle && teamMode); ffBtn.textContent = '🤝 Tir allié : ' + (m.ff ? 'ON' : 'OFF'); ffBtn.classList.toggle('on', !!m.ff);
+    if (revBtn) { revBtn.disabled = !idle; revBtn.textContent = '☠ Revanche : ' + (m.revenge ? 'ON' : 'OFF'); revBtn.classList.toggle('on', !!m.revenge); }
   }
 
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
@@ -108,7 +109,8 @@ export default (function () {
   function playFx(f) {
     if (f.type === 'place' || f.type === 'throw') return sound('place');
     if (f.type === 'wall') return sound('wall');
-    if (f.type === 'guard') return sound('pickup');
+    if (f.type === 'guard' || f.type === 'warp') return sound('pickup');
+    if (f.type === 'spawn') { sound('pickup'); if (!A.reduceFx) { const x = cpx(f.x), y = cpx(f.y), now = performance.now(); for (let k = 0; k < 14; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 3.2; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 320 + Math.random() * 220, color: colSeat(f.seat) }); } } return; } // retour de revanche
     if (f.type === 'drop') { if (!A.reduceFx) shakeMag = Math.max(shakeMag, 4); return; }
     if (f.type === 'pickup') return sound(f.bad ? 'bad' : 'pickup');
     if (f.type === 'boom') { sound('boom'); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 6); const col = colSeat(f.seat), now = performance.now(), x = cpx(f.x), y = cpx(f.y); for (let k = 0; k < 16; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 4; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 240, color: col }); } }
@@ -152,6 +154,12 @@ export default (function () {
           if (TH.round) { ctx.fillStyle = TH.soft; rrect(x + 3, y + 3, CELL - 6, CELL - 6, 5); ctx.fill(); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 7, y + 6, CELL - 14, 3); ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1.5; rrect(x + 3, y + 3, CELL - 6, CELL - 6, 5); ctx.stroke(); } // caisse bois arrondie
           else { ctx.fillStyle = TH.soft; ctx.fillRect(x + 2, y + 2, CELL - 4, CELL - 4); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 2, y + 2, CELL - 4, 5); ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.strokeRect(x + 2.5, y + 2.5, CELL - 5, CELL - 5); }
         }
+        else if (c === '3') {                                       // téléporteur (portail)
+          const cxp = x + CELL / 2, cyp = y + CELL / 2, ph = A.reduceFx ? 1 : 1 + 0.12 * Math.sin(now / 200 + gx + gy), rot = A.reduceFx ? 0 : now / 600;
+          ctx.save(); if (!A.reduceFx) { ctx.shadowColor = '#b98bff'; ctx.shadowBlur = 12; }
+          for (let r = 0; r < 3; r++) { ctx.strokeStyle = `rgba(${185 - r * 30},${139},${240},${0.8 - r * 0.22})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cxp, cyp, (CELL * 0.13 + r * CELL * 0.11) * ph, rot + r, rot + r + Math.PI * 1.5); ctx.stroke(); }
+          ctx.restore();
+        }
       }
       // prévisualisation de portée des bombes
       (snap.bombs || []).forEach(b => {
@@ -185,7 +193,19 @@ export default (function () {
       // joueurs
       const pv = viewPlayers(now);
       snap.players.forEach(p => {
-        if (!p.playing || !p.alive) return;
+        if (!p.playing) return;
+        if (!p.alive) {                                 // mode revanche : revenant sur le bord qui bombarde
+          if (!p.rvn) return;
+          const t = (pv && pv[p.seat]) || p, col = colSeat(p.seat);
+          let gx = Math.floor(t.x / CELL), gy = Math.floor(t.y / CELL), ix = gx, iy = gy;
+          if (gy <= 0) iy = 1; else if (gy >= GH - 1) iy = GH - 2; if (gx <= 0) ix = 1; else if (gx >= GW - 1) ix = GW - 2;
+          if (p.seat === mySeat) { ctx.save(); ctx.strokeStyle = col; ctx.globalAlpha = 0.5 + 0.3 * Math.sin(now / 160); ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.strokeRect(ix * CELL + 3, iy * CELL + 3, CELL - 6, CELL - 6); ctx.restore(); }
+          ctx.save(); ctx.globalAlpha = 0.55 + 0.2 * Math.sin(now / 180); ctx.shadowColor = col; ctx.shadowBlur = 8 * FX; ctx.fillStyle = col;
+          ctx.beginPath(); ctx.arc(t.x, t.y, CELL * 0.26, 0, Math.PI * 2); ctx.fill();
+          ctx.lineWidth = 2; ctx.strokeStyle = p.seat === mySeat ? '#fff' : 'rgba(255,255,255,0.5)'; ctx.stroke();
+          ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.font = '10px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('☠', t.x, t.y + 0.5); ctx.restore();
+          return;
+        }
         const t = (pv && pv[p.seat]) || p, col = colSeat(p.seat);
         ctx.save(); if (p.invuln || p.ghost) ctx.globalAlpha = 0.5 + 0.4 * Math.sin(now / 70);
         ctx.shadowColor = col; ctx.shadowBlur = 10 * FX; ctx.fillStyle = col;
@@ -200,7 +220,7 @@ export default (function () {
     if (snap && (snap.gs === 'lobby' || snap.gs === 'paused')) {
       ctx.fillStyle = 'rgba(4,5,12,0.66)'; ctx.fillRect(0, 0, ARENA, ARENA); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if (snap.gs === 'paused') { ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', ARENA / 2, ARENA / 2 + 28); }
-      else { ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,160,80,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 26px system-ui,sans-serif'; ctx.fillText('BOMBERMAN', ARENA / 2, ARENA / 2 - 32); ctx.restore(); const n = snap.connected; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText(`${n} joueur${n > 1 ? 's' : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n < 2 ? ' (solo : entraînement)' : '')}`, ARENA / 2, ARENA / 2 - 4); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('▶ Espace / clic pour lancer', ARENA / 2, ARENA / 2 + 24); }
+      else { ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,160,80,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 26px system-ui,sans-serif'; ctx.fillText('BOMBERMAN', ARENA / 2, ARENA / 2 - 32); ctx.restore(); const n = snap.connected; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText(`${n} joueur${n > 1 ? 's' : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n < 2 ? ' (solo : entraînement)' : '')}`, ARENA / 2, ARENA / 2 - 4); if (snap.revenge) { ctx.fillStyle = '#ff9b6b'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('☠ Revanche — les morts bombardent depuis le bord et peuvent revenir', ARENA / 2, ARENA / 2 + 14); } ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('▶ Espace / clic pour lancer', ARENA / 2, ARENA / 2 + (snap.revenge ? 34 : 24)); }
     }
     rafId = requestAnimationFrame(draw);
   }
@@ -228,9 +248,10 @@ export default (function () {
     cv = $('bmc'); ctx = cv.getContext('2d'); hud = $('bmHud'); endEl = $('bmEnd');
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = [0, 1, 2, 3, 4, 5].map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
-    startBtn = $('bmStart'); pauseBtn = $('bmPause'); modeBtn = $('bmMode'); genBtn = $('bmGen'); ffBtn = $('bmFf'); pauseFloat = $('bmPauseFloat'); lbBtn = $('bmLbBtn'); lbPanel = $('bmLbPanel'); lbBody = $('bmLbBody');
+    startBtn = $('bmStart'); pauseBtn = $('bmPause'); modeBtn = $('bmMode'); genBtn = $('bmGen'); ffBtn = $('bmFf'); revBtn = $('bmRevenge'); pauseFloat = $('bmPauseFloat'); lbBtn = $('bmLbBtn'); lbPanel = $('bmLbPanel'); lbBody = $('bmLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' }); pauseFloat.onclick = () => send({ t: 'pause' }); modeBtn.onclick = () => send({ t: 'mode' }); genBtn.onclick = () => send({ t: 'gen' }); ffBtn.onclick = () => send({ t: 'ff' });
+    if (revBtn) revBtn.onclick = () => send({ t: 'revenge' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('bmHelp'), helpPanel = $('bmHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
     cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
