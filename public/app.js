@@ -169,7 +169,7 @@ function fireConfetti() {
   if (!confettiCv || a11y.reduceFx) return;                       // respecte « réduire les effets »
   const dpr = window.devicePixelRatio || 1, W = innerWidth, H = innerHeight;
   confettiCv.width = Math.round(W * dpr); confettiCv.height = Math.round(H * dpr);
-  confettiCv.style.width = W + 'px'; confettiCv.style.height = H + 'px';
+  confettiCv.style.width = W + 'px'; confettiCv.style.height = H + 'px'; confettiCv.style.display = 'block';
   const cx = confettiCv.getContext('2d');
   const cols = ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0', '#ffd36e'];
   const parts = [];
@@ -189,7 +189,7 @@ function fireConfetti() {
       cx.fillStyle = p.c; cx.fillRect(-p.r, -p.r * 0.5, p.r * 2, p.r); cx.restore();
     }
     if (alive > 0 && age < 4500) confettiRaf = requestAnimationFrame(step);
-    else cx.clearRect(0, 0, W, H);
+    else { cx.clearRect(0, 0, W, H); confettiCv.style.display = 'none'; }
   };
   confettiRaf = requestAnimationFrame(step);
 }
