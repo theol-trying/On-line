@@ -99,7 +99,7 @@ const esc = s => ('' + s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '
   if (urlKey) { localStorage.setItem('pong-lan-admin', urlKey); try { history.replaceState(null, '', location.pathname); } catch {} } // mémorise la clé puis nettoie l'URL
   const adminKey = localStorage.getItem('pong-lan-admin') || '';
   const adminBox = document.getElementById('adminBox'), adminResetBtn = document.getElementById('adminResetBtn');
-  if (adminKey && adminBox) adminBox.classList.remove('hidden');
+  if (adminKey && adminBox) adminBox.style.display = '';
   if (adminResetBtn) adminResetBtn.onclick = () => {
     if (!adminKey || !confirm('Réinitialiser TOUS les classements (chaque jeu + classement global) ? Action irréversible.')) return;
     send({ t: 'adminreset', key: adminKey });
