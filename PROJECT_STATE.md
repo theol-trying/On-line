@@ -124,6 +124,7 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
   touchent les coéquipiers. La **bombe/obus propre** blesse toujours son auteur ; en ON un kill d'allié est crédité.
 - **Leaderboard par jeu** (`leaderboard.json` = `{gameId:{board,history}}`) : par pseudo ; victoires, kills, K/D, survie max, etc.
   Diffusé sur `dirty`. Pages `/stats?game=<id>` & `/leaderboard.json?game=<id>`.
+- **Reset admin des classements** (réservé au détenteur d'une clé secrète) : env serveur **`ADMIN_KEY`** ; le hub n'honore `{t:'adminreset',key}` que si `key === process.env.ADMIN_KEY` → `reset()` sur **tous** les jeux (le `step()` rediffuse les classements vides à tous, le **global** se recalcule). Côté client : ouvrir une fois l'URL **`?admin=<clé>`** mémorise la clé en `localStorage` (`pong-lan-admin`) et révèle un bouton **🗑 Réinitialiser** dans ⚙️ Réglages → 🔑 Admin (invisible pour les autres). Si `ADMIN_KEY` n'est pas défini côté serveur, la commande est ignorée.
 - **Reconnexion** par token : **période de grâce de 12 s** côté hub (le siège et l'état du jeu sont conservés à la coupure ;
   un F5 réutilise le même membre). Au-delà, élimination via `onLeave`. Chaque jeu garde aussi `seatByMid` (reprise après grâce).
 - **Quitter en cours** : bouton flottant ✕ → `abort` → `backToLobby()` (retour lobby sans perdre les sièges).

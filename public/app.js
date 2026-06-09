@@ -93,6 +93,21 @@ function renderGlobal() {
 }
 const esc = s => ('' + s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
+/* ---------- admin : réinitialisation des classements (réservé au détenteur de la clé) ---------- */
+(function initAdmin() {
+  const urlKey = new URLSearchParams(location.search).get('admin');
+  if (urlKey) { localStorage.setItem('pong-lan-admin', urlKey); try { history.replaceState(null, '', location.pathname); } catch {} } // mémorise la clé puis nettoie l'URL
+  const adminKey = localStorage.getItem('pong-lan-admin') || '';
+  const adminBox = document.getElementById('adminBox'), adminResetBtn = document.getElementById('adminResetBtn');
+  if (adminKey && adminBox) adminBox.classList.remove('hidden');
+  if (adminResetBtn) adminResetBtn.onclick = () => {
+    if (!adminKey || !confirm('Réinitialiser TOUS les classements (chaque jeu + classement global) ? Action irréversible.')) return;
+    send({ t: 'adminreset', key: adminKey });
+    for (const k in boards) boards[k] = []; renderGlobal();   // vide aussi localement tout de suite
+    note('🗑 Classements réinitialisés');
+  };
+})();
+
 /* ---------- ping ---------- */
 const pingTxt = document.getElementById('pingTxt');
 let pingTimer = null;
