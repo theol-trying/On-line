@@ -1,7 +1,7 @@
 // Hub multijeux : registre des jeux, identité/pseudo/token, UNE salle active, lobby, routage, boucle de tick.
 // Une seule partie active à la fois (les joueurs choisissent le jeu dans le lobby quand la salle est libre).
 import { attachWebSocket } from './ws.js';
-import { lbMsg, dirtyGames, anyDirty, clearDirty } from './leaderboard.js';
+import { lbMsg, dirtyGames, anyDirty, clearDirty, reset } from './leaderboard.js';
 import pong from './games/pong/server.js';
 import tron from './games/tron/server.js';
 import tank from './games/tank/server.js';
@@ -88,6 +88,9 @@ function wire(member) {                          // (re)branche les handlers d'u
       member.ready = !!m.v; broadcastRoom();
     } else if (m.t === 'forcestart') {
       if (member.id === hostId()) { ensureGame(); if (game.isIdle()) game.onMessage(member, { t: 'start' }); } // l'hôte force le départ malgré des joueurs pas prêts
+    } else if (m.t === 'adminreset') {
+      const KEY = process.env.ADMIN_KEY;            // réinitialisation de TOUS les classements (réservée au détenteur de la clé admin)
+      if (KEY && typeof m.key === 'string' && m.key === KEY) { for (const meta of META) reset(meta.id); }  // reset marque dirty → step() rediffuse les classements vides à tous (le global se recalcule)
     } else if (m.t === 'emote') {
       if (typeof m.e === 'string' && Date.now() - (member.lastEmote || 0) > 700) { member.lastEmote = Date.now(); room.broadcast({ t: 'emote', id: member.id, name: member.name, e: m.e.slice(0, 8) }); } // émote diffusée à tous (anti-spam 700 ms)
     } else if (m.t === 'png') {
