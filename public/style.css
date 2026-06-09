@@ -262,7 +262,41 @@ body.playing #quitFloat{ display:block; }
 .legrow{ display:flex; align-items:center; gap:10px; font-size:12.5px; color:var(--txt); padding:6px 2px; border-bottom:1px solid rgba(255,255,255,.05); }
 .legrow span{ font-size:18px; width:24px; text-align:center; flex-shrink:0; }
 .legrow b{ font-weight:700; }
+/* icônes d'effets actifs sur les cartes (Pong) */
+.fxon{ font-size:11px; font-weight:800; letter-spacing:1px; animation:fxpulse 1.1s ease-in-out infinite; }
+body.flat .fxon{ animation:none; }
+@keyframes fxpulse{ 0%,100%{ opacity:1; } 50%{ opacity:.4; } }
+/* pastille d'effet avec barre dégressive (le fond se vide au fil du temps) */
+.buff{ display:inline-block; font-size:10px; font-weight:800; line-height:1; padding:2px 5px; border-radius:6px; border:1px solid; margin-left:3px; vertical-align:middle; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.6); }
 
+/* ping (bandeau de statut) */
+#pingTxt{ color:var(--txt2); font-size:11px; }
+/* émotes : lanceur flottant + barre + toasts */
+#emoteFloat{ position:fixed; left:12px; bottom:12px; z-index:11; width:44px; height:44px; padding:0; font-size:20px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; }
+#emoteBar{ position:fixed; left:12px; bottom:62px; z-index:12; display:flex; flex-wrap:wrap; gap:4px; max-width:228px; padding:6px;
+  background:var(--panel); border:1px solid var(--border2); border-radius:12px; backdrop-filter:blur(8px); }
+#emoteBar.hidden{ display:none; }
+.emo{ font-size:20px; padding:4px 7px; background:transparent; border:none; border-radius:8px; cursor:pointer; }
+.emo:hover{ background:var(--panel2); }
+#emoteToasts{ position:fixed; top:54px; left:50%; transform:translateX(-50%); z-index:13; display:flex; flex-direction:column; gap:5px; align-items:center; pointer-events:none; max-width:90vw; }
+.etoast{ background:var(--panel); border:1px solid var(--border2); border-radius:999px; padding:5px 13px; font-size:13px; color:var(--txt);
+  backdrop-filter:blur(8px); white-space:nowrap; animation:etin .18s ease, etout .4s ease 2.2s forwards; }
+.etoast .en{ font-weight:700; } .etoast .ee{ font-size:18px; }
+@keyframes etin{ from{ opacity:0; transform:translateY(-8px) scale(.9); } to{ opacity:1; transform:none; } }
+@keyframes etout{ to{ opacity:0; transform:translateY(-6px); } }
+/* barre « Prêt » (gate de démarrage, commune aux 6 jeux) */
+.readybar{ display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px 12px;
+  padding:7px 12px; max-width:min(96vw,760px); background:var(--panel); border:1px solid var(--border2); border-radius:14px; backdrop-filter:blur(8px); }
+.readybar.hidden{ display:none; }
+.readylist{ display:flex; flex-wrap:wrap; gap:5px 12px; align-items:center; }
+.readylist .rdy{ font-size:13px; color:var(--txt2); }
+.readylist .rdy.on{ color:#7ff0a8; }
+.readycount{ font-size:12px; color:var(--txt2); }
+.readybar .rbtn{ padding:6px 13px; border-radius:10px; border:1px solid var(--border2); background:var(--panel2); color:var(--txt); cursor:pointer; font-weight:600; font-size:13px; }
+.readybar .rbtn:hover{ border-color:var(--accent); }
+.readybar .rbtn.on{ background:#1d6b3f; border-color:#2ea866; color:#eafff0; }
+.readybar .rbtn.force{ background:#5a3a12; border-color:#b9812e; color:#ffe9c8; }
 /* calque de fondu lors d'un changement de jeu */
 #xfade{ position:fixed; inset:0; z-index:8; background:var(--bg0); opacity:0; pointer-events:none; transition:opacity .25s ease; }
 /* calque confettis (au-dessus de tout, ne bloque pas les clics) */

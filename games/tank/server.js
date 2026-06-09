@@ -12,7 +12,11 @@ const LIVES = 3, INVULN = 45;
 const PU_EVERY = 6 * TICK_HZ, MAX_PU = 3, PU_R = 11;
 const RAPID_T = 6 * TICK_HZ, TRIPLE_T = 8 * TICK_HZ, SPEED_T = 8 * TICK_HZ, PIERCE_T = 8 * TICK_HZ, SHIELD_CAP = 2;
 const MINE_ARM = 20, MINE_R = 30, MINE_CAP = 3;
-const PU_TYPES = ['rapid', 'triple', 'shield', 'speed', 'pierce', 'mine'];
+const EMP_T = 2 * TICK_HZ, EMP_R = BLK * 4;        // EMP : étourdit les ennemis proches
+const HOMING_T = 8 * TICK_HZ, CAMO_T = 6 * TICK_HZ, RADAR_T = 10 * TICK_HZ, HOMING_TURN = 0.13; // power-ups avancés : missile guidé / camouflage / radar
+const BARREL_COUNT = 4, BARREL_R = 11, BARREL_DMG_R = BLK * 1.25, BARREL_CHAIN = BLK * 1.6;      // barils explosifs : rayon collision / dégâts de zone / chaînage
+const MUD_COUNT = 10, MUD_MUL = 0.5;               // zones de boue : ralentissent les tanks qui les traversent
+const PU_TYPES = ['rapid', 'triple', 'shield', 'speed', 'pierce', 'mine', 'repair', 'emp', 'homing', 'camo', 'radar'];
 const WIN_TARGETS = [1, 3, 5];
 const SPAWNS = [[1, 1], [G - 2, G - 2], [G - 2, 1], [1, G - 2], [(G - 1) / 2 | 0, 1], [(G - 1) / 2 | 0, G - 2]];
 const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
@@ -45,7 +49,8 @@ function tankConnected(solid, spawns) {                 // BFS sur l'espace libr
 
 export function createTank(room) {
   let players, shells, mines, pickups, blocks, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick;
-  let arenaStyle, winTarget, matchWon, matchWinner, ff;   // ff = tir allié autorisé
+  let arenaStyle, winTarget, matchWon, matchWinner, ff, botCount;   // ff = tir allié autorisé ; botCount = nb de bots IA
+  let barrels, mudSet;                                              // barils explosifs ; ensemble d'indices de cases boueuses
   let seatByMid = {};
 
   function lbEntry(name) {
@@ -72,22 +77,24 @@ export function createTank(room) {
 
   function makePlayers() {
     return Array.from({ length: MAX_SEATS }, (_, seat) => ({
-      seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false,
-      x: ARENA / 2, y: ARENA / 2, angle: 0, lives: LIVES, cool: 0, invulnUntil: 0, spawn: { x: 0, y: 0, angle: 0 },
+      seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false, bot: false,
+      x: ARENA / 2, y: ARENA / 2, angle: 0, lives: LIVES, cool: 0, invulnUntil: 0, empUntil: 0, spawn: { x: 0, y: 0, angle: 0 },
       inputs: { left: false, right: false, fwd: false, back: false, fire: false },
       rapidUntil: 0, tripleUntil: 0, speedUntil: 0, pierceUntil: 0, shield: 0, mineN: 0,
+      homingUntil: 0, camoUntil: 0, radarUntil: 0,
       kills: 0, dmg: 0, place: 0, elimTick: -1, score: 0,
     }));
   }
   function fullReset() {
     players = makePlayers(); shells = []; mines = []; pickups = []; blocks = new Array(G * G).fill(0);
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0;
-    arenaStyle = 0; winTarget = 1; matchWon = false; matchWinner = null; ff = false; seatByMid = {};
+    arenaStyle = 0; winTarget = 1; matchWon = false; matchWinner = null; ff = false; botCount = 0; barrels = []; mudSet = new Set(); seatByMid = {};
   }
 
   const connectedCount = () => players.filter(p => p.member).length;
-  const partCount = () => connectedCount();
-  const canStart = () => connectedCount() >= 2;
+  const maxBots = () => MAX_SEATS - connectedCount();
+  const partCount = () => Math.min(connectedCount() + botCount, MAX_SEATS);
+  const canStart = () => connectedCount() >= 1 && partCount() >= 2;
   const editable = () => gameState === 'lobby' || gameState === 'over';
   const seatOf = member => { for (const p of players) if (p.member === member) return p.seat; return -1; };
   const active = p => p.playing && p.alive;
@@ -103,6 +110,14 @@ export function createTank(room) {
     blocks = new Array(G * G).fill(0);
     for (const k of solid) blocks[k] = 1;
     for (let i = 0; i < blocks.length; i++) { const gx = i % G, gy = (i / G) | 0; if (gx > 0 && gy > 0 && gx < G - 1 && gy < G - 1 && blocks[i] === 0 && !safe.has(i) && Math.random() < 0.42) blocks[i] = 2; }
+    // barils explosifs + zones de boue : posés sur des cases libres, hors zones de spawn (n'affectent pas la connectivité : traversables)
+    barrels = []; mudSet = new Set();
+    const free = [];
+    for (let i = 0; i < blocks.length; i++) { const gx = i % G, gy = (i / G) | 0; if (gx > 0 && gy > 0 && gx < G - 1 && gy < G - 1 && blocks[i] === 0 && !safe.has(i)) free.push(i); }
+    for (let n = free.length - 1; n > 0; n--) { const j = Math.floor(Math.random() * (n + 1)); const t = free[n]; free[n] = free[j]; free[j] = t; } // mélange
+    let fi = 0;
+    for (let b = 0; b < BARREL_COUNT && fi < free.length; b++, fi++) { const k = free[fi], gx = k % G, gy = (k / G) | 0; barrels.push({ x: (gx + 0.5) * BLK, y: (gy + 0.5) * BLK, dead: false }); }
+    for (let mn = 0; mn < MUD_COUNT && fi < free.length; mn++, fi++) mudSet.add(free[fi]);
   }
 
   function spawnFor(i) { const [gx, gy] = SPAWNS[i]; const x = (gx + 0.5) * BLK, y = (gy + 0.5) * BLK; return { x, y, angle: Math.atan2(ARENA / 2 - y, ARENA / 2 - x) }; }
@@ -110,8 +125,11 @@ export function createTank(room) {
 
   function startGame() {
     if (!editable() || !canStart()) return;
-    for (const p of players) p.playing = false;
+    for (const p of players) { p.playing = false; p.bot = false; }
+    if (botCount > maxBots()) botCount = maxBots();
     const parts = players.filter(p => p.member);
+    let bots = botCount;
+    for (const p of players) { if (bots <= 0) break; if (!p.member) { p.bot = true; parts.push(p); bots--; } } // complète avec des bots
     if (parts.length < 2) return;
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
@@ -122,7 +140,9 @@ export function createTank(room) {
     tick = 0;                       // remis à 0 AVANT placeAtSpawn : sinon l'invuln se calcule sur le tick (élevé) de la manche précédente -> joueurs invincibles au rematch
     parts.forEach((p, i) => {
       p.playing = true; p.alive = true; p.lives = LIVES; p.kills = 0; p.dmg = 0; p.place = 0; p.elimTick = -1; p.team = i % nteams; p.cool = 0;
-      p.rapidUntil = 0; p.tripleUntil = 0; p.speedUntil = 0; p.pierceUntil = 0; p.shield = 0; p.mineN = 0;
+      p.rapidUntil = 0; p.tripleUntil = 0; p.speedUntil = 0; p.pierceUntil = 0; p.shield = 0; p.mineN = 0; p.empUntil = 0;
+      p.homingUntil = 0; p.camoUntil = 0; p.radarUntil = 0;
+      if (p.bot) p.name = '🤖 Bot ' + (i + 1);
       p.spawn = spawnFor(i); placeAtSpawn(p);
       p.inputs = { left: false, right: false, fwd: false, back: false, fire: false };
     });
@@ -155,9 +175,11 @@ export function createTank(room) {
     return false;
   }
   function moveTank(p) {
+    if (p.empUntil > tick) return;     // EMP : immobilisé
     if (p.inputs.left) p.angle -= ROT;
     if (p.inputs.right) p.angle += ROT;
-    const base = p.speedUntil > tick ? TANK_SPD * SPEED_MUL : TANK_SPD;
+    let base = p.speedUntil > tick ? TANK_SPD * SPEED_MUL : TANK_SPD;
+    if (mudSet.has(bidx(Math.floor(p.x / BLK), Math.floor(p.y / BLK)))) base *= MUD_MUL;   // zone de boue : ralentit
     const s = p.inputs.fwd ? base : p.inputs.back ? -base * REV : 0;
     if (!s) return;
     const dx = Math.cos(p.angle) * s, dy = Math.sin(p.angle) * s;
@@ -167,15 +189,30 @@ export function createTank(room) {
     if (!by) p.y += dy; else if (by !== true && by.invulnUntil <= tick) { const ny = by.y + dy * 0.5; if (!blockedTank(by.x, ny, by)) { by.y = ny; p.y += dy * 0.5; } }
   }
   function fire(p) {
+    if (p.empUntil > tick) return;     // EMP : ne peut pas tirer
     if (!p.inputs.fire || tick < p.cool) return;
     if (shells.filter(s => s.o === p.seat).length >= MAX_SHELLS) return;
     p.cool = tick + (p.rapidUntil > tick ? FIRE_COOL / 2 : FIRE_COOL);
     const angs = p.tripleUntil > tick ? [-0.18, 0, 0.18] : [0];
     for (const da of angs) {
       const a = p.angle + da, mx = p.x + Math.cos(a) * (TANK_R + SHELL_R + 1), my = p.y + Math.sin(a) * (TANK_R + SHELL_R + 1);
-      shells.push({ x: mx, y: my, vx: Math.cos(a) * SHELL_SPD, vy: Math.sin(a) * SHELL_SPD, o: p.seat, team: p.team, bounces: 0, life: SHELL_LIFE, pierce: p.pierceUntil > tick });
+      shells.push({ x: mx, y: my, vx: Math.cos(a) * SHELL_SPD, vy: Math.sin(a) * SHELL_SPD, o: p.seat, team: p.team, bounces: 0, life: SHELL_LIFE, pierce: p.pierceUntil > tick, homing: p.homingUntil > tick });
     }
     fx.push({ type: 'shot', x: p.x, y: p.y, seat: p.seat });
+  }
+  function botThink(p) {                              // IA simple : viser l'ennemi le plus proche, avancer, tirer, se dégager des murs
+    const inp = { left: false, right: false, fwd: false, back: false, fire: false };
+    let tgt = null, bd = Infinity;
+    for (const q of players) { if (!active(q) || q === p) continue; if (mode !== 'ffa' && q.team === p.team) continue; const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2; if (d < bd) { bd = d; tgt = q; } }
+    const ahead = blockedTank(p.x + Math.cos(p.angle) * (TANK_R + 8), p.y + Math.sin(p.angle) * (TANK_R + 8), p);
+    if (tgt) {
+      const desired = Math.atan2(tgt.y - p.y, tgt.x - p.x), diff = Math.atan2(Math.sin(desired - p.angle), Math.cos(desired - p.angle));
+      if (ahead) inp.right = true;                                  // bloqué : tourne pour se dégager
+      else { if (diff > 0.06) inp.right = true; else if (diff < -0.06) inp.left = true; if (Math.abs(diff) < 0.7 && bd > (BLK * 2) ** 2) inp.fwd = true; }
+      if (Math.abs(diff) < 0.22 && tick >= p.cool) inp.fire = true; // aligné : tire
+      if (p.mineN > 0 && bd < (BLK * 1.4) ** 2 && Math.random() < 0.03) { p.mineN--; mines.push({ x: p.x, y: p.y, owner: p.seat, arm: tick + MINE_ARM }); fx.push({ type: 'mineset', x: p.x, y: p.y, seat: p.seat }); }
+    } else { if (ahead) inp.right = true; else inp.fwd = true; }
+    p.inputs = inp;
   }
   function shellHitsCell(sh) {
     const gx = Math.floor(sh.x / BLK), gy = Math.floor(sh.y / BLK);
@@ -205,6 +242,22 @@ export function createTank(room) {
     else if (type === 'pierce') p.pierceUntil = tick + PIERCE_T;
     else if (type === 'shield') p.shield = Math.min(SHIELD_CAP, p.shield + 1);
     else if (type === 'mine') p.mineN = Math.min(MINE_CAP, p.mineN + 1);
+    else if (type === 'repair') p.lives = Math.min(LIVES, p.lives + 1);   // 🔧 +1 vie (plafonné)
+    else if (type === 'emp') { for (const q of players) if (active(q) && q !== p && (mode === 'ffa' || q.team !== p.team) && q.invulnUntil <= tick && (q.x - p.x) ** 2 + (q.y - p.y) ** 2 < EMP_R * EMP_R) { q.empUntil = tick + EMP_T; q.inputs = { left: false, right: false, fwd: false, back: false, fire: false }; fx.push({ type: 'emp', x: q.x, y: q.y, seat: q.seat }); } } // ⚡ étourdit les ennemis proches
+    else if (type === 'homing') p.homingUntil = tick + HOMING_T;   // 🚀 missile guidé
+    else if (type === 'camo') p.camoUntil = tick + CAMO_T;         // 👁 camouflage
+    else if (type === 'radar') p.radarUntil = tick + RADAR_T;      // 📡 radar (révèle les camouflés)
+  }
+  function explode(x, y, killer) {                  // explosion d'un baril : dégâts de zone à tous + casse les murs cassables autour
+    fx.push({ type: 'barrel', x, y });
+    for (const p of players) if (active(p) && (x - p.x) ** 2 + (y - p.y) ** 2 < BARREL_DMG_R * BARREL_DMG_R) damage(p, killer, x, y);
+    const gx = Math.floor(x / BLK), gy = Math.floor(y / BLK);
+    for (const [dx, dy] of [[0, 0], ...DIRS4]) { const nx = gx + dx, ny = gy + dy; if (nx < 0 || ny < 0 || nx >= G || ny >= G) continue; const k = bidx(nx, ny); if (blocks[k] === 2) { blocks[k] = 0; fx.push({ type: 'wall', x: nx, y: ny }); } }
+  }
+  function detonateBarrels(seed, killer) {          // chaîne : un baril en fait sauter d'autres à proximité
+    const queue = [...seed];
+    while (queue.length) { const b = queue.shift(); if (b.dead) continue; b.dead = true; explode(b.x, b.y, killer); for (const o of barrels) if (!o.dead && (o.x - b.x) ** 2 + (o.y - b.y) ** 2 < BARREL_CHAIN * BARREL_CHAIN) queue.push(o); }
+    barrels = barrels.filter(b => !b.dead);
   }
   function spawnPU() {
     if (pickups.length >= MAX_PU) return;
@@ -223,7 +276,7 @@ export function createTank(room) {
     if (gameState === 'countdown') { tick++; if (tick >= countdownUntil) { gameState = 'play'; tick = 0; } return; }
     if (gameState !== 'play') return;
     tick++;
-    for (const p of players) if (active(p)) { moveTank(p); fire(p); }
+    for (const p of players) if (active(p)) { if (p.bot) botThink(p); moveTank(p); fire(p); }
     // power-ups au sol
     for (const p of players) {
       if (!active(p)) continue;
@@ -239,11 +292,20 @@ export function createTank(room) {
     }
     // obus
     for (let i = shells.length - 1; i >= 0; i--) {
-      const sh = shells[i]; sh.life--; sh.x += sh.vx; sh.y += sh.vy;
+      const sh = shells[i]; sh.life--;
+      if (sh.homing) {                              // missile guidé : braque vers l'ennemi le plus proche (vitesse conservée)
+        let tg = null, bd = Infinity;
+        for (const q of players) { if (!active(q) || q.seat === sh.o) continue; if (mode !== 'ffa' && !ff && q.team === sh.team) continue; if (q.invulnUntil > tick) continue; const d = (q.x - sh.x) ** 2 + (q.y - sh.y) ** 2; if (d < bd) { bd = d; tg = q; } }
+        if (tg) { const want = Math.atan2(tg.y - sh.y, tg.x - sh.x), cur = Math.atan2(sh.vy, sh.vx); let df = Math.atan2(Math.sin(want - cur), Math.cos(want - cur)); df = clamp(df, -HOMING_TURN, HOMING_TURN); const na = cur + df, sp = Math.hypot(sh.vx, sh.vy) || SHELL_SPD; sh.vx = Math.cos(na) * sp; sh.vy = Math.sin(na) * sp; }
+      }
+      sh.x += sh.vx; sh.y += sh.vy;
       if (sh.x < SHELL_R) { sh.x = SHELL_R; sh.vx = -sh.vx; sh.bounces++; } else if (sh.x > ARENA - SHELL_R) { sh.x = ARENA - SHELL_R; sh.vx = -sh.vx; sh.bounces++; }
       if (sh.y < SHELL_R) { sh.y = SHELL_R; sh.vy = -sh.vy; sh.bounces++; } else if (sh.y > ARENA - SHELL_R) { sh.y = ARENA - SHELL_R; sh.vy = -sh.vy; sh.bounces++; }
       const r = shellHitsCell(sh);
       if (r === 'die' || sh.life <= 0 || sh.bounces > MAX_BOUNCE) { shells.splice(i, 1); continue; }
+      let barrelHit = null;                         // un obus qui touche un baril le fait exploser (et propage)
+      for (const b of barrels) if (!b.dead && (sh.x - b.x) ** 2 + (sh.y - b.y) ** 2 < (BARREL_R + SHELL_R) ** 2) { barrelHit = b; break; }
+      if (barrelHit) { detonateBarrels([barrelHit], sh.o); shells.splice(i, 1); continue; }
       let consumed = false;
       for (const p of players) {
         if (!active(p) || p.seat === sh.o) continue;
@@ -259,17 +321,29 @@ export function createTank(room) {
   function snapshot() {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount: 0, maxBots: 0, mode, nteams, winTarget, gen: arenaStyle, ff,
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), mode, nteams, winTarget, gen: arenaStyle, ff,
       grid: blocks.join(''),
-      shells: shells.map(s => ({ x: Math.round(s.x), y: Math.round(s.y), o: s.o, p: !!s.pierce })),
+      shells: shells.map(s => ({ x: Math.round(s.x), y: Math.round(s.y), vx: Math.round(s.vx * 10) / 10, vy: Math.round(s.vy * 10) / 10, o: s.o, p: !!s.pierce, h: !!s.homing })),
       mines: mines.map(m => ({ x: m.x, y: m.y, o: m.owner, armed: tick >= m.arm })),
       pickups: pickups.map(k => ({ x: k.x, y: k.y, t: k.type })),
+      barrels: barrels.map(b => ({ x: Math.round(b.x), y: Math.round(b.y) })),
+      mud: [...mudSet],
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, match: matchWon } : null,
       players: players.map(p => ({
-        seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive,
+        seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot,
         x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, angle: Math.round(p.angle * 100) / 100,
-        lives: Math.max(0, p.lives), score: p.score, invuln: p.invulnUntil > tick,
+        lives: Math.max(0, p.lives), score: p.score, invuln: p.invulnUntil > tick, emp: p.empUntil > tick,
         shield: p.shield, rapid: p.rapidUntil > tick, triple: p.tripleUntil > tick, speed: p.speedUntil > tick, pierce: p.pierceUntil > tick, mineN: p.mineN,
+        homing: p.homingUntil > tick, camo: p.camoUntil > tick, radar: p.radarUntil > tick,
+        buffs: [                                        // [clé, fraction restante] pour les timers dégressifs sur les cartes
+          p.rapidUntil > tick && ['rapid', Math.round((p.rapidUntil - tick) / RAPID_T * 100) / 100],
+          p.tripleUntil > tick && ['triple', Math.round((p.tripleUntil - tick) / TRIPLE_T * 100) / 100],
+          p.speedUntil > tick && ['speed', Math.round((p.speedUntil - tick) / SPEED_T * 100) / 100],
+          p.pierceUntil > tick && ['pierce', Math.round((p.pierceUntil - tick) / PIERCE_T * 100) / 100],
+          p.homingUntil > tick && ['homing', Math.round((p.homingUntil - tick) / HOMING_T * 100) / 100],
+          p.camoUntil > tick && ['camo', Math.round((p.camoUntil - tick) / CAMO_T * 100) / 100],
+          p.radarUntil > tick && ['radar', Math.round((p.radarUntil - tick) / RADAR_T * 100) / 100],
+        ].filter(Boolean),
         kills: p.kills, dmg: p.dmg, place: p.place, elimTick: p.elimTick,
       })),
     };
@@ -280,8 +354,8 @@ export function createTank(room) {
     const cur = seatOf(member); if (cur >= 0) return { role: 'player', seat: cur, hello: { t: 'welcome', seat: cur } }; // déjà assis (reconnexion within grace)
     let seat = -1;
     const rid = seatByMid[member.id];
-    if (rid != null && players[rid] && !players[rid].member) seat = rid;
-    if (seat < 0) { const free = players.find(p => !p.member); if (free) seat = free.seat; }
+    if (rid != null && players[rid] && !players[rid].member && !players[rid].bot) seat = rid;
+    if (seat < 0) { const free = players.find(p => !p.member && !p.bot); if (free) seat = free.seat; }
     if (seat < 0) return { role: 'spectator', hello: { t: 'welcome', seat: -1 } };
     const p = players[seat]; p.member = member; p.mid = member.id; p.name = member.name || ''; seatByMid[member.id] = seat;
     return { role: 'player', seat, hello: { t: 'welcome', seat } };
@@ -304,6 +378,7 @@ export function createTank(room) {
     else if (m.t === 'pause') { if (gameState === 'play') gameState = 'paused'; else if (gameState === 'paused') gameState = 'play'; }
     else if (m.t === 'abort') backToLobby();
     else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; } }
+    else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
     else if (m.t === 'arena') { if (editable()) arenaStyle = (arenaStyle + 1) % 3; }
     else if (m.t === 'wintarget') { if (editable()) winTarget = WIN_TARGETS[(WIN_TARGETS.indexOf(winTarget) + 1) % WIN_TARGETS.length]; }
     else if (m.t === 'ff') { if (editable()) ff = !ff; }

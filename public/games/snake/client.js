@@ -5,6 +5,7 @@ const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#
 const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E69F00', '#009E73'] };
 const TEAM_LETTER = ['A', 'B', 'C'];
 const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3' };
+const VARIANT_NAMES = ['🐍 Classique', '🌀 Murs traversants', '🪨 Obstacles'];
 // identité visuelle propre au jeu (fixe) : Jardin / Terrarium
 const SKIN = { bg: '#0f2410', field: '#1c3a17', field2: '#234a1d', grid: 'rgba(170,255,150,0.05)', border: 'rgba(120,200,110,0.55)', apple: true };
 const INTERP_MS = 90;
@@ -17,7 +18,7 @@ export default (function () {
   let board = [], buf = [];
   const particles = [];
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null;
-  let hud, cards, startBtn, pauseBtn, modeBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
+  let hud, cards, startBtn, pauseBtn, modeBtn, variantBtn, rushBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; };
@@ -101,13 +102,15 @@ export default (function () {
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
     modeBtn.disabled = !(idle && (m.connected === 4 || m.connected === 6));
     modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
+    if (variantBtn) { variantBtn.disabled = !idle; variantBtn.textContent = VARIANT_NAMES[m.variant] || VARIANT_NAMES[0]; variantBtn.classList.toggle('on', m.variant > 0); }
+    if (rushBtn) { rushBtn.disabled = !idle; rushBtn.textContent = '🏁 ' + (m.rush ? 'Food-rush' : 'Survie'); rushBtn.classList.toggle('on', !!m.rush); }
   }
 
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
   function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
   function sound(k) { if (!actx) return; if (k === 'crash') { tone(180, 0.22, 'sawtooth', 0.06); tone(90, 0.3, 'sawtooth', 0.05, 0.04); } else if (k === 'eat') { tone(620, 0.06, 'square', 0.05); tone(880, 0.07, 'square', 0.05, 0.05); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
-    if (f.type === 'eat') { if (f.seat === mySeat) sound('eat'); return; }
+    if (f.type === 'eat') { if (f.seat === mySeat) sound('eat'); if (!A.reduceFx) { const x = px(f.x), y = px(f.y), now = performance.now(); for (let k = 0; k < 8; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.2; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 300 + Math.random() * 180, color: '#ff5a6a' }); } } return; }   // éclaboussure de pomme
     if (f.type === 'crash') {
       sound('crash'); if (A.reduceFx) return;
       shakeMag = Math.max(shakeMag, 6);
@@ -148,19 +151,28 @@ export default (function () {
     ctx.strokeStyle = TH.border || 'rgba(255,255,255,0.22)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, ARENA - 3, ARENA - 3);
 
     if (snap) {
-      // pastilles (pommes en skin Jardin, sinon pastille néon)
+      (snap.rocks || []).forEach(ix => { const gx = ix % GW, gy = (ix / GW) | 0, x = gx * CELL, y = gy * CELL; ctx.fillStyle = '#5a5550'; ctx.fillRect(x + 2, y + 2, CELL - 4, CELL - 4); ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(x + 2, y + 2, CELL - 4, 3); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x + 2, y + CELL - 5, CELL - 4, 3); }); // rochers
+      // nourriture (types : pomme, pomme dorée 🟡, champignon 🍄 rétrécit, fantôme 👻)
       (snap.food || []).forEach(fd => {
-        const x = px(fd.x), y = px(fd.y), pulse = 1 + 0.12 * Math.sin(now / 220 + fd.x + fd.y), r = CELL * 0.32 * pulse;
+        const x = px(fd.x), y = px(fd.y), pulse = 1 + 0.12 * Math.sin(now / 220 + fd.x + fd.y), r = CELL * 0.32 * pulse, t = fd.t || 'apple';
         ctx.save();
-        if (TH.apple) {
-          ctx.fillStyle = '#2e8b3d'; ctx.fillRect(x - 1, y - r - 3, 2, 4);                                   // tige
-          ctx.fillStyle = '#5fc36a'; ctx.beginPath(); ctx.ellipse(x + r * 0.5, y - r * 0.7, r * 0.45, r * 0.25, -0.7, 0, Math.PI * 2); ctx.fill(); // feuille
-          ctx.fillStyle = '#e8413a'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.18, 0, Math.PI * 2); ctx.fill();
+        if (t === 'shrink' || t === 'ghost') {
+          if (!A.reduceFx) { ctx.shadowColor = t === 'ghost' ? '#bfe3ff' : '#d39bff'; ctx.shadowBlur = 8; }
+          ctx.font = `${Math.round(CELL * 0.8)}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(t === 'ghost' ? '👻' : '🍄', x, y + 1);
         } else {
-          ctx.shadowColor = '#ff5a6a'; ctx.shadowBlur = 10 * FX; ctx.fillStyle = '#ff5a6a';
-          ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-          ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.beginPath(); ctx.arc(x - CELL * 0.1, y - CELL * 0.1, CELL * 0.08, 0, Math.PI * 2); ctx.fill();
+          const gold = t === 'gold', body = gold ? '#ffcf4a' : '#e8413a';
+          if (gold && !A.reduceFx) { ctx.shadowColor = '#ffd24a'; ctx.shadowBlur = 13; }
+          if (TH.apple) {
+            ctx.fillStyle = '#2e8b3d'; ctx.fillRect(x - 1, y - r - 3, 2, 4);                                  // tige
+            ctx.fillStyle = '#5fc36a'; ctx.beginPath(); ctx.ellipse(x + r * 0.5, y - r * 0.7, r * 0.45, r * 0.25, -0.7, 0, Math.PI * 2); ctx.fill(); // feuille
+            ctx.fillStyle = body; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.18, 0, Math.PI * 2); ctx.fill();
+          } else {
+            ctx.shadowColor = gold ? '#ffd24a' : '#ff5a6a'; ctx.shadowBlur = 10 * FX; ctx.fillStyle = gold ? '#ffcf4a' : '#ff5a6a';
+            ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+            ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.beginPath(); ctx.arc(x - CELL * 0.1, y - CELL * 0.1, CELL * 0.08, 0, Math.PI * 2); ctx.fill();
+          }
         }
         ctx.restore();
       });
@@ -169,7 +181,8 @@ export default (function () {
         if (!p.playing || !p.alive) return;        // un serpent mort disparaît du plateau (il n'est plus un obstacle)
         const col = colSeat(p.seat), hv = heads && heads[p.seat];
         const hx = hv ? px(hv.x) : px(p.head.x), hy = hv ? px(hv.y) : px(p.head.y);
-        ctx.save();
+        const ga = p.ghost ? (A.reduceFx ? 0.5 : 0.45 + 0.25 * Math.sin(now / 110)) : 1;   // fantôme : translucide
+        ctx.save(); ctx.globalAlpha = ga;
         ctx.strokeStyle = col; ctx.lineWidth = CELL - 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
         ctx.shadowColor = col; ctx.shadowBlur = 8 * FX;
         const path = p.path || [];
@@ -179,7 +192,7 @@ export default (function () {
         let dx = 0, dy = 0;
         if (path.length >= 2) { const a = path[path.length - 2], b = path[path.length - 1]; dx = Math.sign(b[0] - a[0]); dy = Math.sign(b[1] - a[1]); }
         if (!dx && !dy) dx = 1;
-        ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 12 * FX; ctx.fillStyle = col;
+        ctx.save(); ctx.globalAlpha = ga; ctx.shadowColor = col; ctx.shadowBlur = 12 * FX; ctx.fillStyle = col;
         ctx.beginPath(); ctx.arc(hx, hy, CELL * 0.55, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
         const perpx = -dy, perpy = dx, fwd = CELL * 0.12, side = CELL * 0.2, er = CELL * 0.14;
         for (const s of [-1, 1]) {
@@ -192,6 +205,14 @@ export default (function () {
       });
     }
     if (!A.reduceFx) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; for (let i = particles.length - 1; i >= 0; i--) { const q = particles[i], t = (now - q.born) / q.life; if (t >= 1) { particles.splice(i, 1); continue; } q.x += q.vx; q.y += q.vy; q.vx *= 0.95; q.vy *= 0.95; ctx.globalAlpha = 1 - t; ctx.fillStyle = q.color; ctx.beginPath(); ctx.arc(q.x, q.y, 2.5 * (1 - t) + 0.5, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); } else particles.length = 0;
+
+    if (snap && snap.rush && (snap.gs === 'play' || snap.gs === 'countdown')) {   // food-rush : progression du meneur
+      let lead = 0; (snap.players || []).forEach(p => { if (p.playing && p.score > lead) lead = p.score; });
+      ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillStyle = 'rgba(4,5,12,0.5)'; const txt = `🏁 ${lead}/${snap.rushTarget || 20} 🍎`; ctx.font = 'bold 15px system-ui,sans-serif';
+      const w = ctx.measureText(txt).width + 16; ctx.fillRect(ARENA / 2 - w / 2, 6, w, 22);
+      ctx.fillStyle = '#ffd24a'; ctx.fillText(txt, ARENA / 2, 9); ctx.restore();
+    }
 
     if (snap && snap.gs === 'countdown') {
       ctx.fillStyle = 'rgba(4,5,12,0.34)'; ctx.fillRect(0, 0, ARENA, ARENA); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -207,7 +228,8 @@ export default (function () {
         ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(120,220,150,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 30px system-ui,sans-serif'; ctx.fillText('SNAKE', ARENA / 2, ARENA / 2 - 36); ctx.restore();
         const n = snap.connected;
         ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} joueur${n > 1 ? 's' : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n < 2 ? ' (solo : entraînement)' : '')}`, ARENA / 2, ARENA / 2 - 6);
-        ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('▶ Espace / clic pour lancer', ARENA / 2, ARENA / 2 + 24);
+        if (snap.rush) { ctx.fillStyle = '#ffd24a'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('🏁 Food-rush — premier à ' + (snap.rushTarget || 20) + ' 🍎 gagne', ARENA / 2, ARENA / 2 + 14); }
+        ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('▶ Espace / clic pour lancer', ARENA / 2, ARENA / 2 + (snap.rush ? 34 : 24));
       }
     }
     rafId = requestAnimationFrame(draw);
@@ -229,12 +251,15 @@ export default (function () {
     cv = $('snc'); ctx = cv.getContext('2d'); hud = $('snHud'); endEl = $('snEnd');
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = [0, 1, 2, 3, 4, 5].map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
-    startBtn = $('snStart'); pauseBtn = $('snPause'); modeBtn = $('snMode'); pauseFloat = $('snPauseFloat');
+    startBtn = $('snStart'); pauseBtn = $('snPause'); modeBtn = $('snMode'); variantBtn = $('snVariant'); rushBtn = $('snRush'); pauseFloat = $('snPauseFloat');
     lbBtn = $('snLbBtn'); lbPanel = $('snLbPanel'); lbBody = $('snLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' });
     pauseFloat.onclick = () => send({ t: 'pause' });
     modeBtn.onclick = () => send({ t: 'mode' });
+    if (variantBtn) variantBtn.onclick = () => send({ t: 'variant' });
+    if (rushBtn) rushBtn.onclick = () => send({ t: 'rush' });
+    { const helpBtn = $('snHelp'), helpPanel = $('snHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel); }
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
     endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });

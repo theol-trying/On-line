@@ -13,13 +13,14 @@ const PAD_LEN = 84, PAD_SPD = 5.5, MIN_SPD = 2.6, TICK_HZ = 60;
 const PADDLE_MAX_ANGLE = 1.05; // ~60° max p/r à la normale (impact en bout de raquette)
 const HIT_SPEEDUP = 1.05;      // léger gain de vitesse à chaque renvoi raquette
 
-const PU_GOOD = ['multi', 'grow', 'shield', 'ghost', 'invert', 'shrinkT', 'slow'];
-const PU_BAD = ['mini', 'flip', 'speed'];
+const PU_GOOD = ['multi', 'grow', 'shield', 'ghost', 'invert', 'shrinkT', 'slow', 'blocker', 'magnet'];
+const PU_BAD = ['mini', 'flip', 'speed', 'invis'];
 const MAX_BALLS = 8, MAX_FIELD_PU = 2;
+const BUMPER_R = 16, BLOCKER_TICKS = 8 * 60, INVIS_TICKS = 2 * 60, MAGNET_TICKS = 5 * 60, MAX_BUMPERS = 5;
 const GROW_MULT = 1.7, GROW_TICKS = 8 * 60, SHIELD_TICKS = 6 * 60, IMMUNE_TICKS = 3 * 60;
 const INVERT_TICKS = 5 * 60, SHRINKT_TICKS = 6 * 60, SHRINK_MULT = 0.6, SLOW_TICKS = 80, SLOW_FACTOR = 0.5;
-const BOTDIFF = { easy: { spd: 0.52, dz: 34, lead: 0 }, normal: { spd: 0.84, dz: 11, lead: 0 }, hard: { spd: 1.05, dz: 4, lead: 11 } };
-const BOTDIFF_ORDER = ['easy', 'normal', 'hard'];
+const BOTDIFF = { easy: { spd: 0.52, dz: 34, lead: 0 }, normal: { spd: 0.84, dz: 11, lead: 0 }, hard: { spd: 1.05, dz: 4, lead: 11 }, insane: { spd: 1.25, dz: 1.5, lead: 16 } };
+const BOTDIFF_ORDER = ['easy', 'normal', 'hard', 'insane'];
 const COUNTDOWN_TICKS = 3 * 60;
 
 const SPEED = { lente: { init: 3.6, max: 10 }, normale: { init: 4.6, max: 14 }, rapide: { init: 6.2, max: 20 } };
@@ -42,11 +43,11 @@ const SERVE_ORDER = ['random', 'loser'];
 const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
 function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
-const defaultRules = () => ({ winMode: 'survivor', roundsTarget: 3, killsTarget: 8, sudden: 'off', serve: 'random', handicap: false, negatives: false, botDiff: 'normal' });
+const defaultRules = () => ({ winMode: 'survivor', roundsTarget: 3, killsTarget: 8, sudden: 'off', serve: 'random', handicap: false, negatives: false, botDiff: 'normal', bumpers: false });
 
 export function createPong(room) {
   /* ---- état de la partie (par instance) ---- */
-  let players, balls, powerups, gameState, winner, fx, tick, nextPuTick, geo, botCount, mode, nteams;
+  let players, balls, powerups, bumpers, gameState, winner, fx, tick, nextPuTick, geo, botCount, mode, nteams;
   let preset, cfg, roundBounces, nParts, deaths, endTick, countdownUntil;
   let rules, sdActive, sdScale, lastConceder, matchWonPending, matchWinner, slowUntil;
   let lastVoteTick = -999;
@@ -84,7 +85,7 @@ export function createPong(room) {
       seat, edge: -1, pos: 0, team: 0, lives: cfg.lives, alive: true,
       member: null, mid: null, bot: false, playing: false,
       name: '', up: false, dn: false,
-      score: 0, growUntil: 0, shieldUntil: 0, immuneUntil: 0, invertUntil: 0, shrinkUntil: 0, isLeader: false,
+      score: 0, growUntil: 0, shieldUntil: 0, immuneUntil: 0, invertUntil: 0, shrinkUntil: 0, magnetUntil: 0, isLeader: false,
       hits: 0, pu: 0, kills: 0, dmg: 0, matchKills: 0, elimBy: -2, elimTick: -1, place: 0,
     }));
   }
@@ -105,7 +106,7 @@ export function createPong(room) {
     rules = defaultRules();
     sdActive = false; sdScale = 1; lastConceder = -1; matchWonPending = false; matchWinner = null; slowUntil = 0;
     players = makePlayers();
-    balls = [makeBall()]; powerups = [];
+    balls = [makeBall()]; powerups = []; bumpers = [];
     gameState = 'lobby'; winner = null; fx = []; tick = 0; nextPuTick = cfg.puMin;
     geo = null; botCount = 0; mode = 'ffa'; nteams = 0; lastVoteTick = -999; seatByMid = {};
     resetRoundStats();
@@ -174,11 +175,11 @@ export function createPong(room) {
     for (const p of players) {
       if (p.edge >= 0) {
         p.playing = true; p.alive = true; p.lives = cfg.lives;
-        p.up = p.dn = false; p.growUntil = p.shieldUntil = p.immuneUntil = p.invertUntil = p.shrinkUntil = 0; p.isLeader = false;
+        p.up = p.dn = false; p.growUntil = p.shieldUntil = p.immuneUntil = p.invertUntil = p.shrinkUntil = p.magnetUntil = 0; p.isLeader = false;
         nParts++;
       }
     }
-    balls = [makeBall()]; powerups = [];
+    balls = [makeBall()]; powerups = []; bumpers = rules.bumpers ? makeBumpers() : [];
     winner = null; fx = []; tick = 0; nextPuTick = cfg.puMin;
     countdownUntil = COUNTDOWN_TICKS; gameState = 'countdown';
   }
@@ -186,7 +187,7 @@ export function createPong(room) {
   function backToLobby() {            // abandon : retour au lobby en pleine partie (même s'il ne reste que des bots)
     if (gameState !== 'play' && gameState !== 'countdown' && gameState !== 'paused') return;
     for (const p of players) { p.playing = false; p.alive = true; p.up = p.dn = false; p.growUntil = p.shieldUntil = p.immuneUntil = p.invertUntil = p.shrinkUntil = 0; p.isLeader = false; }
-    powerups = []; winner = null; fx = []; tick = 0; sdActive = false; sdScale = 1; slowUntil = 0;
+    powerups = []; bumpers = []; winner = null; fx = []; tick = 0; sdActive = false; sdScale = 1; slowUntil = 0;
     gameState = 'lobby'; configure(); balls = [makeBall()];
   }
 
@@ -241,6 +242,9 @@ export function createPong(room) {
       case 'mini':    if (o) o.shrinkUntil = tick + SHRINKT_TICKS; break;
       case 'flip':    if (o) o.invertUntil = tick + INVERT_TICKS; break;
       case 'speed':   for (const bb of balls) { bb.vx *= 1.5; bb.vy *= 1.5; } break;
+      case 'blocker': if (bumpers.length < MAX_BUMPERS) { const ang = Math.random() * Math.PI * 2, rad = R * (0.25 + Math.random() * 0.35); bumpers.push({ x: CX + Math.cos(ang) * rad, y: CY + Math.sin(ang) * rad, r: BUMPER_R, orbAng: 0, orbR: 0, orbSp: 0, until: tick + BLOCKER_TICKS }); } break; // mur-bloqueur : bumper temporaire
+      case 'invis':   b.invisUntil = tick + INVIS_TICKS; break;                       // balle invisible
+      case 'magnet':  if (o) o.magnetUntil = tick + MAGNET_TICKS; break;               // aimant : ta raquette attire les balles
     }
   }
   function maybeSpawnPowerup() {
@@ -252,6 +256,24 @@ export function createPong(room) {
     const type = pool[Math.floor(Math.random() * pool.length)];
     const ang = Math.random() * Math.PI * 2, rad = Math.random() * (R * 0.45);
     powerups.push({ x: CX + Math.cos(ang) * rad, y: CY + Math.sin(ang) * rad, type, bad });
+  }
+  function makeBumpers() {                            // 2 plots qui orbitent autour du centre (mode bumpers)
+    const orbR = R * 0.4;
+    return [
+      { x: CX + orbR, y: CY, r: BUMPER_R, orbAng: 0, orbR, orbSp: 0.012, until: 0 },
+      { x: CX - orbR, y: CY, r: BUMPER_R, orbAng: Math.PI, orbR, orbSp: 0.012, until: 0 },
+    ];
+  }
+  function ballBumpers(b) {                           // rebond de la balle sur un bumper (cercle)
+    for (const bm of bumpers) {
+      const dx = b.x - bm.x, dy = b.y - bm.y, rr = bm.r + BALL_R, d2 = dx * dx + dy * dy;
+      if (d2 < rr * rr) {
+        const d = Math.sqrt(d2) || 1, nx = dx / d, ny = dy / d, vd = b.vx * nx + b.vy * ny;
+        if (vd < 0) { b.vx -= 2 * vd * nx; b.vy -= 2 * vd * ny; }
+        b.x = bm.x + nx * (rr + 0.5); b.y = bm.y + ny * (rr + 0.5);
+        fx.push({ type: 'bump', x: b.x, y: b.y });
+      }
+    }
   }
   function computeLeader() {
     players.forEach(p => p.isLeader = false);
@@ -407,8 +429,16 @@ export function createPong(room) {
     if (sdAccel && tick % 30 === 0) for (const b of balls) { b.vx *= 1.04; b.vy *= 1.04; }
     let curMax = cfg.max * (cfg.accelEvery ? (1 + tick / 3600) : 1);
     if (sdAccel) curMax = Math.max(curMax, cfg.max * 1.6);
+    // aimant : oriente les balles vers la raquette du porteur (vitesse conservée, pas d'emballement)
+    for (const p of players) if (inPlay(p) && p.magnetUntil > tick) {
+      const e = geo.edges[p.edge], mx = e.ax + e.tx * p.pos, my = e.ay + e.ty * p.pos;
+      for (const b of balls) { const sp = Math.hypot(b.vx, b.vy) || 1, tx = mx - b.x, ty = my - b.y, td = Math.hypot(tx, ty) || 1; b.vx += tx / td * 0.22; b.vy += ty / td * 0.22; const ns = Math.hypot(b.vx, b.vy) || 1; b.vx = b.vx / ns * sp; b.vy = b.vy / ns * sp; }
+    }
+    // bumpers : rotation des orbiteurs + retrait des temporaires expirés
+    if (bumpers.length) { for (const bm of bumpers) if (bm.orbR > 0) { bm.orbAng += bm.orbSp; bm.x = CX + Math.cos(bm.orbAng) * bm.orbR; bm.y = CY + Math.sin(bm.orbAng) * bm.orbR; } bumpers = bumpers.filter(bm => !bm.until || tick <= bm.until); }
     const slowF = slowUntil > tick ? SLOW_FACTOR : 1;
     for (const b of balls) { b.x += b.vx * slowF; b.y += b.vy * slowF; }
+    if (bumpers.length) for (const b of balls) ballBumpers(b);
     for (const b of balls) ballPaddles(b, curMax);
     for (const b of balls) ballPowerups(b);
     for (let bi = balls.length - 1; bi >= 0; bi--) if (ballEdges(bi, curMax)) return;
@@ -424,18 +454,26 @@ export function createPong(room) {
         lives: cfg.lives, pu: cfg.pu, accel: cfg.accelEvery > 0, speed: cfg.speedLevel,
         winMode: rules.winMode, roundsTarget: rules.roundsTarget, killsTarget: rules.killsTarget,
         sudden: rules.sudden, serve: rules.serve, handicap: rules.handicap,
-        negatives: rules.negatives, botDiff: rules.botDiff,
+        negatives: rules.negatives, botDiff: rules.botDiff, bumpers: rules.bumpers,
       },
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / 60), bounces: roundBounces, nParts, match: matchWonPending } : null,
       geo: geo ? { edges: geo.edges.map(e => ({ ax: r1(e.ax), ay: r1(e.ay), bx: r1(e.bx), by: r1(e.by), tx: e.tx, ty: e.ty, nx: e.nx, ny: e.ny, len: r1(e.len), owner: e.owner })) } : null,
-      balls: balls.map(b => ({ x: r1(b.x), y: r1(b.y), o: b.last >= 0 ? geo.edges[b.last].owner : -1, gh: !!b.ghost })),
+      balls: balls.map(b => ({ x: r1(b.x), y: r1(b.y), vx: r1(b.vx), vy: r1(b.vy), o: b.last >= 0 ? geo.edges[b.last].owner : -1, gh: !!b.ghost, iv: b.invisUntil > tick })),
       powerups: powerups.map(p => ({ x: p.x | 0, y: p.y | 0, type: p.type, bad: !!p.bad })),
+      bumpers: bumpers.map(bm => ({ x: r1(bm.x), y: r1(bm.y), r: bm.r, t: !!bm.until })),
       players: players.map(p => ({
         seat: p.seat, edge: p.edge, pos: r1(p.pos), team: p.team,
         lives: Math.max(0, p.lives), alive: p.alive, playing: p.playing, connected: !!p.member, bot: p.bot,
         name: p.name, score: p.score, len: Math.round(padLenOf(p)),
         grow: p.growUntil > tick, shield: p.shieldUntil > tick, immune: p.immuneUntil > tick,
-        inv: p.invertUntil > tick, shr: p.shrinkUntil > tick,
+        inv: p.invertUntil > tick, shr: p.shrinkUntil > tick, mag: p.magnetUntil > tick,
+        buffs: [                                        // [clé, fraction restante] pour les barres dégressives sur les cartes
+          p.growUntil > tick && ['grow', Math.round((p.growUntil - tick) / GROW_TICKS * 100) / 100],
+          p.shieldUntil > tick && ['shield', Math.round((p.shieldUntil - tick) / SHIELD_TICKS * 100) / 100],
+          p.invertUntil > tick && ['invert', Math.round((p.invertUntil - tick) / INVERT_TICKS * 100) / 100],
+          p.shrinkUntil > tick && ['shrink', Math.round((p.shrinkUntil - tick) / SHRINKT_TICKS * 100) / 100],
+          p.magnetUntil > tick && ['magnet', Math.round((p.magnetUntil - tick) / MAGNET_TICKS * 100) / 100],
+        ].filter(Boolean),
         hits: p.hits, puGot: p.pu, kills: p.kills, dmg: p.dmg, matchKills: p.matchKills, lead: p.isLeader,
         elimBy: p.elimBy, elimTick: p.elimTick, place: p.place,
       })),
@@ -511,6 +549,7 @@ export function createPong(room) {
         else if (op === 'ktar') rules.killsTarget = Math.max(3, Math.min(30, rules.killsTarget + (m.d > 0 ? 1 : -1)));
         else if (op === 'negatives') rules.negatives = !rules.negatives;
         else if (op === 'botdiff') rules.botDiff = BOTDIFF_ORDER[(BOTDIFF_ORDER.indexOf(rules.botDiff) + 1) % BOTDIFF_ORDER.length];
+        else if (op === 'bumpers') rules.bumpers = !rules.bumpers;
       }
     } else if (m.t === 'lbreset') reset(GID);
   }

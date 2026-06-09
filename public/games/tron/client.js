@@ -5,7 +5,7 @@ const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#
 const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E69F00', '#009E73'] };
 const TEAM_LETTER = ['A', 'B', 'C'];
 const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3' };
-const PU = { speed: { i: '»', c: '#9fe6ff' }, ghost: { i: '◌', c: '#cbb3ff' }, cut: { i: '✄', c: '#ffd76b' } };
+const PU = { speed: { i: '»', c: '#9fe6ff' }, ghost: { i: '◌', c: '#cbb3ff' }, cut: { i: '✄', c: '#ffd76b' }, blink: { i: '➤', c: '#7fffd4' }, breaker: { i: '⊘', c: '#ffcf5a' }, invert: { i: '⇄', c: '#ff9be0' } };
 const THEMES = {
   neon: { bg: '#0a0a14', field: '#0d0e1c', grid: 'rgba(255,255,255,0.05)', wall: '#2a2f48' },
   crt: { bg: '#04140b', field: '#06190e', grid: 'rgba(120,255,170,0.08)', wall: '#16432a' },
@@ -20,7 +20,7 @@ export default (function () {
   let mySeat = -1, snap = null, prevGs = 'lobby', teamMode = false, endShown = false, inGamePrev = false, prevRound = -1;
   let board = [], buf = [];
   const particles = [];
-  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, boostHeld = false;
+  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, boostHeld = false, killcam = null;
   let hud, cards, startBtn, pauseBtn, modeBtn, fadeBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
@@ -88,7 +88,7 @@ export default (function () {
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
-    if (m.round !== prevRound) { prevRound = m.round; buf = []; particles.length = 0; }
+    if (m.round !== prevRound) { prevRound = m.round; buf = []; particles.length = 0; killcam = null; }
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     if (prevGs !== 'over' && m.gs === 'over') sound('win');
@@ -111,9 +111,11 @@ export default (function () {
   function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
   function sound(k) { if (!actx) return; if (k === 'crash') { tone(180, 0.22, 'sawtooth', 0.06); tone(90, 0.3, 'sawtooth', 0.05, 0.04); } else if (k === 'pickup') { tone(660, 0.07, 'square', 0.05); tone(990, 0.08, 'square', 0.05, 0.06); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
-    if (f.type === 'pickup') return sound('pickup');
+    if (f.type === 'pickup' || f.type === 'break') return sound('pickup');
     if (f.type === 'crash') {
-      sound('crash'); if (A.reduceFx) return;
+      sound('crash');
+      if (f.seat === mySeat && !A.reduceFx) killcam = { x: f.x, y: f.y, born: performance.now() };   // killcam sur ta propre collision
+      if (A.reduceFx) return;
       shakeMag = Math.max(shakeMag, 6);
       const x = px(f.x), y = px(f.y), col = colSeat(f.seat), now = performance.now();
       for (let k = 0; k < 16; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 4; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 420 + Math.random() * 260, color: col }); }
@@ -143,11 +145,19 @@ export default (function () {
     const sc = cv.width / ARENA;
     let ox = 0, oy = 0;
     if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.85; } else shakeMag = 0;
-    ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
+    let sscale = sc, tax = ox * sc, tay = oy * sc;
+    if (killcam && !A.reduceFx) {                         // killcam : zoom bref sur ta propre collision
+      const age = now - killcam.born, D = 750;
+      if (age < D) { const w = Math.sin(Math.PI * age / D), z = 1 + 0.35 * w, cpx = killcam.x * CELL + CELL / 2, cpy = killcam.y * CELL + CELL / 2; sscale = sc * z; tax = (ox * sc) * (1 - w) + (cv.width / 2 - cpx * sscale) * w; tay = (oy * sc) * (1 - w) + (cv.height / 2 - cpy * sscale) * w; }
+      else killcam = null;
+    }
+    ctx.setTransform(sscale, 0, 0, sscale, tax, tay);
     ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, ARENA, ARENA);
     ctx.fillStyle = TH.field; ctx.fillRect(0, 0, ARENA, ARENA);
+    ctx.save(); if (!A.reduceFx) ctx.globalAlpha = 0.65 + 0.35 * Math.sin(now / 700);   // pulsation de la grille
     ctx.strokeStyle = TH.grid; ctx.lineWidth = 1;
     for (let i = 0; i <= GW; i += 5) { const x = i * CELL; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ARENA); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, x); ctx.lineTo(ARENA, x); ctx.stroke(); }
+    ctx.restore();
     // murs (rétrécissement)
     const L = snap ? (snap.shrink || 0) : 0;
     if (L > 0) { ctx.fillStyle = TH.wall; const w = L * CELL; ctx.fillRect(0, 0, ARENA, w); ctx.fillRect(0, ARENA - w, ARENA, w); ctx.fillRect(0, 0, w, ARENA); ctx.fillRect(ARENA - w, 0, w, ARENA); }
@@ -179,6 +189,13 @@ export default (function () {
           ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 14 * FX; ctx.fillStyle = p.ghost ? col : '#fff';
           ctx.globalAlpha = p.ghost ? 0.7 : 1; ctx.fillRect(hx - CELL / 2, hy - CELL / 2, CELL, CELL);
           ctx.fillStyle = col; ctx.globalAlpha = 0.5; ctx.fillRect(hx - CELL / 2, hy - CELL / 2, CELL, CELL); ctx.restore();
+          if ((p.speed || p.boosting) && !A.reduceFx) {            // speed lines derrière la tête
+            let dx = 0, dy = 0; const pth = p.path || [];
+            if (pth.length >= 2) { const a = pth[pth.length - 2], b = pth[pth.length - 1]; dx = Math.sign(b[0] - a[0]); dy = Math.sign(b[1] - a[1]); }
+            if (dx || dy) { ctx.save(); ctx.strokeStyle = col; ctx.lineCap = 'round'; ctx.shadowColor = col; ctx.shadowBlur = 8 * FX;
+              for (let k = 1; k <= 3; k++) { ctx.globalAlpha = 0.45 / k; ctx.lineWidth = Math.max(1, (CELL - 2) * 0.5 / k); ctx.beginPath(); ctx.moveTo(hx - dx * CELL * k, hy - dy * CELL * k); ctx.lineTo(hx - dx * CELL * (k + 0.5), hy - dy * CELL * (k + 0.5)); ctx.stroke(); }
+              ctx.restore(); }
+          }
           if (p.seat === mySeat) { ctx.save(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(now / 200); ctx.strokeRect(hx - CELL / 2 - 2, hy - CELL / 2 - 2, CELL + 4, CELL + 4); ctx.restore(); }
         }
       });
@@ -193,6 +210,8 @@ export default (function () {
       ctx.fillStyle = b > 0.25 ? '#9fe6ff' : '#ff7a7a'; ctx.fillRect(bx, by, bw * b, bh);
       ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
       ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText('BOOST (Maj)', ARENA / 2, by - 2);
+      if (me.brk) { ctx.fillStyle = '#ffcf5a'; ctx.font = 'bold 13px system-ui'; ctx.fillText('⊘ casse-mur prêt', ARENA / 2, by - 16); }   // casse-mur dispo
+      if (me.inv) { ctx.save(); ctx.globalAlpha = 0.6 + 0.4 * Math.sin(now / 90); ctx.fillStyle = '#ff9be0'; ctx.font = 'bold 18px system-ui'; ctx.textBaseline = 'top'; ctx.fillText('⇄ CONTRÔLES INVERSÉS', ARENA / 2, 8); ctx.restore(); }   // alerte inversion
     }
 
     if (snap && snap.gs === 'countdown') {

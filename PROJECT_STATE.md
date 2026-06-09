@@ -56,15 +56,17 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
 - **Renvoi piloté par le point d'impact** : centre = tout droit, bord = fort angle. `PADDLE_MAX_ANGLE=1.05`, `HIT_SPEEDUP=1.05`.
 - Presets 🎮 Classique/Rapide/Chaos + Options ⚙ (vies 1–9, vitesse, power-ups, accél → preset « Personnalisé »).
 - Règles de match : victoire (survivant/manches N/éliminations N), mort subite (off/rétrécit/accélère), service, handicap 👑.
-- Power-ups : multi, grow, shield, ghost, invert, shrinkT, slow (+ négatifs mini/flip/speed). Immunité 3 s.
-- Bots (Facile/Normal/Difficile), spectateurs (7e+, lâchent un power-up 🎁), équipes FFA/2v2/2v2v2/3v3.
+- Power-ups : multi, grow, shield, ghost, invert, shrinkT, slow, **🧱 blocker** (bumper temporaire), **🧲 magnet** (aimante les balles vers ta raquette, vitesse conservée) (+ négatifs mini/flip/speed, **∅ invis** = balle quasi invisible). Immunité 3 s.
+- **Bumpers rotatifs** (option ⚙ `bumpers`) : 2 plots orbitent au centre et font rebondir les balles (collision cercle `ballBumpers`). Le blocker pose un plot statique temporaire (`BLOCKER_TICKS=8 s`, max `MAX_BUMPERS`).
+- Bots (Facile/Normal/Difficile/**Insane**), spectateurs (7e+, lâchent un power-up 🎁), équipes FFA/2v2/2v2v2/3v3.
 - Commandes : ↑↓ / ←→ / WASD, **Espace** lancer, **P/Échap** pause, boutons tactiles ▲▼.
 - Messages C→S : input{up,dn}, start, pause, bots, mode, preset, opt{op,d}, vote, lbreset.
 - Tuning : R=232, PAD_LEN=84, PAD_W=12, PAD_OFF=8, BALL_R=8, PAD_SPD=5.5, MIN_SPD=2.6. Vitesses init/max 3.6/10·4.6/14·6.2/20. Accél ×1.03/75 ticks.
 
 ## Jeu : TRON  (`tron`, 2–6, tickHz 15)
 - Grille 50×50 (CELL 10, ARENA 500). Traînée = file de cellules `p.cells`, **compressée en coins** pour le réseau.
-- **Bonus** : `»` vitesse (temp), `◌` fantôme (traverse les traînées), `✄` coupe sa propre traînée.
+- **Bonus** : `»` vitesse (temp), `◌` fantôme (traverse les traînées), `✄` coupe sa propre traînée, **`➤` téléport court** (`BLINK_DIST=4`), **`⊘` casse-mur** (traverse/détruit 1 traînée, usage unique), **`⇄` inversion** (contrôles adverses inversés `INVERT_TICKS=4 s`).
+- **Killcam** (client) : zoom bref sur ta propre collision ; alerte « ⇄ CONTRÔLES INVERSÉS » quand tu es affecté.
 - **Boost à la jauge** : maintenir **Maj** (ou bouton ⚡) → 2 cases/tick, jauge `BOOST_MAX=100` (régen 0.7 / coût 2.6).
 - **Rétrécissement** d'arène : `SHRINK_START=22 s`, un anneau toutes les `SHRINK_EVERY=2 s` (cellules = WALL -2).
 - **Traînée ∞ / courte** (bouton `fade`) : en mode court, la queue s'efface au-delà de `TRAIL_LIFE=130` cases.
@@ -77,32 +79,41 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
 - Arène continue 600×600, **grille de blocs 15×15** (1=solide, 2=destructible). **Maps PROCÉDURALES**.
 - **Génération** (bouton 🧱) : styles `Symétrique`(180°) / `Aléatoire` / `4 coins` ; densité 0.14 ; **connectivité garantie**
   (24 essais BFS : spawns reliés + ≥60 % libre ; repli piliers) ; spawns dégagés ; murs destructibles semés (0.42).
-- **Power-ups** : `»` rapide, `⋔` triple, `⛉` bouclier(×2), `👟` vitesse, `➳` perçant (1 mur), `◈` mine.
+- **Power-ups** : `»` rapide, `⋔` triple, `⛉` bouclier(×2), `👟` vitesse, `➳` perçant (1 mur), `◈` mine, **🔧 réparation** (+1 vie, max 3), **⚡ EMP** (étourdit les ennemis proches `EMP_R`, `EMP_T=2 s` : ni mouvement ni tir), **🚀 missile guidé** (`HOMING_T=8 s`, les obus tirés braquent vers l'ennemi le plus proche, braquage `HOMING_TURN`, vitesse conservée), **👁 camouflage** (`CAMO_T=6 s`, quasi invisible pour les ennemis — alpha 0.1 côté client — sauf s'ils ont le radar ; soi-même et alliés vus estompés), **📡 radar** (`RADAR_T=10 s`, révèle les tanks camouflés et cercle les ennemis détectés).
+- **Hasards d'arène** (semés par `buildArena` sur des cases libres hors spawns, traversables → n'affectent pas la connectivité) : **🛢 barils explosifs** (`BARREL_COUNT=4` ; un obus qui touche un baril déclenche `detonateBarrels` → `explode` : dégâts de zone `BARREL_DMG_R` à **tous** les tanks proches + casse les murs cassables autour ; **chaîne** les barils voisins `BARREL_CHAIN`) ; **zones de boue** (`MUD_COUNT=10` cases, `mudSet` ; un tank dont le centre est sur une case boueuse voit sa vitesse ×`MUD_MUL=0.5`).
+- **Barre de vie** (client) dessinée au-dessus de chaque tank (3 segments = vies ; rouge à 1 vie ; masquée si le tank est camouflé/invisible pour toi). Snapshot : `barrels[{x,y}]`, `mud[idx…]`, obus `h` (guidé), joueur `homing/camo/radar` + `buffs` (timers dégressifs).
+- **Bots IA** (bouton 🤖) : `botCount` 0..maxBots ; `botThink` (vise l'ennemi le plus proche, avance, tire aligné, se dégage des murs, pose des mines). Démarrage possible dès **1 humain + 2 participants** (humains+bots). Sièges de bots protégés contre la reprise par un humain.
 - **Mines** : pose **E/Maj** (bouton ◈), s'arment (`MINE_ARM`), explosent au passage d'un ennemi (`MINE_R=30`). Couleur = poseur.
 - Obus à **rebonds** (`MAX_BOUNCE=3`), `MAX_SHELLS=2` (triple = salve). 3 vies + respawn + invuln (`INVULN=45`).
 - **Collision tank-tank** + légère poussée. Équipes (⚔) + **mode manches** 🏁 (`WIN_TARGETS=[1,3,5]`, « REMPORTE LE MATCH »).
 - Commandes : ←→ / AD tourner, ↑↓ / WS avancer/reculer, **Espace** tirer, **E/Maj** mine, **P** pause ; tactile ↺▲▼↻🔥◈.
-- Messages C→S : input{left,right,fwd,back,fire}, mine, start, pause, mode, arena, wintarget, ff, lbreset.
+- Messages C→S : input{left,right,fwd,back,fire}, mine, start, pause, mode, bots, arena, wintarget, ff, lbreset.
 
 ## Jeu : BOMBERMAN  (`bomb`, 1–6, tickHz 30)
 - Grille 13×13 (CELL 40), cadre solide. **Maps PROCÉDURALES** (bouton 🧱, mêmes styles/connectivité, densité 0.18, murs 0.72).
-- **Bonus** : 💣 +bombe, 🔥 +portée, 👟 +vitesse, 🦵 poussée, 📡 détonateur, 👻 traverse-murs, 🧤 gant (lancer), 🛡 bouclier.
-- **Malus** (icône rouge) : 🔀 inversion, 🐌 lenteur, ⏱ pose auto (durée `DUR=8 s`).
+- **Bonus** : 💣 +bombe, 🔥 +portée, 👟 +vitesse, 🦵 poussée, 📡 détonateur, 👻 traverse-murs, 🧤 gant (lancer), 🛡 bouclier, **📏 bombe en ligne** (pose une rangée devant soi via `placeBombAt`).
+- **Malus** (icône rouge) : 🔀 inversion, 🐌 lenteur, ⏱ pose auto (durée `DUR=8 s`), **💀 skull** (affliction aléatoire `SKULL_KINDS`, **contagieuse au contact**).
+- **🌀 Téléporteurs** (cellule `3`, 1 paire/map placée hors connectivité via `warpOf`) : entrée sur un portail → sortie au jumeau (anti ping-pong via `lastCell`, désactivé si la sortie est ensevelie par la mort subite).
 - **Action** (X/Maj, bouton 🧤) : avec gant → lance la bombe sous soi ; avec détonateur → fait exploser ses bombes 📡.
 - Bombes : `BOMB_FUSE=90`, **chaînage**, explosion en croix (casse 1 mur par branche). Portée + compte à rebours affichés (client).
 - **Mort subite** : `SD_START=65 s`, blocs qui tombent en spirale (`SD_SPIRAL`). Équipes (⚔). **Solo** = bac à sable (hors classement).
+- **Mode revanche** (bouton ☠, OFF par défaut, ≥2 joueurs) : à la mort, le joueur ne disparaît pas → devient **revenant** sur l'**anneau du bord** (`RING`, sens horaire) ; il se déplace le long du cadre (`revMove`, `REV_MOVE_EVERY=5`) et **pose des bombes vers la case intérieure adjacente** (`revBomb`/`innerCell`). S'il élimine un **vivant** depuis le bord, il **ressuscite** (`reviveRevenant` : spawn ou `freeInteriorCell`, invuln 2 s). Fin via `roundOver()` : plus aucun vivant **ou** un seul camp présent (vivant **ou** revenant) ; **terminaison garantie par la mort subite** (l'arène se remplit → plus de case de résurrection). `endRound` revanche : gagnant = seul camp présent, sinon meilleur total de kills ; places = vivants d'abord puis par `elimTick`. Snapshot : `revenge`, joueur `rvn`. Client : revenant translucide sur le bord + case visée (pour soi), badge HUD « ☠ revanche ».
 - Commandes : ↑↓←→ / WASD, **Espace/B** bombe, **X/Maj** action, **P** pause ; tactile : dpad + 💣 + 🧤.
 - Messages C→S : input{up,down,left,right}, bomb, action, start, pause, mode, gen, ff, lbreset.
 
 ## Jeu : SNAKE  (`snake`, 1–6, tickHz 12)
 - Grille 30×30 (CELL 17, ARENA 510). Chaque joueur = un serpent (file de cellules). FFA ou équipes (⚔, dernier **camp** en vie).
 - **Manger** : pastilles 🍎 (`FOOD_COUNT=4` en permanence) → +`GROW_PER_FOOD=2` segments + score. Longueur de départ `INIT_LEN=4`.
+- **Types de nourriture** : 🍎 pomme (+1), 🟡 **dorée** (+3 pts), 🍄 **champignon** (raccourcit `SHRINK_AMT=4`), 👻 **fantôme** (`ghostUntil`, traverse les corps `GHOST_TICKS=5 s`, pas murs/rochers). *(baie de vitesse écartée : casserait le pas-de-temps simultané.)*
+- **Serpent mort → nourriture** : son corps laisse des pastilles (1 cellule/2, plafond 15) que les autres ramassent (slither-like).
+- **Variantes** (bouton 🐍) : `Classique` / `Murs traversants` (wrap des bords) / `Obstacles` (rochers `ROCK_COUNT=16` loin des têtes).
+- **Mode de partie** (bouton 🏁, orthogonal aux variantes, OFF par défaut) : `Survie` (classique, dernier en vie) **ou** `Food-rush` (`RUSH_FOOD=12` pastilles en permanence ; **premier à `RUSH_TARGET=20` points gagne immédiatement** via `endRound(team)` ; si fin par élimination, gagnant = meilleur score via `bestScoreTeam()`). Snapshot : `rush`, `rushTarget`. Client : bouton, indicateur `🏁 lead/20` en jeu, mention au lobby, classement final au score.
 - **Mort** : tête qui sort de la grille **ou** entre dans un corps de serpent (le sien ou un autre) ; choc frontal (même case) = les deux meurent.
   Crédit kill au propriétaire de la cellule touchée. Un serpent mort **disparaît** (n'est plus un obstacle).
 - Résolution **simultanée** (têtes calculées d'un coup) ; la **queue se libère** dans le tick (on peut suivre une queue) sauf si croissance.
 - **Solo** (1 joueur) = entraînement/score (hors classement). Dernier en vie gagne en multi.
 - Commandes : ↑↓←→ / WASD (pas de demi-tour), **Espace** lancer, **P/Échap** pause ; tactile : dpad. Pas de bonus/boost (pur classique).
-- Snapshot : `food[]`, `players[{head,path(corners),len,score,kills,…}]`. Messages C→S : dir{d}, start, pause, abort, mode, lbreset.
+- Snapshot : `food[{x,y,t}]`, `rocks[]`, `variant`, `players[{head,path(corners),len,score,ghost,…}]`. Messages C→S : dir{d}, start, pause, abort, mode, variant, lbreset.
 - Leaderboard : games, wins, kills, K/D, **meilleur score** 🍎, meilleure survie.
 
 ---
@@ -116,6 +127,9 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
 - **Reconnexion** par token : **période de grâce de 12 s** côté hub (le siège et l'état du jeu sont conservés à la coupure ;
   un F5 réutilise le même membre). Au-delà, élimination via `onLeave`. Chaque jeu garde aussi `seatByMid` (reprise après grâce).
 - **Quitter en cours** : bouton flottant ✕ → `abort` → `backToLobby()` (retour lobby sans perdre les sièges).
+- **Lot transverse (social/UX)** : **émotes** (bouton flottant 😀 → broadcast `{t:'emote',e}` via hub, anti-spam 700 ms, toasts chez tous) ; **classement global cross-jeux** (bouton 🏅 : le shell agrège les `lb` de tous les jeux par pseudo → wins/kills/parties cumulés) ; **ping** (client `{t:'png',ts}` toutes les 3 s, hub echo, RTT affiché). Différé restant : profils/avatars (intégration HUD par jeu).
+- **Système « Prêt » (gate de démarrage, transverse aux 6 jeux — FAIT)** : entièrement dans **hub + shell**, **zéro modif des 6 clients de jeu**. Hub : `member.ready` ; `roomMsg` envoie `host` (= 1er joueur connecté) + `ready` par joueur ; `allReady()` = tous les **membres role=player** prêts (les **bots ne sont pas des membres** → exclus → jamais bloquants) ; le hub **gate** `{t:'g',m:{t:'start'}}` quand `game.isIdle() && !allReady()` (renvoie `{t:'notready'}`) ; `{t:'ready',v}` togglé ; `{t:'forcestart'}` réservé à l'hôte (bypass) ; **réarmement** auto des « Prêt » à chaque manche lancée (transition idle→actif détectée dans `step()` via `wasIdle`). Shell (`app.js`) : barre `#readyBar` (lobby/over seulement) listant ✅/⚪ par joueur + 👑 hôte, bouton **« Prêt »** (joueurs), bouton **« ⏩ Forcer le départ »** (hôte), toast `notready`. Le bouton Démarrer de chaque jeu reste inchangé mais est gaté côté hub.
+- **Modes alternatifs (ex-différés « condition de victoire », FAIT)** : **Snake food-rush** (bouton 🏁 — premier à 20 🍎) et **Bomberman revanche** (bouton ☠ — les morts bombardent depuis le bord et peuvent revenir). Tous deux **OFF par défaut**, sans impact sur le jeu de base. *(Différés Tron — mine + hasards d'arène — abandonnés à la demande.)*
 - **Identité visuelle propre par jeu** (FIXE, constante `SKIN` dans chaque client, pas de sélecteur) :
   Tanks → **Désert** (sable, acier riveté, caisses bois) ; Snake → **Jardin** (herbe en damier, pommes) ; Bomberman → **Cartoon** (herbe pastel, murs arrondis) ; Pong & Tron → **Néon**.
   Le sélecteur de thème global (Néon/CRT/Clair) ne pilote plus que le **shell** + Pong/Tron. `reduceFx` (réduire les effets) et la palette daltonien restent appliqués dans tous les jeux.
@@ -124,6 +138,8 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
 - **Plateau adaptatif** : taille calculée par écran ; s'agrandit en jeu (chrome masqué) ; ⏸ flottant en jeu, ⚙️ flottant en pause.
 - **Juice** : interpolation client (lerp), particules, shake, décompte 3·2·1, écran de fin + classement.
 - **Pack « quick-wins » (polish)** : 🎉 **confettis** de victoire (overlay global, déclenché par `state.gs==='over' && winner>=0`) · **fondu de transition** entre jeux (`#xfade`) · **volume SFX** (slider `a11y.sfx`, branché dans chaque `tone()`) + **plein écran** + **vibration tactile** mobile (réglages shell). Par jeu : Pong = flash d'impact ; Tron = bloom renforcé + cœur de traînée ; Tanks = jauge de munitions ; Bomberman = étincelle de mèche animée + cases « danger » clignotantes ; Snake = yeux + tête arrondie. Tout respecte `reduceFx`.
+- **Pack « quick-wins » lot 2** : Pong → **lueur des bords** quand une balle frôle + **particules** au ramassage de power-up + **icônes d'effets actifs** (pulsantes) sur les cartes + **IA « insane »** ; Tron → **pulsation de grille** + **speed lines** (boost/vitesse, flag serveur `boosting`) + **traînée d'équipe traversable** (coéquipiers) ; Tanks → **flash de bouche** + **poussière** au déplacement + **fumée** (tank à 1 vie) ; Snake → **éclaboussure** de pomme à la bouffe ; shell → **nombre de spectateurs** dans le bandeau. 🟡 différés (besoin de données serveur) : barres dégressives d'effets (Pong), flèche de service (Pong), trail d'obus (Tanks), dégradé de queue (Snake), indicateur de ping.
+- **Lot « finir le polish » (🟡 petits ajouts serveur — FAIT)** : Pong → **barres d'effets dégressives** sur les cartes (serveur envoie `players[].buffs=[[clé,fraction]]`) + **flèche de sens de service** (serveur envoie `balls[].vx/vy`, flèche dessinée au décompte) ; Tanks → **timers d'effets dégressifs** (mêmes `buffs`) + **traînée d'obus** (serveur envoie `shells[].vx/vy`). Pastille `.buff` = fond en dégradé qui se vide. Restent 🟡 : dégradé de queue Snake (traînées compressées en sommets), indicateur de ping (protocole).
 - **Optimisation hub** : diffusion plein régime en jeu, ~4 Hz en lobby/pause/fin, boucle suspendue si 0 membre.
 
 ## Bugs corrigés (historique)

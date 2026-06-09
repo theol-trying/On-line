@@ -14,12 +14,21 @@
     <div class="sub" id="sub">plateforme multijeux · réseau local</div>
   </header>
 
-  <div id="msg"><span id="status-dot"></span><span id="msg-txt">Connexion…</span></div>
+  <div id="msg"><span id="status-dot"></span><span id="msg-txt">Connexion…</span><span id="pingTxt"></span></div>
   <div class="namebar"><input id="nameInput" maxlength="12" placeholder="Ton pseudo" autocomplete="off"></div>
 
   <div class="shellrow">
     <div id="gamemenu"></div>
+    <button id="globalBtn" class="ghosttab" aria-label="classement global">🏅 Global</button>
     <button id="setBtn" class="ghosttab" aria-label="réglages d'affichage">⚙️ Affichage</button>
+  </div>
+
+  <!-- ===== barre « Prêt » (gate de démarrage, commune aux 6 jeux) ===== -->
+  <div id="readyBar" class="readybar hidden">
+    <div id="readyList" class="readylist"></div>
+    <span id="readyCount" class="readycount"></span>
+    <button id="readyBtn" class="rbtn">☐ Pas prêt</button>
+    <button id="forceBtn" class="rbtn force" style="display:none">⏩ Forcer le départ</button>
   </div>
 
   <!-- ===== racine du jeu PONG ===== -->
@@ -74,6 +83,7 @@
         <div class="srow"><span>Service</span><button id="optServe" class="cyc">Aléatoire</button></div>
         <label class="srow"><span>Handicap (catch-up)</span><input type="checkbox" class="switch" id="optHandi"></label>
         <label class="srow"><span>Power-ups négatifs</span><input type="checkbox" class="switch" id="optNeg"></label>
+        <label class="srow"><span>Bumpers (centre)</span><input type="checkbox" class="switch" id="optBump"></label>
         <div class="srow"><span>Bots (IA)</span><button id="optBot" class="cyc">Normal</button></div>
       </div>
     </div>
@@ -89,11 +99,14 @@
         <div class="legrow"><span>⇄</span><b>Inversion</b> — inverse les contrôles d'un adversaire</div>
         <div class="legrow"><span>▭</span><b>Raquette réduite</b> — rétrécit la raquette d'un adversaire</div>
         <div class="legrow"><span>≈</span><b>Ralenti</b> — ralentit la balle un court instant</div>
+        <div class="legrow"><span>🧱</span><b>Mur-bloqueur</b> — dépose un plot temporaire qui fait rebondir les balles</div>
+        <div class="legrow"><span>🧲</span><b>Aimant</b> — ta raquette attire les balles quelques secondes</div>
         <h4>Malus (icône rouge — si « Power-ups négatifs » activé)</h4>
         <div class="legrow"><span>▽</span><b>Ta raquette rétrécit</b></div>
         <div class="legrow"><span>✕</span><b>Tes contrôles s'inversent</b></div>
         <div class="legrow"><span>»</span><b>Balle accélérée</b></div>
-        <div class="note">Le porteur du dernier renvoi récupère le bonus. Active/désactive les power-ups dans ⚙ Options.</div>
+        <div class="legrow"><span>∅</span><b>Balle invisible</b> — une balle devient presque invisible un instant !</div>
+        <div class="note">Le porteur du dernier renvoi récupère le bonus. Active/désactive les power-ups et les <b>bumpers</b> (plots qui orbitent au centre) dans ⚙ Options.</div>
       </div>
     </div>
 
@@ -150,6 +163,9 @@
         <div class="legrow"><span>»</span><b>Vitesse</b> — ta moto avance 2× plus vite (quelques secondes)</div>
         <div class="legrow"><span>◌</span><b>Fantôme</b> — tu traverses les traînées sans crasher (quelques secondes)</div>
         <div class="legrow"><span>✄</span><b>Coupe</b> — efface immédiatement toute ta traînée actuelle</div>
+        <div class="legrow"><span>➤</span><b>Téléport</b> — saute de quelques cases vers l'avant (par-dessus un obstacle)</div>
+        <div class="legrow"><span>⊘</span><b>Casse-mur</b> — traverse/détruit UNE traînée sans crasher (usage unique)</div>
+        <div class="legrow"><span>⇄</span><b>Inversion</b> — inverse les contrôles de tes adversaires (quelques secondes)</div>
         <h4>Boost</h4>
         <div class="legrow"><span>⚡</span><b>Boost</b> — touche <b>Maj</b> (ou bouton ⚡) : accélère à la demande tant que la jauge (en bas) tient, puis se régénère</div>
         <div class="note">L'arène se referme avec le temps (mort subite). En mode « traînée courte », ta queue s'efface au fil du temps.</div>
@@ -169,6 +185,7 @@
       <button id="tkStart" class="primary" disabled>▶ Démarrer</button>
       <button id="tkPause" disabled>⏸ Pause</button>
       <span class="sep"></span>
+      <button id="tkBots">🤖 Bots : 0</button>
       <button id="tkMode" disabled>⚔ FFA</button>
       <button id="tkArena">🧱 Arène</button>
       <button id="tkWin">🏁 1 manche</button>
@@ -207,7 +224,15 @@
         <div class="legrow"><span>👟</span><b>Vitesse</b> — déplacement plus rapide (quelques secondes)</div>
         <div class="legrow"><span>➳</span><b>Obus perçant</b> — traverse un mur cassable au lieu d'y exploser</div>
         <div class="legrow"><span>◈</span><b>Mine</b> — à poser (E/Maj ou bouton ◈) ; explose au passage d'un ennemi</div>
-        <div class="note">❤ = vies restantes (3 par défaut). Les obus rebondissent (3 fois max) ; les murs clairs sont destructibles.</div>
+        <div class="legrow"><span>🔧</span><b>Réparation</b> — récupère une vie (max 3)</div>
+        <div class="legrow"><span>⚡</span><b>EMP</b> — étourdit brièvement les ennemis proches (ils ne bougent ni ne tirent)</div>
+        <div class="legrow"><span>🚀</span><b>Missile guidé</b> — tes obus se dirigent vers l'ennemi le plus proche (quelques secondes)</div>
+        <div class="legrow"><span>👁</span><b>Camouflage</b> — tu deviens quasi invisible pour les ennemis (sauf s'ils ont le radar)</div>
+        <div class="legrow"><span>📡</span><b>Radar</b> — révèle les tanks camouflés et cercle les ennemis détectés</div>
+        <h4>Hasards d'arène</h4>
+        <div class="legrow"><span>🛢</span><b>Baril explosif</b> — tire dessus : il explose en chaîne et blesse tout ce qui est proche (toi compris !)</div>
+        <div class="legrow"><span>🟤</span><b>Zone de boue</b> — ralentit les tanks qui la traversent</div>
+        <div class="note">❤ = vies restantes (3 par défaut), aussi affichées en <b>barre de vie</b> au-dessus de chaque tank. Les obus rebondissent (3 fois max) ; les murs clairs sont destructibles. Ajoute des <b>🤖 bots</b> avec le bouton de la barre (au moins 1 humain + 2 participants au total).</div>
       </div>
     </div>
   </div>
@@ -227,6 +252,7 @@
       <button id="bmMode" disabled>⚔ FFA</button>
       <button id="bmGen">🧱 Map</button>
       <button id="bmFf" disabled>🤝 Tir allié : OFF</button>
+      <button id="bmRevenge">☠ Revanche : OFF</button>
       <button id="bmHelp">❔ Bonus</button>
       <button id="bmLbBtn">🏆 Classement</button>
     </div>
@@ -256,11 +282,17 @@
         <div class="legrow"><span>👻</span><b>Fantôme</b> — traverse les murs destructibles</div>
         <div class="legrow"><span>🧤</span><b>Gant</b> — lance la bombe devant toi (action)</div>
         <div class="legrow"><span>🛡</span><b>Bouclier</b> — encaisse une explosion sans mourir</div>
+        <div class="legrow"><span>📏</span><b>Bombe en ligne</b> — pose une rangée de bombes devant toi (si tu as assez de bombes)</div>
         <h4>Malus (icône rouge)</h4>
         <div class="legrow"><span>🔀</span><b>Inversé</b> — tes commandes sont inversées</div>
         <div class="legrow"><span>🐌</span><b>Ralenti</b> — tu te déplaces moins vite</div>
         <div class="legrow"><span>⏱</span><b>Pose auto</b> — tu poses des bombes automatiquement</div>
-        <div class="note">Action = touche <b>X / Maj</b> (ou bouton 🧤). Les effets durent quelques secondes ; les bonus d'équipement (💣🔥👟🦵📡👻🧤🛡) restent jusqu'à ta mort.</div>
+        <div class="legrow"><span>💀</span><b>Skull</b> — affliction aléatoire… <b>contagieuse</b> : elle se transmet aux joueurs que tu touches !</div>
+        <h4>Décor</h4>
+        <div class="legrow"><span>🌀</span><b>Téléporteur</b> — marche sur un portail pour ressortir à son jumeau</div>
+        <h4>Mode revanche (bouton ☠)</h4>
+        <div class="legrow"><span>☠</span><b>Revanche</b> — quand tu meurs (à 2 joueurs+), tu ne disparais pas : tu rejoins le <b>bord</b> de l'arène. Déplace-toi le long du cadre et <b>pose des bombes vers l'intérieur</b> (touche bombe). Si tu élimines un vivant depuis le bord, tu <b>ressuscites</b> dans l'arène ! La manche se termine quand un seul camp subsiste (la mort subite garantit la fin).</div>
+        <div class="note">Action = touche <b>X / Maj</b> (ou bouton 🧤). Les effets durent quelques secondes ; les bonus d'équipement (💣🔥👟🦵📡👻🧤🛡📏) restent jusqu'à ta mort.</div>
       </div>
     </div>
   </div>
@@ -278,6 +310,9 @@
       <button id="snPause" disabled>⏸ Pause</button>
       <span class="sep"></span>
       <button id="snMode" disabled>⚔ FFA</button>
+      <button id="snVariant">🐍 Classique</button>
+      <button id="snRush">🏁 Survie</button>
+      <button id="snHelp">❔ Nourriture</button>
       <button id="snLbBtn">🏆 Classement</button>
     </div>
     <div class="help">
@@ -293,6 +328,35 @@
       <div class="shead"><h3>🏆 Classement — Snake</h3><button class="sclose" aria-label="fermer">✕</button></div>
       <div class="sbody"><div id="snLbBody"></div></div>
     </div>
+    <div id="snHelpPanel" class="settings hidden" style="width:min(94vw,420px);">
+      <div class="shead"><h3>Nourriture &amp; variantes — Snake</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody">
+        <h4>Nourriture</h4>
+        <div class="legrow"><span>🍎</span><b>Pomme</b> — grandit un peu, +1 point</div>
+        <div class="legrow"><span>🟡</span><b>Pomme dorée</b> — grandit, <b>+3 points</b></div>
+        <div class="legrow"><span>🍄</span><b>Champignon</b> — te <b>raccourcit</b> (pratique pour t'extraire)</div>
+        <div class="legrow"><span>👻</span><b>Fantôme</b> — tu <b>traverses les serpents</b> quelques secondes (pas les murs/rochers)</div>
+        <div class="note">Un serpent qui meurt laisse son corps en <b>nourriture</b> à ramasser !</div>
+        <h4>Variantes (bouton 🐍)</h4>
+        <div class="legrow"><span>🐍</span><b>Classique</b> — les murs tuent</div>
+        <div class="legrow"><span>🌀</span><b>Murs traversants</b> — tu ressors de l'autre côté</div>
+        <div class="legrow"><span>🪨</span><b>Obstacles</b> — des rochers parsèment l'arène</div>
+        <h4>Mode de partie (bouton 🏁)</h4>
+        <div class="legrow"><span>🐍</span><b>Survie</b> — règle classique : le dernier serpent en vie gagne</div>
+        <div class="legrow"><span>🏁</span><b>Food-rush</b> — l'arène déborde de pastilles ; le <b>premier à 20 points</b> 🍎 gagne tout de suite (sinon, à l'élimination, c'est le meilleur score qui l'emporte)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== émotes (flottant, dispo en lobby et en jeu) ===== -->
+  <div id="emoteToasts"></div>
+  <button id="emoteFloat" aria-label="émotes">😀</button>
+  <div id="emoteBar" class="hidden"></div>
+
+  <!-- ===== classement global cross-jeux ===== -->
+  <div id="globalPanel" class="settings hidden" style="width:min(94vw,460px);">
+    <div class="shead"><h3>🏅 Classement global (tous jeux)</h3><button class="sclose" aria-label="fermer">✕</button></div>
+    <div class="sbody"><div id="globalBody"></div></div>
   </div>
 
   <!-- ===== réglages d'affichage (shell, partagés) ===== -->
