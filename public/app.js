@@ -120,6 +120,7 @@ const readyList = document.getElementById('readyList');
 const readyCount = document.getElementById('readyCount');
 const readyBtn = document.getElementById('readyBtn');
 const forceBtn = document.getElementById('forceBtn');
+const reseatBtn = document.getElementById('reseatBtn');
 const myEntry = () => roomPlayers.find(p => p.id === you.id);
 function renderReady() {
   if (!readyBar) return;
@@ -127,7 +128,8 @@ function renderReady() {
   const idle = gs === 'lobby' || gs === 'over';
   const players = roomPlayers.filter(p => p.role === 'player');
   const me = myEntry();
-  if (!idle || !me || players.length < 1) { readyBar.classList.add('hidden'); return; }
+  const isSpec = me && me.role === 'spectator';
+  if (!idle || !me || (!isSpec && players.length < 2)) { readyBar.classList.add('hidden'); return; }   // seul : pas de barre « Prêt » (le hub ne gate pas non plus) ; toujours visible pour un spectateur (bouton siège)
   readyBar.classList.remove('hidden');
   const nready = players.filter(p => p.ready).length;
   readyList.innerHTML = players.map(p => `<span class="rdy ${p.ready ? 'on' : ''}">${p.ready ? '✅' : '⚪'} ${esc(p.name || 'Joueur')}${p.id === roomHost ? ' 👑' : ''}</span>`).join('');
@@ -137,10 +139,12 @@ function renderReady() {
   readyBtn.textContent = meReady ? '✅ Prêt' : '☐ Pas prêt';
   readyBtn.classList.toggle('on', meReady);
   forceBtn.style.display = (you.id === roomHost) ? '' : 'none';
+  if (reseatBtn) reseatBtn.style.display = isSpec ? '' : 'none';   // spectateur : peut tenter de prendre un siège libéré
 }
 if (readyBtn) readyBtn.onclick = () => { const me = myEntry(); send({ t: 'ready', v: !(me && me.ready) }); };
 if (forceBtn) forceBtn.onclick = () => send({ t: 'forcestart' });
-function note(txt) { if (!emoteToasts) return; const el = document.createElement('div'); el.className = 'etoast'; el.textContent = txt; emoteToasts.appendChild(el); while (emoteToasts.children.length > 6) emoteToasts.removeChild(emoteToasts.firstChild); setTimeout(() => el.remove(), 2200); }
+if (reseatBtn) reseatBtn.onclick = () => send({ t: 'reseat' });
+function note(txt) { if (!emoteToasts) return; const el = document.createElement('div'); el.className = 'etoast'; el.textContent = txt; emoteToasts.appendChild(el); while (emoteToasts.children.length > 6) emoteToasts.removeChild(emoteToasts.firstChild); setTimeout(() => el.remove(), 2600); }
 
 /* ---------- pseudo ---------- */
 nameInput.value = myName;
@@ -246,7 +250,7 @@ function connect() {
     } else if (m.t === 'png') {
       const rtt = Math.max(0, Math.round(performance.now() - m.ts)); if (pingTxt) pingTxt.textContent = ' · ⚡ ' + rtt + ' ms';
     } else if (m.t === 'notready') {
-      note('⏳ En attente que tous les joueurs soient prêts');
+      if (!window.__lastNR || performance.now() - window.__lastNR > 1500) { window.__lastNR = performance.now(); note('⏳ En attente que tous les joueurs soient prêts'); } // anti-spam (Espace en auto-répétition)
     } else if (m.t === 'state') {
       const g = m.g; const s = { ...m }; delete s.t; delete s.g;
       const prevGs = lastGs[g];

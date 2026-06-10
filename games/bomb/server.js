@@ -11,6 +11,7 @@ const SPD_BASE = 2.0, SPD_STEP = 0.4, SPD_MAX = 3.6, SLOW_MUL = 0.5;
 const BOMB_FUSE = 90, BLAST_TIME = 18, FLAME_BASE = 1, MAXB_CAP = 8, POWER_CAP = 8;
 const SOFT_PROB = 0.72, PICK_PROB = 0.42, MALUS_RATIO = 0.22;
 const DUR = 8 * TICK_HZ, AUTO_EVERY = 18, THROW_DIST = 4, SHIELD_CAP = 1;
+const GHOST_DUR = 10 * TICK_HZ;                    // 👻 traverse-murs : temporaire (sinon trop fort)
 const SD_START = 65 * TICK_HZ, SD_EVERY = 10;
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const GOOD = ['bomb', 'flame', 'speed', 'kick', 'remote', 'shield', 'ghost', 'throw', 'line'];
@@ -79,7 +80,7 @@ export function createBomb(room) {
     return Array.from({ length: MAX_SEATS }, (_, seat) => ({
       seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false,
       x: ccx(1), y: ccx(1), face: { x: 0, y: 1 }, maxBombs: 1, power: FLAME_BASE, speed: SPD_BASE, bombsActive: 0,
-      kick: false, remote: false, ghost: false, throw: false, line: false, shield: 0, reverseUntil: 0, slowUntil: 0, autoUntil: 0,
+      kick: false, remote: false, ghostUntil: 0, throw: false, line: false, shield: 0, reverseUntil: 0, slowUntil: 0, autoUntil: 0,
       skullUntil: 0, skullKind: '', warpCd: 0, lastCell: -1, revenant: false, ring: 0,
       inputs: { up: false, down: false, left: false, right: false }, invulnUntil: 0,
       kills: 0, score: 0, place: 0, elimTick: -1, spawn: { gx: 1, gy: 1 },
@@ -134,7 +135,7 @@ export function createBomb(room) {
       const [sx, sy] = SPAWNS[i];
       p.playing = true; p.alive = true; p.spawn = { gx: sx, gy: sy }; p.x = ccx(sx); p.y = ccx(sy); p.face = { x: 0, y: 1 };
       p.maxBombs = 1; p.power = FLAME_BASE; p.speed = SPD_BASE; p.bombsActive = 0;
-      p.kick = p.remote = p.ghost = p.throw = p.line = false; p.shield = 0; p.reverseUntil = p.slowUntil = p.autoUntil = 0; p.invulnUntil = 0;
+      p.kick = p.remote = p.throw = p.line = false; p.ghostUntil = 0; p.shield = 0; p.reverseUntil = p.slowUntil = p.autoUntil = 0; p.invulnUntil = 0;
       p.skullUntil = 0; p.skullKind = ''; p.warpCd = 0; p.lastCell = -1; p.revenant = false; p.ring = 0;
       p.team = i % nteams; p.kills = 0; p.place = 0; p.elimTick = -1;
       p.inputs = { up: false, down: false, left: false, right: false };
@@ -169,11 +170,12 @@ export function createBomb(room) {
     if (gx < 0 || gy < 0 || gx >= GW || gy >= GH) return true;
     const c = cells[idx(gx, gy)];
     if (c === 1) return true;
-    if (c === 2 && !p.ghost) return true;        // mur destructible : traversable si "ghost"
+    if (c === 2 && !(p.ghostUntil > tick)) return true;   // mur destructible : traversable si "ghost" actif
     const b = bombAt(gx, gy); if (b && !b.pass.has(p.seat)) return true;
     return false;
   }
   function freeAt(p, x, y) { const r = PR - 1; for (const cx of [x - r, x + r]) for (const cy of [y - r, y + r]) if (cellBlocked(p, Math.floor(cx / CELL), Math.floor(cy / CELL))) return false; return true; }
+  function inSoftWall(p) { const r = PR - 1; for (const cx of [p.x - r, p.x + r]) for (const cy of [p.y - r, p.y + r]) if (cells[idx(Math.floor(cx / CELL), Math.floor(cy / CELL))] === 2) return true; return false; }
   function bombFree(gx, gy) { if (gx < 1 || gy < 1 || gx >= GW - 1 || gy >= GH - 1) return false; if (cells[idx(gx, gy)] !== 0) return false; if (bombAt(gx, gy)) return false; for (const q of players) if (active(q) && Math.floor(q.x / CELL) === gx && Math.floor(q.y / CELL) === gy) return false; return true; }
   // la hitbox du joueur (rayon PR-1) chevauche-t-elle la case (gx,gy) ? (sert à savoir s'il est encore "sur" sa bombe)
   function overlapsCell(p, gx, gy) { const r = PR - 1; return gx >= Math.floor((p.x - r) / CELL) && gx <= Math.floor((p.x + r) / CELL) && gy >= Math.floor((p.y - r) / CELL) && gy <= Math.floor((p.y + r) / CELL); }
@@ -206,22 +208,22 @@ export function createBomb(room) {
     fx.push({ type: 'place', x: tx, y: ty });
     return true;
   }
-  function placeBombAt(p, gx, gy) {
+  function placeBombAt(p, gx, gy, forceFuse) {
     if (p.bombsActive >= p.maxBombs) return false;
     if (gx < 1 || gy < 1 || gx >= GW - 1 || gy >= GH - 1) return false;
     if (bombAt(gx, gy) || cells[idx(gx, gy)] !== 0) return false;
     const pass = new Set();
     for (const q of players) if (active(q) && Math.floor(q.x / CELL) === gx && Math.floor(q.y / CELL) === gy) pass.add(q.seat);
-    bombs.push({ gx, gy, owner: p.seat, fuse: BOMB_FUSE, power: p.power, pass, dead: false, remote: p.remote });
+    bombs.push({ gx, gy, owner: p.seat, fuse: BOMB_FUSE, power: p.power, pass, dead: false, remote: p.remote && !forceFuse });
     p.bombsActive++;
     fx.push({ type: 'place', x: gx, y: gy });
     return true;
   }
-  function placeBomb(p) {
+  function placeBomb(p, forceFuse) {                 // forceFuse : la pose AUTO (malus ⏱) reste minutée même avec 📡 (sinon bombes orphelines jamais déclenchées)
     if (!active(p) || gameState !== 'play') return;
     const gx = Math.floor(p.x / CELL), gy = Math.floor(p.y / CELL);
-    if (!placeBombAt(p, gx, gy)) return;
-    if (p.line) for (let d = 1; d <= 6; d++) { if (!placeBombAt(p, gx + p.face.x * d, gy + p.face.y * d)) break; } // bombe en ligne : pose en chaîne devant soi tant qu'il reste des bombes et que c'est libre
+    if (!placeBombAt(p, gx, gy, forceFuse)) return;
+    if (p.line) for (let d = 1; d <= 6; d++) { if (!placeBombAt(p, gx + p.face.x * d, gy + p.face.y * d, forceFuse)) break; } // bombe en ligne : pose en chaîne devant soi tant qu'il reste des bombes et que c'est libre
   }
   function action(p) {                             // gant (lancer) sinon détonateur
     if (!active(p)) return;
@@ -324,7 +326,7 @@ export function createBomb(room) {
       case 'speed': p.speed = Math.min(SPD_MAX, p.speed + SPD_STEP); break;
       case 'kick': p.kick = true; break;
       case 'remote': p.remote = true; break;
-      case 'ghost': p.ghost = true; break;
+      case 'ghost': p.ghostUntil = tick + GHOST_DUR; break;
       case 'throw': p.throw = true; break;
       case 'line': p.line = true; break;
       case 'shield': p.shield = Math.min(SHIELD_CAP, p.shield + 1); break;
@@ -356,7 +358,7 @@ export function createBomb(room) {
     bombs = bombs.filter(b => !b.dead);
     blasts = blasts.filter(bl => bl.until > tick);
     // déplacements + pose auto (malus)
-    for (const p of players) if (active(p)) { movePlayer(p); if (p.autoUntil > tick && tick % AUTO_EVERY === 0) placeBomb(p); }
+    for (const p of players) if (active(p)) { if (p.ghostUntil > 0 && p.ghostUntil <= tick && inSoftWall(p)) p.ghostUntil = tick + 1; movePlayer(p); if (p.autoUntil > tick && tick % AUTO_EVERY === 0) placeBomb(p, true); } // ghost prolongé tant qu'on est DANS un mur (anti-coincé) ; bombes auto = toujours minutées
     for (const p of players) if (p.revenant) revMove(p);     // revanche : déplacement le long du bord
     // téléporteurs : on warpe à l'ENTRÉE d'une case 3 (pas de ping-pong), si la sortie n'est pas un bloc tombé (mort subite)
     for (const p of players) if (active(p)) {
@@ -405,7 +407,7 @@ export function createBomb(room) {
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive,
         x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10,
         bombs: p.maxBombs, power: p.power, speed: Math.round((p.speed - SPD_BASE) / SPD_STEP),
-        kick: p.kick, remote: p.remote, ghost: p.ghost, throw: p.throw, line: p.line, shield: p.shield,
+        kick: p.kick, remote: p.remote, ghost: p.ghostUntil > tick, throw: p.throw, line: p.line, shield: p.shield,
         rev: p.reverseUntil > tick, slow: p.slowUntil > tick, auto: p.autoUntil > tick, skull: p.skullUntil > tick, invuln: p.invulnUntil > tick, rvn: p.revenant,
         kills: p.kills, score: p.score, place: p.place, elimTick: p.elimTick,
       })),

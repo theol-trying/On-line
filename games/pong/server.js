@@ -43,7 +43,8 @@ const SERVE_ORDER = ['random', 'loser'];
 const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
 function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
-const defaultRules = () => ({ winMode: 'survivor', roundsTarget: 3, killsTarget: 8, sudden: 'off', serve: 'random', handicap: false, negatives: false, botDiff: 'normal', bumpers: false });
+const BOTSTYLE_ORDER = ['equilibre', 'agressif', 'defensif'];   // style d'IA : équilibré / agressif (frappe du bord de raquette, met la pression) / défensif (suit toujours la balle)
+const defaultRules = () => ({ winMode: 'survivor', roundsTarget: 3, killsTarget: 8, sudden: 'off', serve: 'random', handicap: false, negatives: false, botDiff: 'normal', botStyle: 'equilibre', bumpers: false });
 
 export function createPong(room) {
   /* ---- état de la partie (par instance) ---- */
@@ -60,6 +61,7 @@ export function createPong(room) {
       survSum: 0, bestSurvivalSec: 0, mostKills: 0, fastestElimSec: null, fewestTouches: null });
   }
   function recordRound() {
+    if (nParts < 2) return;                            // l'entraînement solo ne compte pas au classement
     for (const p of players) {
       if (p.edge < 0 || p.bot || !p.name) continue;
       const e = lbEntry(p.name);
@@ -116,7 +118,7 @@ export function createPong(room) {
   const connectedCount = () => players.filter(p => p.member).length;
   const maxBots = () => MAX_SEATS - connectedCount();
   const partCount = () => Math.min(connectedCount() + botCount, MAX_SEATS);
-  const canStart = () => connectedCount() >= 1 && partCount() >= 2;
+  const canStart = () => connectedCount() >= 1 && (partCount() >= 2 || partCount() === 1);   // 1 participant = entraînement solo (mur)
   const editable = () => gameState === 'lobby' || gameState === 'over';
   const lobbyConfigure = () => { if (gameState === 'lobby') configure(); };
   const seatOf = member => { for (const p of players) if (p.member === member) return p.seat; return -1; };
@@ -151,14 +153,14 @@ export function createPong(room) {
     const parts = players.filter(p => p.member);
     let bots = botCount;
     for (const p of players) { if (bots <= 0) break; if (!p.member) { p.bot = true; parts.push(p); bots--; } }
-    if (parts.length < 2) { geo = null; return; }
+    if (parts.length < 1) { geo = null; return; }
     const N = Math.min(parts.length, MAX_SEATS);
     if (!validModes(N).includes(mode)) mode = 'ffa';
-    const G = N === 2 ? 4 : N;
+    const G = N <= 2 ? 4 : N;                          // solo : carré, 1 raquette + 3 murs (entraînement)
     geo = buildGeometry(G);
     let owners;
     if (N >= 3) owners = Array.from({ length: N }, (_, i) => i);
-    else owners = [0, 1, 2, 3].sort((a, b) => Math.abs(geo.edges[b].nx) - Math.abs(geo.edges[a].nx)).slice(0, 2);
+    else owners = [0, 1, 2, 3].sort((a, b) => Math.abs(geo.edges[b].nx) - Math.abs(geo.edges[a].nx)).slice(0, N);
     nteams = numTeamsFor(mode, N);
     parts.slice(0, N).forEach((p, i) => {
       const e = owners[i];
@@ -208,7 +210,14 @@ export function createPong(room) {
     const s = (tx - e.ax) * e.tx + (ty - e.ay) * e.ty;
     const L = padLenOf(p), spd = PAD_SPD * D.spd;
     const incoming = (best.vx * e.nx + best.vy * e.ny) < 0;   // la balle fonce-t-elle vers ce bord ?
-    const target = incoming ? s : e.len / 2;                  // sinon on revient au centre (évite de rester bloqué dans un coin)
+    let target = incoming ? s : e.len / 2;                    // sinon on revient au centre (évite de rester bloqué dans un coin)
+    const style = rules.botStyle || 'equilibre';
+    if (style === 'agressif') {                               // frappe avec le BORD de la raquette (angles forts) + reste sous la balle pour la pression
+      if (incoming) target = s + (s > e.len / 2 ? -1 : 1) * L * 0.32;
+      else target = Math.max(L / 2, Math.min(e.len - L / 2, s));
+    } else if (style === 'defensif') {                        // suit toujours la balle, mais sans s'éloigner trop du centre (couverture)
+      target = incoming ? s : (s + e.len / 2) / 2;
+    }
     let dir = target < p.pos - D.dz ? -1 : target > p.pos + D.dz ? 1 : 0;
     if (p.invertUntil > tick) dir = -dir;
     if (dir < 0) p.pos = Math.max(L / 2, p.pos - spd);
@@ -295,6 +304,12 @@ export function createPong(room) {
   }
   function aliveTeams() { return new Set(players.filter(inPlay).map(p => p.team)); }
   function checkWin() {
+    if (nParts === 1) {                                // entraînement solo : la manche ne s'arrête que quand le joueur n'a plus de vies
+      if (players.some(inPlay)) return false;
+      gameState = 'over'; endTick = tick; winner = -1;
+      recordRound();                                   // no-op en solo (guard nParts<2) : hors classement
+      return true;
+    }
     const s = aliveTeams();
     if (s.size > 1) return false;
     gameState = 'over'; endTick = tick;
@@ -454,7 +469,7 @@ export function createPong(room) {
         lives: cfg.lives, pu: cfg.pu, accel: cfg.accelEvery > 0, speed: cfg.speedLevel,
         winMode: rules.winMode, roundsTarget: rules.roundsTarget, killsTarget: rules.killsTarget,
         sudden: rules.sudden, serve: rules.serve, handicap: rules.handicap,
-        negatives: rules.negatives, botDiff: rules.botDiff, bumpers: rules.bumpers,
+        negatives: rules.negatives, botDiff: rules.botDiff, botStyle: rules.botStyle, bumpers: rules.bumpers,
       },
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / 60), bounces: roundBounces, nParts, match: matchWonPending } : null,
       geo: geo ? { edges: geo.edges.map(e => ({ ax: r1(e.ax), ay: r1(e.ay), bx: r1(e.bx), by: r1(e.by), tx: e.tx, ty: e.ty, nx: e.nx, ny: e.ny, len: r1(e.len), owner: e.owner })) } : null,
@@ -549,6 +564,7 @@ export function createPong(room) {
         else if (op === 'ktar') rules.killsTarget = Math.max(3, Math.min(30, rules.killsTarget + (m.d > 0 ? 1 : -1)));
         else if (op === 'negatives') rules.negatives = !rules.negatives;
         else if (op === 'botdiff') rules.botDiff = BOTDIFF_ORDER[(BOTDIFF_ORDER.indexOf(rules.botDiff) + 1) % BOTDIFF_ORDER.length];
+        else if (op === 'botstyle') rules.botStyle = BOTSTYLE_ORDER[(BOTSTYLE_ORDER.indexOf(rules.botStyle) + 1) % BOTSTYLE_ORDER.length];
         else if (op === 'bumpers') rules.bumpers = !rules.bumpers;
       }
     } else if (m.t === 'lbreset') reset(GID);

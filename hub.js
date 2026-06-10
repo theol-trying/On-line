@@ -32,7 +32,7 @@ const room = {
 function ensureGame() { if (!game) game = GAMES[activeId].create(room); }
 function roomMsg() { return { t: 'room', active: activeId, host: hostId(), players: members.map(m => ({ id: m.id, name: m.name, role: m.role, ready: !!m.ready })) }; }
 function hostId() { const p = members.find(m => m.role === 'player'); return (p || members[0] || {}).id || null; }   // hôte = 1er joueur connecté
-function allReady() { const ps = members.filter(m => m.role === 'player'); return ps.length >= 1 && ps.every(m => m.ready); } // bots = non-membres → exclus → jamais bloquants
+function allReady() { const ps = members.filter(m => m.role === 'player'); return ps.length <= 1 || ps.every(m => m.ready); } // solo : pas de gate ; bots = non-membres → exclus → jamais bloquants
 function broadcastRoom() { room.broadcast(roomMsg()); }
 function setLoop() { const hz = GAMES[activeId].meta.tickHz || 60; if (hz === curHz && loop) return; if (loop) clearInterval(loop); curHz = hz; loop = setInterval(step, 1000 / hz); }
 
@@ -74,7 +74,7 @@ function wire(member) {                          // (re)branche les handlers d'u
   member.conn.onMessage(raw => {
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (m.t === 'name') {
-      const nm = ('' + (m.name || '')).trim().slice(0, 12);
+      const nm = ('' + (m.name || '')).replace(/[<>&"']/g, '').trim().slice(0, 12);   // assaini à la source : les clients l'injectent en innerHTML
       member.ident.name = nm; member.name = nm;
       if (game && game.onRename) game.onRename(member);
       broadcastRoom();
@@ -86,6 +86,8 @@ function wire(member) {                          // (re)branche les handlers d'u
       game.onMessage(member, m.m);
     } else if (m.t === 'ready') {
       member.ready = !!m.v; broadcastRoom();
+    } else if (m.t === 'reseat') {
+      if (member.role === 'spectator') { ensureGame(); if (game.isIdle()) { joinGame(member); broadcastRoom(); } } // spectateur : tente de prendre un siège libéré (hors partie ; onJoin re-vérifie)
     } else if (m.t === 'forcestart') {
       if (member.id === hostId()) { ensureGame(); if (game.isIdle()) game.onMessage(member, { t: 'start' }); } // l'hôte force le départ malgré des joueurs pas prêts
     } else if (m.t === 'adminreset') {

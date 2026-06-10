@@ -1,5 +1,13 @@
 // Module client SNAKE : serpents sur grille partagée, pastilles à manger, dernier en vie gagne. FFA + équipes.
 import { GW, GH, CELL, ARENA } from './shared.js';
+import { createMusic } from '../../music.js';
+
+// musique : jardin léger — nappe douce majeure, plucks pentatoniques ; climax (sprint food-rush / duel) = contre-voix + tempo
+const MUSIC_THEME = { bpm: 102, bpmBoost: 12, vol: 0.42, root: 130.81, len: 32, layers: [
+  { seq: [[0, 4], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [5, 9], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sine', gain: 0.022, dur: 14 },
+  { seq: [0, null, 2, null, 4, null, 7, null, 9, null, 7, null, 4, null, 2, null, 0, null, 4, null, 7, null, 9, null, 12, null, 9, null, 7, null, 4, null], oct: 1, wave: 'triangle', gain: 0.028, dur: 1.4, min: 1 },
+  { seq: [null, null, 16, null, null, null, 14, null, null, null, 12, null, null, null, 9, null], oct: 1, wave: 'sine', gain: 0.018, dur: 1.2, min: 2 },
+] };
 
 const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9'] };
 const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E69F00', '#009E73'] };
@@ -8,6 +16,10 @@ const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2'
 const VARIANT_NAMES = ['🐍 Classique', '🌀 Murs traversants', '🪨 Obstacles'];
 // identité visuelle propre au jeu (fixe) : Jardin / Terrarium
 const SKIN = { bg: '#0f2410', field: '#1c3a17', field2: '#234a1d', grid: 'rgba(170,255,150,0.05)', border: 'rgba(120,200,110,0.55)', apple: true };
+// fond animé : lucioles qui flânent + pétales qui tombent (identité jardin) — coupé par reduceFx
+const AMB_FLY = Array.from({ length: 12 }, () => ({ x: Math.random(), y: Math.random(), ph: Math.random() * 6.28, r: 1.3 + Math.random() }));
+const AMB_PETAL = Array.from({ length: 6 }, () => ({ x: Math.random(), v: 9 + Math.random() * 12, ph: Math.random() * 6.28, s: 2 + Math.random() * 2 }));
+const AMB_FLOWERS = Array.from({ length: 14 }, () => ({ x: Math.random(), y: Math.random(), w: Math.random() < 0.5 }));   // pâquerettes statiques très pâles (déco du jardin)
 const INTERP_MS = 90;
 const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
 
@@ -18,6 +30,7 @@ export default (function () {
   let board = [], buf = [];
   const particles = [];
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null;
+  const music = createMusic(() => actx, () => A, MUSIC_THEME);
   let hud, cards, startBtn, pauseBtn, modeBtn, variantBtn, rushBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
@@ -91,6 +104,13 @@ export default (function () {
     (m.fx || []).forEach(playFx);
     if (prevGs !== 'over' && m.gs === 'over') sound('win');
     prevGs = m.gs;
+    { let inten = 0;                                  // musique : 1 en jeu, 2 = sprint final food-rush ou duel (parmi 3+)
+      if (m.gs === 'play' || m.gs === 'countdown') {
+        inten = 1;
+        if (m.rush) { let lead = 0; m.players.forEach(p => { if (p.playing && p.score > lead) lead = p.score; }); if (lead >= (m.rushTarget || 20) * 0.7) inten = 2; }
+        else { const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length; if (tot >= 3 && alive <= 2) inten = 2; }
+      }
+      music.setIntensity(inten); }
     refreshHUD();
     if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } }
     else { endShown = false; endEl.classList.add('hidden'); }
@@ -146,9 +166,18 @@ export default (function () {
     ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, ARENA, ARENA);
     if (TH.field2) { for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) { ctx.fillStyle = ((gx + gy) & 1) ? TH.field : TH.field2; ctx.fillRect(gx * CELL, gy * CELL, CELL, CELL); } } // damier d'herbe (skin Jardin)
     else { ctx.fillStyle = TH.field; ctx.fillRect(0, 0, ARENA, ARENA); }
+    { ctx.save(); for (const fl of AMB_FLOWERS) { const x = fl.x * ARENA, y = fl.y * ARENA; ctx.globalAlpha = 0.20; ctx.fillStyle = fl.w ? '#eef7e2' : '#ffd9e8'; for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + 0.5; ctx.beginPath(); ctx.arc(x + Math.cos(a) * 2.4, y + Math.sin(a) * 2.4, 1.7, 0, Math.PI * 2); ctx.fill(); } ctx.globalAlpha = 0.25; ctx.fillStyle = '#ffe28a'; ctx.beginPath(); ctx.arc(x, y, 1.4, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); }   // pâquerettes
     ctx.strokeStyle = TH.grid; ctx.lineWidth = 1;
     for (let i = 0; i <= GW; i += 5) { const x = i * CELL; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ARENA); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, x); ctx.lineTo(ARENA, x); ctx.stroke(); }
     ctx.strokeStyle = TH.border || 'rgba(255,255,255,0.22)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, ARENA - 3, ARENA - 3);
+    if (!A.reduceFx) {                                 // lucioles + pétales (ambiance jardin)
+      ctx.save();
+      ctx.fillStyle = '#d8ff9a';
+      for (const f of AMB_FLY) { const x = f.x * ARENA + Math.sin(now / 2200 + f.ph) * 26, y = f.y * ARENA + Math.cos(now / 1900 + f.ph * 1.7) * 20, glow = 0.5 + 0.5 * Math.sin(now / 650 + f.ph); ctx.globalAlpha = 0.10 + 0.22 * glow; ctx.beginPath(); ctx.arc(x, y, f.r + glow, 0, Math.PI * 2); ctx.fill(); }
+      ctx.fillStyle = '#ffb7d0';
+      for (const pe of AMB_PETAL) { const y = (pe.ph * 90 + now / 1000 * pe.v) % (ARENA + 12) - 6, x = pe.x * ARENA + Math.sin(now / 1300 + pe.ph) * 14; ctx.globalAlpha = 0.18; ctx.save(); ctx.translate(x, y); ctx.rotate(now / 900 + pe.ph); ctx.beginPath(); ctx.ellipse(0, 0, pe.s, pe.s * 0.55, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+      ctx.restore();
+    }
 
     if (snap) {
       (snap.rocks || []).forEach(ix => { const gx = ix % GW, gy = (ix / GW) | 0, x = gx * CELL, y = gy * CELL; ctx.fillStyle = '#5a5550'; ctx.fillRect(x + 2, y + 2, CELL - 4, CELL - 4); ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(x + 2, y + 2, CELL - 4, 3); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x + 2, y + CELL - 5, CELL - 4, 3); }); // rochers
@@ -186,11 +215,22 @@ export default (function () {
         ctx.strokeStyle = col; ctx.lineWidth = CELL - 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
         ctx.shadowColor = col; ctx.shadowBlur = 8 * FX;
         const path = p.path || [];
-        if (path.length) { ctx.beginPath(); ctx.moveTo(px(path[0][0]), px(path[0][1])); for (let i = 1; i < path.length; i++) ctx.lineTo(px(path[i][0]), px(path[i][1])); ctx.lineTo(hx, hy); ctx.stroke(); }
+        if (path.length) {                            // dégradé vers la queue : chaque segment est tracé avec une opacité croissante vers la tête ; null = coupure de wrap (on relève le crayon)
+          const nPts = path.filter(Boolean).length;
+          let prev = null, k = 0;
+          for (const pt of path) {
+            if (!pt) { prev = null; continue; }
+            if (prev) { const f = k / Math.max(1, nPts - 1); ctx.globalAlpha = ga * (0.35 + 0.65 * f); ctx.beginPath(); ctx.moveTo(px(prev[0]), px(prev[1])); ctx.lineTo(px(pt[0]), px(pt[1])); ctx.stroke(); }
+            prev = pt; k++;
+          }
+          if (prev) { ctx.globalAlpha = ga; ctx.beginPath(); ctx.moveTo(px(prev[0]), px(prev[1])); ctx.lineTo(hx, hy); ctx.stroke(); }
+        }
         ctx.restore();
-        // tête arrondie + yeux orientés selon la direction
+        // tête arrondie + yeux orientés selon la direction (un saut de wrap inverse le signe)
         let dx = 0, dy = 0;
-        if (path.length >= 2) { const a = path[path.length - 2], b = path[path.length - 1]; dx = Math.sign(b[0] - a[0]); dy = Math.sign(b[1] - a[1]); }
+        const pts = path.filter(Boolean);
+        const sgn = v => Math.abs(v) > 1 ? -Math.sign(v) : Math.sign(v);
+        if (pts.length >= 2) { const a = pts[pts.length - 2], b = pts[pts.length - 1]; dx = sgn(b[0] - a[0]); dy = sgn(b[1] - a[1]); }
         if (!dx && !dy) dx = 1;
         ctx.save(); ctx.globalAlpha = ga; ctx.shadowColor = col; ctx.shadowBlur = 12 * FX; ctx.fillStyle = col;
         ctx.beginPath(); ctx.arc(hx, hy, CELL * 0.55, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
@@ -267,10 +307,11 @@ export default (function () {
     applyColors();
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown);
+    music.start();
     rafId = requestAnimationFrame(draw);
   }
   function onA11y() { applyColors(); }
-  function teardown() { destroyed = true; cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); }
+  function teardown() { destroyed = true; music.stop(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };
 })();

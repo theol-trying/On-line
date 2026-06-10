@@ -59,7 +59,7 @@ export function createTank(room) {
   }
   function recordRound() {
     for (const p of players) {
-      if (!p.playing || !p.name) continue;
+      if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
       const e = lbEntry(p.name);
       e.games++;
       if (winner >= 0 && p.team === winner) e.wins++;
@@ -142,6 +142,7 @@ export function createTank(room) {
       p.playing = true; p.alive = true; p.lives = LIVES; p.kills = 0; p.dmg = 0; p.place = 0; p.elimTick = -1; p.team = i % nteams; p.cool = 0;
       p.rapidUntil = 0; p.tripleUntil = 0; p.speedUntil = 0; p.pierceUntil = 0; p.shield = 0; p.mineN = 0; p.empUntil = 0;
       p.homingUntil = 0; p.camoUntil = 0; p.radarUntil = 0;
+      p.botAvoidUntil = 0; p.botWanderUntil = 0; p.botWanderTurn = null;   // tick repart à 0 : purge l'état d'IA de la manche précédente
       if (p.bot) p.name = '🤖 Bot ' + (i + 1);
       p.spawn = spawnFor(i); placeAtSpawn(p);
       p.inputs = { left: false, right: false, fwd: false, back: false, fire: false };
@@ -200,18 +201,27 @@ export function createTank(room) {
     }
     fx.push({ type: 'shot', x: p.x, y: p.y, seat: p.seat });
   }
-  function botThink(p) {                              // IA simple : viser l'ennemi le plus proche, avancer, tirer, se dégager des murs
+  function botThink(p) {                              // IA : viser l'ennemi le plus proche, avancer en tournant, tirer ; évitement ENGAGÉ (sinon le bot tremble sur place)
     const inp = { left: false, right: false, fwd: false, back: false, fire: false };
     let tgt = null, bd = Infinity;
-    for (const q of players) { if (!active(q) || q === p) continue; if (mode !== 'ffa' && q.team === p.team) continue; const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2; if (d < bd) { bd = d; tgt = q; } }
-    const ahead = blockedTank(p.x + Math.cos(p.angle) * (TANK_R + 8), p.y + Math.sin(p.angle) * (TANK_R + 8), p);
-    if (tgt) {
+    for (const q of players) { if (!active(q) || q === p) continue; if (mode !== 'ffa' && q.team === p.team) continue; if (q.camoUntil > tick && p.radarUntil <= tick) continue; const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2; if (d < bd) { bd = d; tgt = q; } } // ne « voit » pas les camouflés (sauf radar)
+    const ahead = blockedTank(p.x + Math.cos(p.angle) * (TANK_R + 10), p.y + Math.sin(p.angle) * (TANK_R + 10), p);
+    if (p.botAvoidUntil > tick) {                     // manœuvre en cours : on s'y tient quelques ticks
+      inp[p.botAvoidDir] = true; inp.back = !!p.botAvoidBack; if (!ahead && !p.botAvoidBack) inp.fwd = true;
+    } else if (ahead) {                               // bloqué : choisir un côté (et parfois reculer) puis s'y tenir
+      p.botAvoidDir = Math.random() < 0.5 ? 'left' : 'right'; p.botAvoidBack = Math.random() < 0.4; p.botAvoidUntil = tick + 10 + Math.floor(Math.random() * 16);
+      inp[p.botAvoidDir] = true; inp.back = !!p.botAvoidBack;
+    } else if (tgt) {
       const desired = Math.atan2(tgt.y - p.y, tgt.x - p.x), diff = Math.atan2(Math.sin(desired - p.angle), Math.cos(desired - p.angle));
-      if (ahead) inp.right = true;                                  // bloqué : tourne pour se dégager
-      else { if (diff > 0.06) inp.right = true; else if (diff < -0.06) inp.left = true; if (Math.abs(diff) < 0.7 && bd > (BLK * 2) ** 2) inp.fwd = true; }
-      if (Math.abs(diff) < 0.22 && tick >= p.cool) inp.fire = true; // aligné : tire
+      if (diff > 0.07) inp.right = true; else if (diff < -0.07) inp.left = true;
+      if (Math.abs(diff) < 1.1 && bd > (BLK * 1.3) ** 2) inp.fwd = true;                 // avance aussi pendant qu'il tourne, s'approche plus près
+      if (Math.abs(diff) < 0.22 && tick >= p.cool) inp.fire = true;                     // aligné : tire
       if (p.mineN > 0 && bd < (BLK * 1.4) ** 2 && Math.random() < 0.03) { p.mineN--; mines.push({ x: p.x, y: p.y, owner: p.seat, arm: tick + MINE_ARM }); fx.push({ type: 'mineset', x: p.x, y: p.y, seat: p.seat }); }
-    } else { if (ahead) inp.right = true; else inp.fwd = true; }
+    } else {                                          // pas de cible visible : errance (patrouille)
+      if (!(p.botWanderUntil > tick)) { p.botWanderUntil = tick + 20 + Math.floor(Math.random() * 40); p.botWanderTurn = Math.random() < 0.35 ? (Math.random() < 0.5 ? 'left' : 'right') : null; }
+      if (p.botWanderTurn) inp[p.botWanderTurn] = true;
+      inp.fwd = true;
+    }
     p.inputs = inp;
   }
   function shellHitsCell(sh) {

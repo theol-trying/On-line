@@ -1,5 +1,16 @@
 // Module client TRON v2 : traînées + bonus + boost + équipes + arène qui se referme.
 import { GW, GH, CELL, ARENA } from './shared.js';
+import { createMusic } from '../../music.js';
+
+// musique : synthwave sombre — nappe en quintes, basse pulsée, arpège néon ; climax (duel final) = arp rapide + charley + tempo
+const MUSIC_THEME = { bpm: 122, bpmBoost: 14, vol: 0.5, root: 82.41, len: 32, layers: [
+  { seq: [[0, 7], null, null, null, null, null, null, null, [-2, 5], null, null, null, null, null, null, null, [0, 7], null, null, null, null, null, null, null, [3, 10], null, null, null, null, null, null, null], wave: 'sawtooth', gain: 0.016, dur: 7 },
+  { seq: [0, null, 0, null, 0, null, 0, null, 0, null, 0, null, -2, null, -2, null, 0, null, 0, null, 0, null, 0, null, 3, null, 3, null, -2, null, -2, null], wave: 'triangle', gain: 0.05, dur: 0.9, min: 1 },
+  { seq: [12, null, null, null, 15, null, null, null, 19, null, null, null, 15, null, null, null], wave: 'square', gain: 0.014, dur: 1.2, min: 1 },
+  { drums: 'K...K...K...K...', min: 1 },
+  { seq: [0, 3, 7, 12, 7, 3], oct: 1, wave: 'sawtooth', gain: 0.012, dur: 0.8, min: 2 },
+  { drums: '..H...H...H...H.', min: 2 },
+] };
 
 const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9'] };
 const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E69F00', '#009E73'] };
@@ -11,6 +22,8 @@ const THEMES = {
   crt: { bg: '#04140b', field: '#06190e', grid: 'rgba(120,255,170,0.08)', wall: '#16432a' },
   light: { bg: '#e4e8f3', field: '#dbe0ee', grid: 'rgba(0,0,0,0.07)', wall: '#9aa3bf' },
 };
+// fond animé : fines lignes de néon qui tombent (pluie de code) — coupé par reduceFx
+const AMB_RAIN = Array.from({ length: 14 }, () => ({ x: Math.random(), v: 30 + Math.random() * 70, l: 18 + Math.random() * 40, ph: Math.random() * 1000 }));
 const INTERP_MS = 80;
 const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
 
@@ -21,6 +34,7 @@ export default (function () {
   let board = [], buf = [];
   const particles = [];
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, boostHeld = false, killcam = null;
+  const music = createMusic(() => actx, () => A, MUSIC_THEME);
   let hud, cards, startBtn, pauseBtn, modeBtn, fadeBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
@@ -93,6 +107,9 @@ export default (function () {
     (m.fx || []).forEach(playFx);
     if (prevGs !== 'over' && m.gs === 'over') sound('win');
     prevGs = m.gs;
+    { let inten = 0;                                  // musique : 1 en jeu, 2 quand il ne reste qu'un duel (parmi 3+)
+      if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length; if (tot >= 3 && alive <= 2) inten = 2; }
+      music.setIntensity(inten); }
     refreshHUD();
     if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } }
     else { endShown = false; endEl.classList.add('hidden'); }
@@ -154,6 +171,7 @@ export default (function () {
     ctx.setTransform(sscale, 0, 0, sscale, tax, tay);
     ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, ARENA, ARENA);
     ctx.fillStyle = TH.field; ctx.fillRect(0, 0, ARENA, ARENA);
+    if (!A.reduceFx) { ctx.save(); ctx.strokeStyle = '#7fd6ff'; ctx.lineWidth = 1; for (const r of AMB_RAIN) { const y = (r.ph + now / 1000 * r.v) % (ARENA + r.l) - r.l; ctx.globalAlpha = 0.05 + 0.05 * Math.sin(now / 600 + r.ph); ctx.beginPath(); ctx.moveTo(r.x * ARENA, y); ctx.lineTo(r.x * ARENA, y + r.l); ctx.stroke(); } ctx.restore(); }   // pluie de néon
     ctx.save(); if (!A.reduceFx) ctx.globalAlpha = 0.65 + 0.35 * Math.sin(now / 700);   // pulsation de la grille
     ctx.strokeStyle = TH.grid; ctx.lineWidth = 1;
     for (let i = 0; i <= GW; i += 5) { const x = i * CELL; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ARENA); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, x); ctx.lineTo(ARENA, x); ctx.stroke(); }
@@ -186,9 +204,16 @@ export default (function () {
         }
         ctx.restore();
         if (!dead) {
-          ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 14 * FX; ctx.fillStyle = p.ghost ? col : '#fff';
-          ctx.globalAlpha = p.ghost ? 0.7 : 1; ctx.fillRect(hx - CELL / 2, hy - CELL / 2, CELL, CELL);
-          ctx.fillStyle = col; ctx.globalAlpha = 0.5; ctx.fillRect(hx - CELL / 2, hy - CELL / 2, CELL, CELL); ctx.restore();
+          let mdx = 1, mdy = 0; const mp = p.path || [];                       // direction de la moto (2 derniers sommets)
+          if (mp.length >= 2) { const a2 = mp[mp.length - 2], b2 = mp[mp.length - 1]; mdx = Math.sign(b2[0] - a2[0]); mdy = Math.sign(b2[1] - a2[1]); if (!mdx && !mdy) mdx = 1; }
+          ctx.save(); ctx.translate(hx, hy); ctx.rotate(Math.atan2(mdy, mdx));
+          ctx.globalAlpha = p.ghost ? 0.7 : 1; ctx.shadowColor = col; ctx.shadowBlur = 14 * FX;
+          ctx.strokeStyle = col; ctx.lineCap = 'round'; ctx.lineWidth = CELL - 3;             // corps : capsule allongée
+          ctx.beginPath(); ctx.moveTo(-CELL * 0.45, 0); ctx.lineTo(CELL * 0.45, 0); ctx.stroke();
+          ctx.shadowBlur = 0; ctx.fillStyle = p.ghost ? col : '#fff';                         // verrière avant
+          ctx.beginPath(); ctx.ellipse(CELL * 0.2, 0, CELL * 0.2, CELL * 0.24, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(-CELL * 0.42, -1.2, CELL * 0.28, 2.4);   // fente roue arrière
+          ctx.restore();
           if ((p.speed || p.boosting) && !A.reduceFx) {            // speed lines derrière la tête
             let dx = 0, dy = 0; const pth = p.path || [];
             if (pth.length >= 2) { const a = pth[pth.length - 2], b = pth[pth.length - 1]; dx = Math.sign(b[0] - a[0]); dy = Math.sign(b[1] - a[1]); }
@@ -205,11 +230,14 @@ export default (function () {
     // jauge de boost (joueur local)
     const me = (snap && mySeat >= 0) ? snap.players[mySeat] : null;
     if (me && me.playing && me.alive && snap.gs === 'play') {
-      const bw = 120, bh = 8, bx = (ARENA - bw) / 2, by = ARENA - 18, b = (me.boost || 0) / 100;
-      ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(bx, by, bw, bh);
-      ctx.fillStyle = b > 0.25 ? '#9fe6ff' : '#ff7a7a'; ctx.fillRect(bx, by, bw * b, bh);
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
-      ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText('BOOST (Maj)', ARENA / 2, by - 2);
+      const bw = 170, bh = 11, bx = (ARENA - bw) / 2, by = ARENA - 22, b = (me.boost || 0) / 100;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+      const gcol = b > 0.6 ? '#7ff0bd' : b > 0.25 ? '#9fe6ff' : '#ff7a7a';                    // vert = plein, bleu = ok, rouge = à sec
+      ctx.fillStyle = gcol; ctx.fillRect(bx, by, bw * b, bh);
+      if (me.boosting && !A.reduceFx) { ctx.save(); ctx.globalAlpha = 0.35 + 0.3 * Math.sin(now / 70); ctx.fillStyle = '#fff'; ctx.fillRect(bx, by, bw * b, bh); ctx.restore(); }   // pulse pendant le boost
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1; ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+      ctx.strokeStyle = 'rgba(0,0,0,0.4)'; for (let k = 1; k < 4; k++) { ctx.beginPath(); ctx.moveTo(bx + bw * k / 4, by); ctx.lineTo(bx + bw * k / 4, by + bh); ctx.stroke(); }     // graduations 25 %
+      ctx.fillStyle = gcol; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText(`⚡ BOOST ${Math.round(b * 100)} % (Maj)`, ARENA / 2, by - 3);
       if (me.brk) { ctx.fillStyle = '#ffcf5a'; ctx.font = 'bold 13px system-ui'; ctx.fillText('⊘ casse-mur prêt', ARENA / 2, by - 16); }   // casse-mur dispo
       if (me.inv) { ctx.save(); ctx.globalAlpha = 0.6 + 0.4 * Math.sin(now / 90); ctx.fillStyle = '#ff9be0'; ctx.font = 'bold 18px system-ui'; ctx.textBaseline = 'top'; ctx.fillText('⇄ CONTRÔLES INVERSÉS', ARENA / 2, 8); ctx.restore(); }   // alerte inversion
     }
@@ -269,10 +297,11 @@ export default (function () {
     applyColors();
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
+    music.start();
     rafId = requestAnimationFrame(draw);
   }
   function onA11y() { applyColors(); }
-  function teardown() { destroyed = true; cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur); }
+  function teardown() { destroyed = true; music.stop(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur); }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };
 })();

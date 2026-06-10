@@ -21,7 +21,7 @@ const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
 function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
 
 // compression d'un chemin de cellules en sommets (mêmes que Tron) : on ne garde que les points de virage
-function corners(cells) {
+function compressSeg(cells) {
   const n = cells.length; if (n === 0) return [];
   if (n <= 2) return cells.map(c => [c.x, c.y]);
   const out = [[cells[0].x, cells[0].y]];
@@ -31,6 +31,19 @@ function corners(cells) {
     if (ax !== bx || ay !== by) out.push([cells[i].x, cells[i].y]);
   }
   out.push([cells[n - 1].x, cells[n - 1].y]);
+  return out;
+}
+// variante murs traversants : on coupe le chemin à chaque wrap (saut > 1 case) et on sépare les segments par null
+// (sinon le client trace une ligne droite d'un bord à l'autre = « queue qui traverse l'écran »)
+function corners(cells) {
+  const segs = []; let cur = [];
+  for (const c of cells) {
+    if (cur.length) { const pr = cur[cur.length - 1]; if (Math.abs(c.x - pr.x) > 1 || Math.abs(c.y - pr.y) > 1) { segs.push(cur); cur = []; } }
+    cur.push(c);
+  }
+  if (cur.length) segs.push(cur);
+  const out = [];
+  segs.forEach((s, k) => { if (k) out.push(null); out.push(...compressSeg(s)); });
   return out;
 }
 
@@ -251,7 +264,7 @@ export function createSnake(room) {
     if (gameState === 'play' || gameState === 'countdown' || gameState === 'paused') {
       if (p.alive) { p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++; }
       if (connectedCount() === 0) fullReset();
-      else if (gameState === 'play') { if (nParts >= 2 ? aliveTeams().size <= 1 : aliveCount() === 0) endRound(); }
+      else if (gameState === 'play') { if (nParts >= 2 ? aliveTeams().size <= 1 : aliveCount() === 0) endRound(rush ? bestScoreTeam() : undefined); }   // même règle de gagnant qu'en update (food-rush = meilleur score)
     } else if (connectedCount() === 0) fullReset();
   }
   function onRename(member) { const s = seatOf(member); if (s >= 0) players[s].name = member.name || ''; }
