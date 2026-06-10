@@ -19,6 +19,7 @@ const BOOST_MAX = 100, BOOST_REGEN = 0.7, BOOST_COST = 2.6;
 const SHRINK_START = 22 * TICK_HZ, SHRINK_EVERY = 2 * TICK_HZ;
 // traînée qui s'efface (mode "fade")
 const TRAIL_LIFE = 130;
+const TRDIFF = [{ look: 4, err: 0.14 }, { look: 8, err: 0.04 }, { look: 12, err: 0 }];   // IA : Facile / Normale / Difficile (profondeur de vision, taux d'inattention)
 const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
 function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
@@ -37,7 +38,7 @@ function corners(cells) {
 }
 
 export function createTron(room) {
-  let players, occupied, pickups, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, shrinkLevel, fadeMode, botCount;
+  let players, occupied, pickups, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, shrinkLevel, fadeMode, botCount, botDiff;
   let seatByMid = {};
 
   function lbEntry(name) {
@@ -74,7 +75,7 @@ export function createTron(room) {
   function fullReset() {
     players = makePlayers(); occupied = new Map(); pickups = [];
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = [];
-    mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; shrinkLevel = 0; fadeMode = false; botCount = 0; seatByMid = {};
+    mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; shrinkLevel = 0; fadeMode = false; botCount = 0; botDiff = 1; seatByMid = {};
   }
 
   const connectedCount = () => players.filter(p => p.member).length;
@@ -183,9 +184,9 @@ export function createTron(room) {
     if (best.sc <= 0.5 + 1.5 * (best.d === p.dir ? 1 : 0)) { const alt = cand.find(c => c.sc > 1.5); if (alt) { p.pendingDir = alt.d; return; } }   // cul-de-sac : prend ce qui reste
     p.pendingDir = best.d;
   }
-  function rayFree(x, y, d) {                       // IA : distance libre devant (max 12), murs de rétrécissement inclus
+  function rayFree(x, y, d, max) {                  // IA : distance libre devant (profondeur selon difficulté), murs de rétrécissement inclus
     let n = 0;
-    for (let i = 1; i <= 12; i++) {
+    for (let i = 1; i <= (max || 12); i++) {
       const cx = x + d.x * i, cy = y + d.y * i;
       if (cx < 0 || cy < 0 || cx >= GW || cy >= GH) break;
       if (cx < shrinkLevel || cy < shrinkLevel || cx >= GW - shrinkLevel || cy >= GH - shrinkLevel) break;
@@ -195,14 +196,16 @@ export function createTron(room) {
     return n;
   }
   function botThink(p) {                            // IA : tout droit si c'est sûr, sinon tourner du côté le plus dégagé
+    const D = TRDIFF[botDiff] || TRDIFF[1];
+    if (D.err && Math.random() < D.err) return;                            // Facile : moments d'inattention (continue tout droit)
     const h = head(p), d = p.dir;
     const left = { x: d.y, y: -d.x }, right = { x: -d.y, y: d.x };
-    const fS = rayFree(h.x, h.y, d), lS = rayFree(h.x, h.y, left), rS = rayFree(h.x, h.y, right);
+    const fS = rayFree(h.x, h.y, d, D.look), lS = rayFree(h.x, h.y, left, D.look), rS = rayFree(h.x, h.y, right, D.look);
     let turn = null;
     if (fS >= 4 && Math.random() < 0.93) turn = null;                      // voie libre : on continue (7 % de fantaisie)
     else if (fS >= lS && fS >= rS && fS > 0) turn = null;                  // tout droit reste le meilleur choix
     else turn = lS >= rS ? left : right;                                   // sinon : côté le plus dégagé
-    if (turn && rayFree(h.x, h.y, turn) === 0) turn = (turn === left ? right : left);
+    if (turn && rayFree(h.x, h.y, turn, D.look) === 0) turn = (turn === left ? right : left);
     if (turn) p.pendingDir = turn;
   }
   function applyShrink() {
@@ -258,7 +261,7 @@ export function createTron(room) {
   function snapshot() {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), mode, nteams, shrink: shrinkLevel, fade: fadeMode,
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, shrink: shrinkLevel, fade: fadeMode,
       pickups: pickups.map(p => ({ x: p.gx, y: p.gy, t: p.type })),
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts } : null,
       players: players.map(p => ({
@@ -305,6 +308,7 @@ export function createTron(room) {
     else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; } }
     else if (m.t === 'fade') { if (editable()) fadeMode = !fadeMode; }
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
+    else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

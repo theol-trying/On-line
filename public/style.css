@@ -297,6 +297,8 @@ body.flat .fxon{ animation:none; }
 .readybar .rbtn:hover{ border-color:var(--accent); }
 .readybar .rbtn.on{ background:#1d6b3f; border-color:#2ea866; color:#eafff0; }
 .readybar .rbtn.force{ background:#5a3a12; border-color:#b9812e; color:#ffe9c8; }
+/* podium de tournoi */
+.champ{ text-align:center; font-size:16px; font-weight:800; color:#ffd76b; padding:10px 4px 14px; }
 /* calque de fondu lors d'un changement de jeu */
 #xfade{ position:fixed; inset:0; z-index:8; background:var(--bg0); opacity:0; pointer-events:none; transition:opacity .25s ease; }
 /* calque confettis (au-dessus de tout, ne bloque pas les clics) */

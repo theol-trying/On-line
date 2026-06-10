@@ -17,6 +17,7 @@ const HOMING_T = 8 * TICK_HZ, CAMO_T = 6 * TICK_HZ, RADAR_T = 10 * TICK_HZ, HOMI
 const BARREL_COUNT = 4, BARREL_R = 11, BARREL_DMG_R = BLK * 1.25, BARREL_CHAIN = BLK * 1.6;      // barils explosifs : rayon collision / dégâts de zone / chaînage
 const MUD_COUNT = 10, MUD_MUL = 0.5;               // zones de boue : ralentissent les tanks qui les traversent
 const PU_TYPES = ['rapid', 'triple', 'shield', 'speed', 'pierce', 'mine', 'repair', 'emp', 'homing', 'camo', 'radar'];
+const TKDIFF = [{ skip: 0.45, fireA: 0.14, fireP: 0.5 }, { skip: 0.12, fireA: 0.22, fireP: 0.9 }, { skip: 0, fireA: 0.3, fireP: 1 }];   // IA : Facile / Normale / Difficile (réactivité, fenêtre et probabilité de tir)
 const WIN_TARGETS = [1, 3, 5];
 const SPAWNS = [[1, 1], [G - 2, G - 2], [G - 2, 1], [1, G - 2], [(G - 1) / 2 | 0, 1], [(G - 1) / 2 | 0, G - 2]];
 const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
@@ -49,7 +50,8 @@ function tankConnected(solid, spawns) {                 // BFS sur l'espace libr
 
 export function createTank(room) {
   let players, shells, mines, pickups, blocks, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick;
-  let arenaStyle, winTarget, matchWon, matchWinner, ff, botCount;   // ff = tir allié autorisé ; botCount = nb de bots IA
+  let arenaStyle, winTarget, matchWon, matchWinner, ff, botCount, botDiff;   // ff = tir allié autorisé ; botCount = nb de bots IA ; botDiff = 0/1/2
+  let lastGrid = '';                                                // dernière grille émise (delta : on n'émet que si changement)
   let barrels, mudSet;                                              // barils explosifs ; ensemble d'indices de cases boueuses
   let seatByMid = {};
 
@@ -88,7 +90,7 @@ export function createTank(room) {
   function fullReset() {
     players = makePlayers(); shells = []; mines = []; pickups = []; blocks = new Array(G * G).fill(0);
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0;
-    arenaStyle = 0; winTarget = 1; matchWon = false; matchWinner = null; ff = false; botCount = 0; barrels = []; mudSet = new Set(); seatByMid = {};
+    arenaStyle = 0; winTarget = 1; matchWon = false; matchWinner = null; ff = false; botCount = 0; botDiff = 1; barrels = []; mudSet = new Set(); seatByMid = {};
   }
 
   const connectedCount = () => players.filter(p => p.member).length;
@@ -202,6 +204,8 @@ export function createTank(room) {
     fx.push({ type: 'shot', x: p.x, y: p.y, seat: p.seat });
   }
   function botThink(p) {                              // IA : viser l'ennemi le plus proche, avancer en tournant, tirer ; évitement ENGAGÉ (sinon le bot tremble sur place)
+    const D = TKDIFF[botDiff] || TKDIFF[1];
+    if (D.skip && Math.random() < D.skip) return;     // Facile : réagit moins souvent (garde ses inputs précédents)
     const inp = { left: false, right: false, fwd: false, back: false, fire: false };
     let tgt = null, bd = Infinity;
     for (const q of players) { if (!active(q) || q === p) continue; if (mode !== 'ffa' && q.team === p.team) continue; if (q.camoUntil > tick && p.radarUntil <= tick) continue; const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2; if (d < bd) { bd = d; tgt = q; } } // ne « voit » pas les camouflés (sauf radar)
@@ -215,7 +219,7 @@ export function createTank(room) {
       const desired = Math.atan2(tgt.y - p.y, tgt.x - p.x), diff = Math.atan2(Math.sin(desired - p.angle), Math.cos(desired - p.angle));
       if (diff > 0.07) inp.right = true; else if (diff < -0.07) inp.left = true;
       if (Math.abs(diff) < 1.1 && bd > (BLK * 1.3) ** 2) inp.fwd = true;                 // avance aussi pendant qu'il tourne, s'approche plus près
-      if (Math.abs(diff) < 0.22 && tick >= p.cool) inp.fire = true;                     // aligné : tire
+      if (Math.abs(diff) < D.fireA && tick >= p.cool && Math.random() < D.fireP) inp.fire = true;   // aligné : tire (fenêtre/probabilité selon difficulté)
       if (p.mineN > 0 && bd < (BLK * 1.4) ** 2 && Math.random() < 0.03) { p.mineN--; mines.push({ x: p.x, y: p.y, owner: p.seat, arm: tick + MINE_ARM }); fx.push({ type: 'mineset', x: p.x, y: p.y, seat: p.seat }); }
     } else {                                          // pas de cible visible : errance (patrouille)
       if (!(p.botWanderUntil > tick)) { p.botWanderUntil = tick + 20 + Math.floor(Math.random() * 40); p.botWanderTurn = Math.random() < 0.35 ? (Math.random() < 0.5 ? 'left' : 'right') : null; }
@@ -329,10 +333,13 @@ export function createTank(room) {
   }
 
   function snapshot() {
+    const g = blocks.join('');
+    const sendGrid = g !== lastGrid || tick % 15 === 0 || gameState !== 'play';   // delta + refresh 2×/s (arrivants, auto-réparation)
+    if (sendGrid) lastGrid = g;
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), mode, nteams, winTarget, gen: arenaStyle, ff,
-      grid: blocks.join(''),
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, winTarget, gen: arenaStyle, ff,
+      grid: sendGrid ? g : undefined,
       shells: shells.map(s => ({ x: Math.round(s.x), y: Math.round(s.y), vx: Math.round(s.vx * 10) / 10, vy: Math.round(s.vy * 10) / 10, o: s.o, p: !!s.pierce, h: !!s.homing })),
       mines: mines.map(m => ({ x: m.x, y: m.y, o: m.owner, armed: tick >= m.arm })),
       pickups: pickups.map(k => ({ x: k.x, y: k.y, t: k.type })),
@@ -389,6 +396,7 @@ export function createTank(room) {
     else if (m.t === 'abort') backToLobby();
     else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; } }
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
+    else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
     else if (m.t === 'arena') { if (editable()) arenaStyle = (arenaStyle + 1) % 3; }
     else if (m.t === 'wintarget') { if (editable()) winTarget = WIN_TARGETS[(WIN_TARGETS.indexOf(winTarget) + 1) % WIN_TARGETS.length]; }
     else if (m.t === 'ff') { if (editable()) ff = !ff; }

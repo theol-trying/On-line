@@ -4,7 +4,8 @@ import { createMusic } from '../../music.js';
 
 // musique : guerre/désert — drone grave en quintes, tambours martiaux ; climax (1 vie / duel final) = cor de tension + roulement
 const MUSIC_THEME = { bpm: 96, bpmBoost: 12, vol: 0.55, root: 73.42, len: 32,
-  stingers: { kill: { notes: [0, -7], wave: 'sawtooth', oct: 0, gain: 0.055, dur: 0.26, rate: 0.1 }, win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16]], gain: 0.035, dur: 0.3, rate: 0.13 } },
+  stingers: { kill: { notes: [0, -7], wave: 'sawtooth', oct: 0, gain: 0.055, dur: 0.26, rate: 0.1 }, win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16]], gain: 0.035, dur: 0.3, rate: 0.13 },
+    count: { notes: [0], oct: 1, wave: 'sawtooth', dur: 0.12, gain: 0.05, duck: false }, go: { notes: [[0, 4, 7]], oct: 1, dur: 0.4, gain: 0.05, duck: false } },
   layers: [
   { seq: [[0, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [-2, 5], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sawtooth', gain: 0.018, dur: 14 },
   { drums: 'K..K....K..K.S..K..K....K.KKS...', min: 1 },
@@ -32,11 +33,12 @@ export default (function () {
   let board = [], buf = [];
   const particles = [], puffs = [], lastPos = {};      // puffs = poussière/fumée (rendu opaque) ; lastPos = pour détecter le mouvement
   const craters = [], tracks = [];                     // cratères (murs détruits, persistants la manche) + traces de chenilles (s'estompent)
-  let prevRound = -1;
+  let prevRound = -1, _lastCount = -1;
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null;
   const music = createMusic(() => actx, () => A, MUSIC_THEME);
   const input = { left: false, right: false, fwd: false, back: false, fire: false };
-  let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, arenaBtn, winBtn, ffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
+  let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, diffBtn, arenaBtn, winBtn, ffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
+  const DIFF_NAMES = ['Facile', 'Normale', 'Difficile'];
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; };
@@ -110,6 +112,7 @@ export default (function () {
   function onMessage(m) { if (m && m.t === 'welcome') mySeat = m.seat; }
   function onLb(d) { board = d.board || []; renderLB(); }
   function onState(m) {
+    if (m.grid === undefined && snap) m.grid = snap.grid;   // delta réseau : grille absente = inchangée
     snap = m; teamMode = m.mode && m.mode !== 'ffa';
     if (m.round !== prevRound) { prevRound = m.round; craters.length = 0; tracks.length = 0; }   // nouvelle manche : terrain propre
     const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
@@ -119,6 +122,9 @@ export default (function () {
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
+    if (m.gs === 'countdown' && m.count > 0 && m.count !== _lastCount) music.sting('count');   // décompte musical 3·2·1
+    if (prevGs === 'countdown' && m.gs === 'play') music.sting('go');
+    _lastCount = m.count;
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 si un tank est à 1 vie ou duel final (parmi 3+)
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive); if ((tot >= 3 && alive.length <= 2) || alive.some(p => p.lives === 1)) inten = 2; }
@@ -131,6 +137,7 @@ export default (function () {
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused'); pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
     if (botsBtn) { botsBtn.disabled = !idle; botsBtn.textContent = '🤖 Bots : ' + (m.botCount || 0); botsBtn.classList.toggle('on', (m.botCount || 0) > 0); }
+    if (diffBtn) { diffBtn.disabled = !idle; diffBtn.textContent = '🎯 IA : ' + (DIFF_NAMES[m.botDiff] || 'Normale'); }
     modeBtn.disabled = !(idle && (total === 4 || total === 6)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     arenaBtn.disabled = !idle; arenaBtn.textContent = '🧱 ' + (GEN_NAMES[m.gen] || 'Arène');
     winBtn.disabled = !idle; winBtn.textContent = '🏁 ' + (m.winTarget === 1 ? '1 manche' : m.winTarget + ' manches');
@@ -138,20 +145,22 @@ export default (function () {
   }
 
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
+  let sndPan = 0;                                   // pan stéréo du prochain son (posé par psound, consommé par tone)
+  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); let dest = actx.destination; if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); dest = pn; } gg.connect(dest); o.start(t0); o.stop(t0 + d); }
+  function psound(k, x) { sndPan = Math.max(-1, Math.min(1, (x / ARENA - 0.5) * 1.7)); sound(k); sndPan = 0; }   // son positionné gauche/droite selon le x de l'événement
   function sound(k) { if (!actx) return; if (k === 'shot') tone(320, 0.05, 'square', 0.03); else if (k === 'hit') tone(200, 0.08, 'square', 0.05); else if (k === 'pickup') { tone(660, 0.07, 'square', 0.05); tone(990, 0.08, 'square', 0.05, 0.06); } else if (k === 'boom') { tone(150, 0.25, 'sawtooth', 0.06); tone(80, 0.32, 'sawtooth', 0.05, 0.05); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
-    if (f.type === 'shot') { sound('shot'); if (!A.reduceFx) { const now = performance.now(); for (let k = 0; k < 6; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.6; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 150 + Math.random() * 120, color: '#ffe08a' }); } } return; } // flash de bouche
-    if (f.type === 'hit') return sound('hit');
+    if (f.type === 'shot') { psound('shot', f.x); if (!A.reduceFx) { const now = performance.now(); for (let k = 0; k < 6; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.6; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 150 + Math.random() * 120, color: '#ffe08a' }); } } return; } // flash de bouche
+    if (f.type === 'hit') return psound('hit', f.x);
     if (f.type === 'wall') {                            // mur cassé : cratère persistant + éclats de bois
       craters.push({ gx: f.x, gy: f.y }); if (craters.length > 60) craters.shift();
       if (!A.reduceFx) { const now = performance.now(), cx0 = (f.x + 0.5) * BLK, cy0 = (f.y + 0.5) * BLK; for (let k = 0; k < 7; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.4; particles.push({ x: cx0, y: cy0, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 260 + Math.random() * 200, color: '#b58a4c' }); } }
       return;
     }
     if (f.type === 'pickup' || f.type === 'mineset') return sound('pickup');
-    if (f.type === 'barrel') { sound('boom'); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 9); const now = performance.now(); for (let k = 0; k < 26; k++) { const a = Math.random() * Math.PI * 2, sp = 1.5 + Math.random() * 5; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 320, color: Math.random() < 0.5 ? '#ff8a3a' : '#ffd23f' }); } return; } // explosion de baril (orange/jaune)
+    if (f.type === 'barrel') { psound('boom', f.x); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 9); const now = performance.now(); for (let k = 0; k < 26; k++) { const a = Math.random() * Math.PI * 2, sp = 1.5 + Math.random() * 5; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 320, color: Math.random() < 0.5 ? '#ff8a3a' : '#ffd23f' }); } return; } // explosion de baril (orange/jaune)
     if (f.type === 'boom') {
-      sound('boom'); if (!f.small) music.sting('kill'); if (A.reduceFx) return;
+      psound('boom', f.x); if (!f.small) music.sting('kill'); if (A.reduceFx) return;
       if (!f.small) shakeMag = Math.max(shakeMag, 7);
       const col = colSeat(f.seat), now = performance.now(), n = f.small ? 8 : 18;
       for (let k = 0; k < n; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 4.5; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 280, color: col }); }
@@ -294,6 +303,7 @@ export default (function () {
     pauseBtn.onclick = () => send({ t: 'pause' }); pauseFloat.onclick = () => send({ t: 'pause' });
     modeBtn.onclick = () => send({ t: 'mode' }); arenaBtn.onclick = () => send({ t: 'arena' }); winBtn.onclick = () => send({ t: 'wintarget' }); ffBtn.onclick = () => send({ t: 'ff' });
     if (botsBtn) botsBtn.onclick = () => send({ t: 'bots' });
+    diffBtn = $('tkDiff'); if (diffBtn) diffBtn.onclick = () => send({ t: 'botdiff' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('tkHelp'), helpPanel = $('tkHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
     cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
