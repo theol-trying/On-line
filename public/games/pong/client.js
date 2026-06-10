@@ -2,6 +2,7 @@
 // Contrat : init(ctx), onState(snap), onMessage(m), onLb(data), onA11y(), teardown().
 // Le shell fournit ctx = { root, send, a11y, togglePanel, closePanels }. Réseau/pseudo/thème = shell.
 import { W, H, BALL_R, PAD_W, PAD_OFF, PU_R } from './shared.js';
+import { createMusic } from '../../music.js';
 
 const SHAPE = { 2: 'Face à face', 3: 'Triangle', 4: 'Carré', 5: 'Pentagone', 6: 'Hexagone' };
 const PU_GLYPH = { multi: '+1', grow: 'XL', shield: '⛉', ghost: '◌', invert: '⇄', shrinkT: '▭', slow: '≈', mini: '▽', flip: '✕', speed: '»', blocker: '🧱', magnet: '🧲', invis: '∅' };
@@ -26,7 +27,17 @@ const THEMES = {
   light: { bg: '#e4e8f3', field: '#d6dbe9', grid: 'rgba(0,0,0,0.06)', ball: '#1a1d2e' },
 };
 const INTERP_MS = 33;
-const M_SCALE = [220, 277.18, 329.63, 440, 554.37];
+
+// musique : arcade néon — nappe aérienne, basse ronde, blips lead ; climax (échanges rapides) = charley + tempo
+// fond animé : starfield lent qui scintille (identité néon/arcade) — positions dérivées du temps, coupé par reduceFx
+const AMB_STARS = Array.from({ length: 40 }, () => ({ x: Math.random(), y: Math.random(), v: 4 + Math.random() * 9, r: 0.5 + Math.random() * 1.3, ph: Math.random() * 6.28 }));
+const MUSIC_THEME = { bpm: 126, bpmBoost: 18, vol: 0.45, root: 110, len: 32, layers: [
+  { seq: [[0, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [-4, 3], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sine', gain: 0.022, dur: 12 },
+  { seq: [0, null, 0, null, 3, null, 3, null, 5, null, 5, null, 3, null, 3, null], wave: 'triangle', gain: 0.04, dur: 1.2, min: 1 },
+  { seq: [12, null, null, null, null, null, 15, null, null, null, null, null, 19, null, null, null, 17, null, null, null, null, null, 15, null, null, null, null, null, 12, null, null, null], oct: 1, wave: 'square', gain: 0.016, dur: 1.2, min: 1 },
+  { drums: '..H...H...H...H.', gain: 0.6, min: 2 },
+  { seq: [0, 3, 7, 10], oct: 2, wave: 'sine', gain: 0.012, dur: 0.8, min: 2 },
+] };
 
 export default (function () {
   let A, send, root, cv, ctx, togglePanel = () => {}, closePanels = () => {};
@@ -35,14 +46,15 @@ export default (function () {
   let board = [], history = [], endShown = false, inGamePrev = false;
   let buf = [], trails = [];
   const particles = [], edgeFlash = {}, rings = [], flashes = [];
-  let actx = null, musicOn = false, musicTimer = null, mStep = 0;
+  let actx = null;
+  const music = createMusic(() => actx, () => A, MUSIC_THEME);
   let shakeMag = 0, ballPopUntil = 0, bannerTimer = null, curWinMode = 'survivor';
   let rafId = 0, destroyed = false, resizeH = null;
   const input = { up: false, dn: false };
   // DOM refs
   let hud, cards, startBtn, pauseBtn, botsBtn, modeBtn, presetBtn, pauseFloat;
   let optBtn, optionsPanel, optLives, optSpeed, optPu, optAccel, optWin, optSudden, optServe, optHandi;
-  let optTarRow, optTar, optTarLbl, optNeg, optBot, optBump, lbBtn, lbPanel, voteBtn, histPreset, histMode;
+  let optTarRow, optTar, optTarLbl, optNeg, optBot, optStyle, optBump, lbBtn, lbPanel, voteBtn, histPreset, histMode;
 
   const $ = id => root.querySelector('#' + id) || document.getElementById(id);
   function colSeat(s) { if (s < 0 || !snap) return '#ffffff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; }
@@ -127,7 +139,7 @@ export default (function () {
     const w = m.winner, champ = w >= 0 ? parts.find(p => p.team === w) : null;
     const isMatch = m.stats && m.stats.match;
     const who = champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[w] : nm(champ.seat)) : null;
-    const title = champ ? (isMatch ? '🏆 ' + who + ' REMPORTE LE MATCH' : who + ' gagne') : 'Égalité';
+    const title = (m.stats && m.stats.nParts === 1) ? '🎯 Entraînement terminé' : (champ ? (isMatch ? '🏆 ' + who + ' REMPORTE LE MATCH' : who + ' gagne') : 'Égalité');
     const medals = ['🥇', '🥈', '🥉'];
     const rows = parts.map(p => {
       const col = colOf(p), place = p.place || 0;
@@ -195,12 +207,15 @@ export default (function () {
     detectBanners(prev, m);
     if (prevGs !== 'over' && m.gs === 'over') sound('win');
     prevGs = m.gs;
+    { let inten = 0;                                  // musique : 1 en jeu, 2 quand les échanges deviennent rapides
+      if (m.gs === 'play' || m.gs === 'countdown') inten = (m.gs === 'play' && musicIntensity() > 0.55) ? 2 : 1;
+      music.setIntensity(inten); }
     refreshHUD();
     if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } }
     else { endShown = false; $('endscreen').classList.add('hidden'); }
     const n = m.connected + m.botCount;
     const idle = m.gs === 'lobby' || m.gs === 'over';
-    startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1 && n >= 2);
+    startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1 && n >= 1);   // n=1 : entraînement solo (mur)
     startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused');
     pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
@@ -220,11 +235,12 @@ export default (function () {
       optNeg.checked = m.opts.negatives;
       if (optBump) optBump.checked = !!m.opts.bumpers;
       optBot.textContent = BOTDIFF_LABEL[m.opts.botDiff] || m.opts.botDiff;
+      if (optStyle) optStyle.textContent = ({ equilibre: 'Équilibré', agressif: 'Agressif', defensif: 'Défensif' })[m.opts.botStyle] || 'Équilibré';
       optSudden.classList.toggle('on', m.opts.sudden !== 'off');
       const showTar = m.opts.winMode !== 'survivor';
       optTarRow.style.display = showTar ? '' : 'none';
       if (showTar) { optTarLbl.textContent = m.opts.winMode === 'kills' ? 'Élim. cible' : 'Manches à gagner'; optTar.textContent = m.opts.winMode === 'kills' ? m.opts.killsTarget : m.opts.roundsTarget; }
-      [optLives, optSpeed, optPu, optAccel, optWin, optSudden, optServe, optHandi, optNeg, optBot, optBump,
+      [optLives, optSpeed, optPu, optAccel, optWin, optSudden, optServe, optHandi, optNeg, optBot, optStyle, optBump,
        $('optLivesMinus'), $('optLivesPlus'), $('optTarMinus'), $('optTarPlus')].forEach(el => { if (el) el.disabled = !idle; });
       optBtn.classList.toggle('on', m.preset === 'custom');
     }
@@ -234,9 +250,8 @@ export default (function () {
   function unlockAudio() {
     if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} }
     if (actx && actx.state === 'suspended') actx.resume();
-    if (A.music) startMusic();
   }
-  function musicIntensity() {
+  function musicIntensity() {                          // 0..1 selon la vitesse de la balle la plus rapide (pilote le climax musical)
     if (buf.length < 2) return 0;
     const a = buf[buf.length - 2].s, b = buf[buf.length - 1].s;
     if (!a.balls.length || a.balls.length !== b.balls.length) return 0.3;
@@ -244,17 +259,6 @@ export default (function () {
     for (let i = 0; i < b.balls.length; i++) { const d = Math.hypot(b.balls[i].x - a.balls[i].x, b.balls[i].y - a.balls[i].y); if (d > mx) mx = d; }
     return Math.min(1, mx / 16);
   }
-  function musicLoop() {
-    if (!musicOn || !actx) return;
-    const playing = snap && snap.gs === 'play';
-    const inten = playing ? musicIntensity() : 0;
-    tone(M_SCALE[0] / 2, 0.18, 'triangle', 0.035);
-    if (mStep % 2 === 0) tone(M_SCALE[1 + (Math.floor(mStep / 2) % 4)], 0.13, 'sine', 0.025, 0.05);
-    mStep++;
-    musicTimer = setTimeout(musicLoop, playing ? (440 - inten * 230) : 720);
-  }
-  function startMusic() { if (musicOn || !actx) return; musicOn = true; mStep = 0; musicLoop(); }
-  function stopMusic() { musicOn = false; if (musicTimer) { clearTimeout(musicTimer); musicTimer = null; } }
   function tone(freq, dur, type = 'square', gain = 0.05, delay = 0) {
     const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1;
     if (!actx || _v <= 0) return;
@@ -346,6 +350,7 @@ export default (function () {
     else shakeMag = 0;
     ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
     ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, W, H);
+    if (!A.reduceFx) { ctx.save(); ctx.fillStyle = '#9fd0ff'; for (const s of AMB_STARS) { const y = (s.y * H + now / 1000 * s.v) % H, tw = 0.5 + 0.5 * Math.sin(now / 900 + s.ph); ctx.globalAlpha = 0.05 + 0.16 * tw; ctx.beginPath(); ctx.arc(s.x * W, y, s.r, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); }   // starfield
     const view = computeView(now);
     const vballs = view ? view.balls : (snap ? snap.balls : []);
     const vpos = s => (view && view.pos[s] != null) ? view.pos[s] : (snap ? snap.players[s].pos : 0);
@@ -358,6 +363,10 @@ export default (function () {
       ctx.save(); ctx.clip();
       ctx.strokeStyle = TH.grid; ctx.lineWidth = 1;
       for (let i = 30; i < W; i += 40) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, H); ctx.moveTo(0, i); ctx.lineTo(W, i); ctx.stroke(); }
+      if (!A.reduceFx && snap.gs === 'play') {           // le terrain « chauffe » avec la vitesse des échanges
+        const heat = musicIntensity();
+        if (heat > 0.15) { const g = ctx.createRadialGradient(W / 2, H / 2, 60, W / 2, H / 2, W * 0.62); g.addColorStop(0, 'rgba(255,90,40,0)'); g.addColorStop(1, `rgba(255,90,40,${(0.16 * heat).toFixed(3)})`); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+      }
       ctx.restore();
       const edgeA = A.contrast ? 'aa' : '66';
       const wallC = A.contrast ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.16)';
@@ -519,7 +528,7 @@ export default (function () {
           ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '11.5px system-ui,sans-serif'; ctx.fillText(r, W / 2, H / 2 + 30);
         }
         ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif';
-        ctx.fillText(n >= 2 ? '▶ Espace / clic pour lancer' : 'En attente d\'un 2ᵉ participant…', W / 2, H / 2 + 52);
+        ctx.fillText(n >= 2 ? '▶ Espace / clic pour lancer' : '▶ Espace / clic — entraînement solo (mur) · ou ajoute un bot 🤖', W / 2, H / 2 + 52);
       }
     }
     rafId = requestAnimationFrame(draw);
@@ -568,7 +577,7 @@ export default (function () {
     optBtn = $('optBtn'); optionsPanel = $('options');
     optLives = $('optLives'); optSpeed = $('optSpeed'); optPu = $('optPu'); optAccel = $('optAccel');
     optWin = $('optWin'); optSudden = $('optSudden'); optServe = $('optServe'); optHandi = $('optHandi');
-    optTarRow = $('optTarRow'); optTar = $('optTar'); optTarLbl = $('optTarLbl'); optNeg = $('optNeg'); optBot = $('optBot'); optBump = $('optBump');
+    optTarRow = $('optTarRow'); optTar = $('optTar'); optTarLbl = $('optTarLbl'); optNeg = $('optNeg'); optBot = $('optBot'); optStyle = $('optStyle'); optBump = $('optBump');
     lbBtn = $('lbBtn'); lbPanel = $('lbpanel'); voteBtn = $('voteBtn'); histPreset = $('histPreset'); histMode = $('histMode');
 
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
@@ -594,6 +603,7 @@ export default (function () {
     optNeg.onchange = () => send({ t: 'opt', op: 'negatives' });
     if (optBump) optBump.onchange = () => send({ t: 'opt', op: 'bumpers' });
     optBot.onclick = () => send({ t: 'opt', op: 'botdiff' });
+    if (optStyle) optStyle.onclick = () => send({ t: 'opt', op: 'botstyle' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); renderHist(); };
     $('lbReset').onclick = () => { if (confirm('Réinitialiser le classement ?')) send({ t: 'lbreset' }); };
     voteBtn.onclick = () => send({ t: 'vote' });
@@ -605,11 +615,12 @@ export default (function () {
     resizeH = resizeCanvas;
     addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
+    music.start();
     rafId = requestAnimationFrame(draw);
   }
-  function onA11y() { applyColors(); A.music ? startMusic() : stopMusic(); }
+  function onA11y() { applyColors(); }
   function teardown() {
-    destroyed = true; cancelAnimationFrame(rafId); stopMusic();
+    destroyed = true; cancelAnimationFrame(rafId); music.stop();
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
   }
 

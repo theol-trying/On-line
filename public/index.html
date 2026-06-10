@@ -29,6 +29,7 @@
     <span id="readyCount" class="readycount"></span>
     <button id="readyBtn" class="rbtn">☐ Pas prêt</button>
     <button id="forceBtn" class="rbtn force" style="display:none">⏩ Forcer le départ</button>
+    <button id="reseatBtn" class="rbtn" style="display:none">🪑 Prendre un siège</button>
   </div>
 
   <!-- ===== racine du jeu PONG ===== -->
@@ -85,6 +86,7 @@
         <label class="srow"><span>Power-ups négatifs</span><input type="checkbox" class="switch" id="optNeg"></label>
         <label class="srow"><span>Bumpers (centre)</span><input type="checkbox" class="switch" id="optBump"></label>
         <div class="srow"><span>Bots (IA)</span><button id="optBot" class="cyc">Normal</button></div>
+        <div class="srow"><span>Style des bots</span><button id="optStyle" class="cyc">Équilibré</button></div>
       </div>
     </div>
 
@@ -279,7 +281,7 @@
         <div class="legrow"><span>👟</span><b>Vitesse</b> — tu te déplaces plus vite</div>
         <div class="legrow"><span>🦵</span><b>Coup de pied</b> — pousse les bombes en marchant dessus</div>
         <div class="legrow"><span>📡</span><b>Détonateur</b> — fais exploser tes bombes à la demande (action)</div>
-        <div class="legrow"><span>👻</span><b>Fantôme</b> — traverse les murs destructibles</div>
+        <div class="legrow"><span>👻</span><b>Fantôme</b> — traverse les murs destructibles pendant ~10 s</div>
         <div class="legrow"><span>🧤</span><b>Gant</b> — lance la bombe devant toi (action)</div>
         <div class="legrow"><span>🛡</span><b>Bouclier</b> — encaisse une explosion sans mourir</div>
         <div class="legrow"><span>📏</span><b>Bombe en ligne</b> — pose une rangée de bombes devant toi (si tu as assez de bombes)</div>
@@ -292,7 +294,7 @@
         <div class="legrow"><span>🌀</span><b>Téléporteur</b> — marche sur un portail pour ressortir à son jumeau</div>
         <h4>Mode revanche (bouton ☠)</h4>
         <div class="legrow"><span>☠</span><b>Revanche</b> — quand tu meurs (à 2 joueurs+), tu ne disparais pas : tu rejoins le <b>bord</b> de l'arène. Déplace-toi le long du cadre et <b>pose des bombes vers l'intérieur</b> (touche bombe). Si tu élimines un vivant depuis le bord, tu <b>ressuscites</b> dans l'arène ! La manche se termine quand un seul camp subsiste (la mort subite garantit la fin).</div>
-        <div class="note">Action = touche <b>X / Maj</b> (ou bouton 🧤). Les effets durent quelques secondes ; les bonus d'équipement (💣🔥👟🦵📡👻🧤🛡📏) restent jusqu'à ta mort.</div>
+        <div class="note">Action = touche <b>X / Maj</b> (ou bouton 🧤). Les effets durent quelques secondes ; les bonus d'équipement (💣🔥👟🦵📡🧤🛡📏) restent jusqu'à ta mort (👻 est temporaire). Avec 📡, tes bombes n'ont <b>pas de mèche</b> : déclenche-les avec <b>Action</b> !</div>
       </div>
     </div>
   </div>

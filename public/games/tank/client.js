@@ -1,5 +1,14 @@
 // Module client TANK v2 : arène destructible, power-ups, mines, collision, FFA/équipes, manches.
 import { ARENA, TANK_R, SHELL_R, BLK, G } from './shared.js';
+import { createMusic } from '../../music.js';
+
+// musique : guerre/désert — drone grave en quintes, tambours martiaux ; climax (1 vie / duel final) = cor de tension + roulement
+const MUSIC_THEME = { bpm: 96, bpmBoost: 12, vol: 0.55, root: 73.42, len: 32, layers: [
+  { seq: [[0, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [-2, 5], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sawtooth', gain: 0.018, dur: 14 },
+  { drums: 'K..K....K..K.S..K..K....K.KKS...', min: 1 },
+  { seq: [0, null, null, null, null, null, null, null, 3, null, null, null, 2, null, null, null, 0, null, null, null, null, null, null, null, -2, null, null, null, null, null, null, null], wave: 'sawtooth', gain: 0.02, dur: 4, min: 2 },
+  { drums: '..H...H...H...H...H...H...H.HH..', gain: 0.7, min: 2 },
+] };
 
 const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9'] };
 const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E69F00', '#009E73'] };
@@ -9,6 +18,8 @@ const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
 const PU = { rapid: { i: '»', c: '#9fe6ff' }, triple: { i: '⋔', c: '#ffd76b' }, shield: { i: '⛉', c: '#7fd1ff' }, speed: { i: '👟', c: '#7ff0bd' }, pierce: { i: '➳', c: '#ff9be0' }, mine: { i: '◈', c: '#ff8e6e' }, repair: { i: '🔧', c: '#7ff0bd' }, emp: { i: '⚡', c: '#9fe6ff' }, homing: { i: '🚀', c: '#ff7a7a' }, camo: { i: '👁', c: '#b9a6ff' }, radar: { i: '📡', c: '#7ff0bd' } };
 // identité visuelle propre au jeu (fixe) : Désert / Champ de bataille
 const SKIN = { bg: '#14130c', floor: '#2b2818', floor2: '#262313', solid: '#564f45', soft: '#8a6a3c', softTop: '#b58a4c', grid: 'rgba(255,220,150,0.045)', border: 'rgba(210,180,120,0.3)', steel: true, crate: true };
+// fond animé : grains de sable/poussière qui dérivent dans le vent (identité désert) — coupé par reduceFx
+const AMB_DUST = Array.from({ length: 18 }, () => ({ y: Math.random(), v: 12 + Math.random() * 26, a: 6 + Math.random() * 14, ph: Math.random() * 6.28, r: 1 + Math.random() * 2.2 }));
 const INTERP_MS = 55;
 const KEYMAP = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowUp: 'fwd', KeyW: 'fwd', ArrowDown: 'back', KeyS: 'back' };
 
@@ -18,7 +29,10 @@ export default (function () {
   let mySeat = -1, snap = null, prevGs = 'lobby', teamMode = false, endShown = false, inGamePrev = false;
   let board = [], buf = [];
   const particles = [], puffs = [], lastPos = {};      // puffs = poussière/fumée (rendu opaque) ; lastPos = pour détecter le mouvement
+  const craters = [], tracks = [];                     // cratères (murs détruits, persistants la manche) + traces de chenilles (s'estompent)
+  let prevRound = -1;
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null;
+  const music = createMusic(() => actx, () => A, MUSIC_THEME);
   const input = { left: false, right: false, fwd: false, back: false, fire: false };
   let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, arenaBtn, winBtn, ffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
@@ -84,6 +98,7 @@ export default (function () {
   function onLb(d) { board = d.board || []; renderLB(); }
   function onState(m) {
     snap = m; teamMode = m.mode && m.mode !== 'ffa';
+    if (m.round !== prevRound) { prevRound = m.round; craters.length = 0; tracks.length = 0; }   // nouvelle manche : terrain propre
     const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
@@ -91,7 +106,11 @@ export default (function () {
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     if (prevGs !== 'over' && m.gs === 'over') sound('win');
-    prevGs = m.gs; refreshHUD();
+    prevGs = m.gs;
+    { let inten = 0;                                  // musique : 1 en jeu, 2 si un tank est à 1 vie ou duel final (parmi 3+)
+      if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive); if ((tot >= 3 && alive.length <= 2) || alive.some(p => p.lives === 1)) inten = 2; }
+      music.setIntensity(inten); }
+    refreshHUD();
     if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } } else { endShown = false; endEl.classList.add('hidden'); }
     const idle = m.gs === 'lobby' || m.gs === 'over';
     const total = m.connected + (m.botCount || 0);
@@ -111,6 +130,11 @@ export default (function () {
   function playFx(f) {
     if (f.type === 'shot') { sound('shot'); if (!A.reduceFx) { const now = performance.now(); for (let k = 0; k < 6; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.6; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 150 + Math.random() * 120, color: '#ffe08a' }); } } return; } // flash de bouche
     if (f.type === 'hit') return sound('hit');
+    if (f.type === 'wall') {                            // mur cassé : cratère persistant + éclats de bois
+      craters.push({ gx: f.x, gy: f.y }); if (craters.length > 60) craters.shift();
+      if (!A.reduceFx) { const now = performance.now(), cx0 = (f.x + 0.5) * BLK, cy0 = (f.y + 0.5) * BLK; for (let k = 0; k < 7; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.4; particles.push({ x: cx0, y: cy0, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 260 + Math.random() * 200, color: '#b58a4c' }); } }
+      return;
+    }
     if (f.type === 'pickup' || f.type === 'mineset') return sound('pickup');
     if (f.type === 'barrel') { sound('boom'); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 9); const now = performance.now(); for (let k = 0; k < 26; k++) { const a = Math.random() * Math.PI * 2, sp = 1.5 + Math.random() * 5; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 320, color: Math.random() < 0.5 ? '#ff8a3a' : '#ffd23f' }); } return; } // explosion de baril (orange/jaune)
     if (f.type === 'boom') {
@@ -153,6 +177,11 @@ export default (function () {
         }
       }
       ctx.strokeStyle = TH.border || 'rgba(255,255,255,0.2)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, ARENA - 3, ARENA - 3);
+      if (!A.reduceFx) { ctx.save(); ctx.fillStyle = 'rgb(214,196,150)'; for (const d of AMB_DUST) { const x = (d.ph * 100 + now / 1000 * d.v) % ARENA, y = d.y * ARENA + Math.sin(now / 1400 + d.ph) * d.a; ctx.globalAlpha = 0.06 + 0.05 * Math.sin(now / 800 + d.ph); ctx.beginPath(); ctx.arc(x, y, d.r, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); }   // poussière portée par le vent
+      // cratères (murs détruits) : taches sombres + éclats, persistants jusqu'à la fin de la manche
+      if (craters.length) { ctx.save(); for (const cr of craters) { const x = (cr.gx + 0.5) * BLK, y = (cr.gy + 0.5) * BLK, r1 = Math.abs(Math.sin(cr.gx * 13.3 + cr.gy * 7.7)), r2 = Math.abs(Math.sin(cr.gx * 5.1 + cr.gy * 11.9)); ctx.globalAlpha = 0.30; ctx.fillStyle = '#1c1910'; ctx.beginPath(); ctx.arc(x + (r1 - 0.5) * 8, y + (r2 - 0.5) * 8, 7 + r1 * 4, 0, Math.PI * 2); ctx.arc(x - (r2 - 0.5) * 9, y + (r1 - 0.5) * 6, 5 + r2 * 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 0.22; ctx.fillStyle = '#6b522e'; ctx.fillRect(x - 8 + r1 * 10, y - 6 + r2 * 8, 3.5, 2); ctx.fillRect(x + 2 - r2 * 8, y + 4 - r1 * 6, 3, 2); } ctx.restore(); }
+      // traces de chenilles : deux pointillés parallèles qui s'estompent (~5 s)
+      if (!A.reduceFx && tracks.length) { ctx.save(); ctx.fillStyle = '#3a3424'; for (let i = tracks.length - 1; i >= 0; i--) { const tr = tracks[i], age = (now - tr.born) / 5000; if (age >= 1) { tracks.splice(i, 1); continue; } ctx.globalAlpha = 0.16 * (1 - age); const pxp = -Math.sin(tr.a) * 5, pyp = Math.cos(tr.a) * 5; ctx.fillRect(tr.x + pxp - 1.5, tr.y + pyp - 1.5, 3, 3); ctx.fillRect(tr.x - pxp - 1.5, tr.y - pyp - 1.5, 3, 3); } ctx.restore(); }
       // zones de boue (ralentissent)
       (snap.mud || []).forEach(idx => { const gx = idx % G, gy = (idx / G) | 0, x = gx * BLK, y = gy * BLK; ctx.save(); ctx.fillStyle = 'rgba(86,60,28,0.6)'; ctx.fillRect(x, y, BLK, BLK); ctx.fillStyle = 'rgba(54,38,16,0.7)'; ctx.beginPath(); ctx.arc(x + BLK * 0.32, y + BLK * 0.4, 4, 0, Math.PI * 2); ctx.arc(x + BLK * 0.68, y + BLK * 0.62, 5, 0, Math.PI * 2); ctx.arc(x + BLK * 0.5, y + BLK * 0.8, 3, 0, Math.PI * 2); ctx.fill(); ctx.restore(); });
       // barils explosifs
@@ -173,6 +202,7 @@ export default (function () {
           const lp = lastPos[p.seat];
           if (lp && Math.hypot(t.x - lp.x, t.y - lp.y) > 0.6 && Math.random() < 0.5) puffs.push({ x: t.x - Math.cos(t.angle) * TANK_R, y: t.y - Math.sin(t.angle) * TANK_R, vx: (Math.random() * 2 - 1) * 0.3, vy: (Math.random() * 2 - 1) * 0.3 - 0.15, born: now, life: 340 + Math.random() * 220, r0: 3 + Math.random() * 3, col: '210,190,140' }); // poussière
           if (p.lives <= 1 && Math.random() < 0.12) puffs.push({ x: t.x + (Math.random() * 2 - 1) * 4, y: t.y - TANK_R * 0.4, vx: (Math.random() * 2 - 1) * 0.2, vy: -0.5 - Math.random() * 0.4, born: now, life: 600 + Math.random() * 400, r0: 3 + Math.random() * 3, col: '70,70,76' }); // fumée (tank endommagé)
+          if (lp && Math.hypot(t.x - lp.x, t.y - lp.y) > 1.2) { tracks.push({ x: t.x, y: t.y, a: t.angle, born: now }); if (tracks.length > 160) tracks.shift(); }   // traces de chenilles
           lastPos[p.seat] = { x: t.x, y: t.y };
         }
         ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.angle);
@@ -259,10 +289,11 @@ export default (function () {
     const mineBtn = $('tkMine'); if (mineBtn) mineBtn.addEventListener('pointerdown', e => { e.preventDefault(); send({ t: 'mine' }); });
     applyColors(); resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
+    music.start();
     rafId = requestAnimationFrame(draw);
   }
   function onA11y() { applyColors(); }
-  function teardown() { destroyed = true; cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur); }
+  function teardown() { destroyed = true; music.stop(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur); }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };
 })();

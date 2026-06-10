@@ -1,5 +1,16 @@
 // Module client BOMBERMAN v2 : équipes, bonus/malus, portée + compte à rebours visibles, mort subite.
 import { GW, GH, CELL, ARENA } from './shared.js';
+import { createMusic } from '../../music.js';
+
+// musique : cartoon enjoué — basse bondissante, mélodie espiègle, woodblock ; climax (mort subite) = motif chromatique + grosse caisse + tempo
+const MUSIC_THEME = { bpm: 134, bpmBoost: 16, vol: 0.48, root: 130.81, len: 32, layers: [
+  { seq: [[0, 4, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sine', gain: 0.02, dur: 12 },
+  { seq: [0, null, 7, null, 0, null, 7, null, 5, null, 12, null, 5, null, 12, null, 0, null, 7, null, 0, null, 7, null, -4, null, 3, null, 7, null, 3, null], wave: 'square', gain: 0.03, dur: 0.9, min: 1 },
+  { seq: [12, null, 12, null, 7, null, null, null, 9, null, 9, null, 4, null, null, null, 12, null, 14, null, 16, null, null, null, 12, null, 9, null, 7, null, null, null], oct: 1, wave: 'square', gain: 0.016, dur: 1.1, min: 1 },
+  { drums: '..H...H...H...H.', gain: 0.6, min: 1 },
+  { seq: [12, 11, 12, 11, 12, null, null, null], oct: 1, wave: 'triangle', gain: 0.022, dur: 0.8, min: 2 },
+  { drums: 'K...K...K...K...', min: 2 },
+] };
 
 const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9'] };
 const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E69F00', '#009E73'] };
@@ -7,6 +18,8 @@ const TEAM_LETTER = ['A', 'B', 'C'];
 const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3' };
 const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
 const PICK_ICON = { bomb: '💣', flame: '🔥', speed: '👟', kick: '🦵', remote: '📡', ghost: '👻', throw: '🧤', shield: '🛡', line: '📏', reverse: '🔀', slow: '🐌', auto: '⏱', skull: '💀' };
+// fond animé : ombres de nuages qui défilent doucement (identité cartoon) — coupé par reduceFx
+const AMB_CLOUDS = Array.from({ length: 5 }, () => ({ y: 0.05 + Math.random() * 0.85, v: 5 + Math.random() * 7, s: 22 + Math.random() * 26, ph: Math.random() * 1000 }));
 const INTERP_MS = 55;
 const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -17,9 +30,11 @@ export default (function () {
   let A, send, root, cv, ctx, togglePanel = () => {}, closePanels = () => {};
   let CC = PAL.normal, TEAMCC = TEAMPAL.normal, TH = SKIN, FX = 1;
   let mySeat = -1, snap = null, prevGs = 'lobby', teamMode = false, endShown = false, inGamePrev = false, prevRound = -1;
+  const wallAnims = [];                                // blocs détruits : petite anim d'écrasement cartoon
   let board = [], buf = [];
   const particles = [];
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null;
+  const music = createMusic(() => actx, () => A, MUSIC_THEME);
   const input = { up: false, down: false, left: false, right: false };
   let hud, cards, startBtn, pauseBtn, modeBtn, genBtn, ffBtn, revBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
@@ -91,7 +106,11 @@ export default (function () {
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     if (prevGs !== 'over' && m.gs === 'over') sound('win');
-    prevGs = m.gs; refreshHUD();
+    prevGs = m.gs;
+    { let inten = 0;                                  // musique : 1 en jeu, 2 dès la mort subite
+      if (m.gs === 'play' || m.gs === 'countdown') inten = m.sd ? 2 : 1;
+      music.setIntensity(inten); }
+    refreshHUD();
     if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } } else { endShown = false; endEl.classList.add('hidden'); }
     const idle = m.gs === 'lobby' || m.gs === 'over';
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1); startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
@@ -108,7 +127,7 @@ export default (function () {
   function sound(k) { if (!actx) return; if (k === 'place') tone(330, 0.05, 'square', 0.03); else if (k === 'wall') tone(240, 0.07, 'square', 0.04); else if (k === 'pickup') { tone(660, 0.07, 'square', 0.05); tone(880, 0.08, 'square', 0.05, 0.06); } else if (k === 'bad') { tone(300, 0.1, 'sawtooth', 0.05); tone(180, 0.18, 'sawtooth', 0.05, 0.08); } else if (k === 'boom') { tone(140, 0.28, 'sawtooth', 0.07); tone(70, 0.34, 'sawtooth', 0.05, 0.05); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
     if (f.type === 'place' || f.type === 'throw') return sound('place');
-    if (f.type === 'wall') return sound('wall');
+    if (f.type === 'wall') { sound('wall'); if (!A.reduceFx) { wallAnims.push({ x: f.x, y: f.y, born: performance.now() }); if (wallAnims.length > 30) wallAnims.shift(); } return; }
     if (f.type === 'guard' || f.type === 'warp') return sound('pickup');
     if (f.type === 'spawn') { sound('pickup'); if (!A.reduceFx) { const x = cpx(f.x), y = cpx(f.y), now = performance.now(); for (let k = 0; k < 14; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 3.2; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 320 + Math.random() * 220, color: colSeat(f.seat) }); } } return; } // retour de revanche
     if (f.type === 'drop') { if (!A.reduceFx) shakeMag = Math.max(shakeMag, 4); return; }
@@ -161,6 +180,9 @@ export default (function () {
           ctx.restore();
         }
       }
+      if (!A.reduceFx) { ctx.save(); ctx.fillStyle = '#fff'; for (const cl of AMB_CLOUDS) { const x = (cl.ph + now / 1000 * cl.v) % (ARENA + cl.s * 3) - cl.s * 1.5, y = cl.y * ARENA; ctx.globalAlpha = 0.05; ctx.beginPath(); ctx.ellipse(x, y, cl.s, cl.s * 0.42, 0, 0, Math.PI * 2); ctx.ellipse(x + cl.s * 0.6, y - cl.s * 0.18, cl.s * 0.6, cl.s * 0.3, 0, 0, Math.PI * 2); ctx.ellipse(x - cl.s * 0.6, y + cl.s * 0.08, cl.s * 0.55, cl.s * 0.26, 0, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); }   // nuages doux qui défilent
+      // blocs détruits : écrasement cartoon (squash & stretch ~240 ms)
+      for (let i = wallAnims.length - 1; i >= 0; i--) { const w = wallAnims[i], t2 = (now - w.born) / 240; if (t2 >= 1) { wallAnims.splice(i, 1); continue; } const sq = Math.max(0.05, 1 - t2); ctx.save(); ctx.globalAlpha = 1 - t2 * 0.6; ctx.translate(w.x * CELL + CELL / 2, w.y * CELL + CELL - 3); ctx.scale(1 + 0.55 * t2, sq); ctx.translate(-CELL / 2, -(CELL - 6)); ctx.fillStyle = TH.soft; rrect(3, 3, CELL - 6, CELL - 6, 5); ctx.fill(); ctx.restore(); }
       // prévisualisation de portée des bombes
       (snap.bombs || []).forEach(b => {
         const danger = b.f <= 30;                                   // mèche < ~1 s : on alerte
@@ -179,6 +201,7 @@ export default (function () {
       // bombes + compte à rebours
       (snap.bombs || []).forEach(b => {
         const x = cpx(b.x), y = cpx(b.y), pulse = 1 + 0.16 * Math.sin(now / (60 + b.f * 3));
+        ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(x, y + CELL * 0.24, CELL * 0.24, CELL * 0.09, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();   // ombre portée
         ctx.save(); ctx.fillStyle = b.r ? '#243' : '#1a1a22'; ctx.shadowColor = '#000'; ctx.shadowBlur = 6;
         ctx.beginPath(); ctx.arc(x, y, CELL * 0.32 * pulse, 0, Math.PI * 2); ctx.fill();
         const fl = 0.5 + 0.5 * Math.sin(now / (40 + b.f)), sr = 2 + fl * 1.7;   // étincelle de mèche qui crépite
@@ -207,10 +230,16 @@ export default (function () {
           return;
         }
         const t = (pv && pv[p.seat]) || p, col = colSeat(p.seat);
+        ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.26)'; ctx.beginPath(); ctx.ellipse(t.x, t.y + CELL * 0.3, CELL * 0.26, CELL * 0.10, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();   // ombre portée
         ctx.save(); if (p.invuln || p.ghost) ctx.globalAlpha = 0.5 + 0.4 * Math.sin(now / 70);
         ctx.shadowColor = col; ctx.shadowBlur = 10 * FX; ctx.fillStyle = col;
         ctx.beginPath(); ctx.arc(t.x, t.y, CELL * 0.32, 0, Math.PI * 2); ctx.fill();
-        ctx.lineWidth = 2; ctx.strokeStyle = p.shield ? '#7fd1ff' : (p.seat === mySeat ? '#fff' : 'rgba(255,255,255,0.5)'); ctx.stroke(); ctx.restore();
+        ctx.lineWidth = 2; ctx.strokeStyle = p.shield ? '#7fd1ff' : (p.seat === mySeat ? '#fff' : 'rgba(255,255,255,0.5)'); ctx.stroke();
+        ctx.shadowBlur = 0;                                                              // petit visage cartoon
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(t.x - 4, t.y - 2.5, 2.7, 0, Math.PI * 2); ctx.arc(t.x + 4, t.y - 2.5, 2.7, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#1c2030'; ctx.beginPath(); ctx.arc(t.x - 3.6, t.y - 2, 1.3, 0, Math.PI * 2); ctx.arc(t.x + 4.4, t.y - 2, 1.3, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(t.x, t.y + 2.2, 3.6, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+        ctx.restore();
         ctx.fillStyle = '#fff'; ctx.font = 'bold 10px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText(p.seat === mySeat ? 'VOUS' : (p.name || ('P' + (p.seat + 1))).slice(0, 8), t.x, t.y - CELL * 0.36);
       });
     }
@@ -261,10 +290,11 @@ export default (function () {
     const act = $('bmAct'); if (act) act.addEventListener('pointerdown', e => { e.preventDefault(); send({ t: 'action' }); });
     applyColors(); resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
+    music.start();
     rafId = requestAnimationFrame(draw);
   }
   function onA11y() { applyColors(); }
-  function teardown() { destroyed = true; cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur); }
+  function teardown() { destroyed = true; music.stop(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur); }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };
 })();
