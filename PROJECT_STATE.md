@@ -159,6 +159,10 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
   · **Bomberman** : **écrasement cartoon** des blocs détruits (`wallAnims`, squash & stretch 240 ms) ; **visages** (yeux + sourire) ; **ombres portées** sous joueurs et bombes.
   · **Snake** : **dégradé de queue** (chaque segment du chemin tracé avec opacité croissante vers la tête, compatible coupures de wrap) ; **pâquerettes** décoratives statiques (`AMB_FLOWERS`).
   · **Transverse** : **spectateur → siège** (bouton 🪑 dans la barre Prêt, message `{t:'reseat'}`, le hub re-exécute `joinGame` hors partie) ; **page `/stats` enrichie** (onglet `?game=global` : agrégat cross-jeux + champion par jeu ; colonne **% victoires** partout).
+- **Lot bots + stingers + icônes** :
+  · **Bots Tron/Snake/Bomberman** (pattern Tanks : `botCount`, bouton 🤖, sièges protégés, **exclus du leaderboard**, démarrage dès 1 humain + 2 participants). IA Tron : `rayFree` 3 directions, tourne vers le côté le plus dégagé. IA Snake : `botSafe` + anticipation 2 cases + attraction nourriture. IA Bomberman : `dangerMap` (portées des bombes), `botBfs` (fuite/cible : bonus sain ou mur cassable), **pose seulement si une retraite existe**, compense le malus inversé ; en mode revanche les bots **meurent pour de bon** (pas revenants).
+  · **Stingers musicaux** : `music.sting(kind)` dans music.js (`theme.stingers`, `base` Hz optionnel) ; **kill** (motif court propre à chaque jeu) + **win** (accords basés Do, harmonisés avec le jingle SFX) branchés dans les 5 clients (crash/boom/death + passage à `over`). Coupés avec la musique 🎵.
+  · **Icônes vectorielles** (rendu identique sur tous les OS, fini les emoji qui varient) : Bomberman `drawPickIcon` (13 glyphes bonus/malus dessinés au canvas), Tanks `drawTankIcon` (👟🔧⚡🚀👁📡 → chevrons/clé/éclair/missile/œil/ondes, via `TANK_VECT`), Snake champignon + fantôme dessinés. Les caractères typographiques (» ⋔ ⛉ ➳ ◈…) restent en texte. HUD HTML (badges/boutons) conserve les emoji (purement décoratif).
 - **Optimisation hub** : diffusion plein régime en jeu, ~4 Hz en lobby/pause/fin, boucle suspendue si 0 membre.
 
 ## Bugs corrigés (historique)

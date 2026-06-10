@@ -51,7 +51,7 @@ function bombConnected(solid, spawns) {
 }
 
 export function createBomb(room) {
-  let players, cells, bombs, blasts, pickups, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, sdIndex, sd, genStyle, ff, warpOf, revenge;
+  let players, cells, bombs, blasts, pickups, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, sdIndex, sd, genStyle, ff, warpOf, revenge, botCount;
   let seatByMid = {};
 
   function lbEntry(name) {
@@ -61,7 +61,7 @@ export function createBomb(room) {
   function recordRound() {
     if (nParts < 2) return;
     for (const p of players) {
-      if (!p.playing || !p.name) continue;
+      if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
       const e = lbEntry(p.name); e.games++;
       if (winner >= 0 && p.team === winner) e.wins++;
       e.kills += p.kills; e.dmg += p.kills;
@@ -78,7 +78,7 @@ export function createBomb(room) {
 
   function makePlayers() {
     return Array.from({ length: MAX_SEATS }, (_, seat) => ({
-      seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false,
+      seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false, bot: false, botNext: null, botCd: 0,
       x: ccx(1), y: ccx(1), face: { x: 0, y: 1 }, maxBombs: 1, power: FLAME_BASE, speed: SPD_BASE, bombsActive: 0,
       kick: false, remote: false, ghostUntil: 0, throw: false, line: false, shield: 0, reverseUntil: 0, slowUntil: 0, autoUntil: 0,
       skullUntil: 0, skullKind: '', warpCd: 0, lastCell: -1, revenant: false, ring: 0,
@@ -88,11 +88,12 @@ export function createBomb(room) {
   }
   function fullReset() {
     players = makePlayers(); cells = new Array(GW * GH).fill(0); bombs = []; blasts = []; pickups = [];
-    gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; sdIndex = 0; sd = false; genStyle = 0; ff = false; warpOf = {}; revenge = false; seatByMid = {};
+    gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; sdIndex = 0; sd = false; genStyle = 0; ff = false; warpOf = {}; revenge = false; botCount = 0; seatByMid = {};
   }
 
   const connectedCount = () => players.filter(p => p.member).length;
-  const partCount = () => connectedCount();
+  const maxBots = () => MAX_SEATS - connectedCount();
+  const partCount = () => Math.min(connectedCount() + botCount, MAX_SEATS);
   const canStart = () => connectedCount() >= 1;
   const editable = () => gameState === 'lobby' || gameState === 'over';
   const seatOf = member => { for (const p of players) if (p.member === member) return p.seat; return -1; };
@@ -123,8 +124,12 @@ export function createBomb(room) {
   }
   function startGame() {
     if (!editable() || !canStart()) return;
-    for (const p of players) p.playing = false;
+    for (const p of players) { p.playing = false; p.bot = false; }
+    if (botCount > maxBots()) botCount = maxBots();
     const parts = players.filter(p => p.member);
+    let bots = botCount;
+    for (const p of players) { if (bots <= 0) break; if (!p.member) { p.bot = true; parts.push(p); bots--; } } // complète avec des bots
+    parts.forEach((p, i) => { if (p.bot) p.name = '🤖 Bot ' + (i + 1); });
     if (parts.length < 1) return;
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
@@ -136,7 +141,7 @@ export function createBomb(room) {
       p.playing = true; p.alive = true; p.spawn = { gx: sx, gy: sy }; p.x = ccx(sx); p.y = ccx(sy); p.face = { x: 0, y: 1 };
       p.maxBombs = 1; p.power = FLAME_BASE; p.speed = SPD_BASE; p.bombsActive = 0;
       p.kick = p.remote = p.throw = p.line = false; p.ghostUntil = 0; p.shield = 0; p.reverseUntil = p.slowUntil = p.autoUntil = 0; p.invulnUntil = 0;
-      p.skullUntil = 0; p.skullKind = ''; p.warpCd = 0; p.lastCell = -1; p.revenant = false; p.ring = 0;
+      p.skullUntil = 0; p.skullKind = ''; p.warpCd = 0; p.lastCell = -1; p.revenant = false; p.ring = 0; p.botNext = null; p.botCd = 0;
       p.team = i % nteams; p.kills = 0; p.place = 0; p.elimTick = -1;
       p.inputs = { up: false, down: false, left: false, right: false };
     });
@@ -316,7 +321,7 @@ export function createBomb(room) {
     if (kp) kp.kills++;
     for (const b of bombs) if (!b.dead && b.owner === p.seat && b.remote) { b.remote = false; b.fuse = Math.min(b.fuse, 2 * TICK_HZ); } // bombes télécommandées du mort : repassent en minutées (plus d'orphelines)
     fx.push({ type: 'boom', x: gx, y: gy, seat: p.seat });
-    if (revenge && nParts >= 2) { toRevenant(p); if (kp && kp.revenant) reviveRevenant(kp); return; } // revanche : pas d'élimination, on passe au bord (et le tueur revenant ressuscite)
+    if (revenge && nParts >= 2 && !p.bot) { toRevenant(p); if (kp && kp.revenant) reviveRevenant(kp); return; } // revanche : pas d'élimination, on passe au bord (et le tueur revenant ressuscite) ; les bots, eux, meurent pour de bon
     p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++;
   }
   function applyPick(p, pk) {
@@ -343,6 +348,89 @@ export function createBomb(room) {
     else if (kind === 'auto') p.autoUntil = tick + DUR;
   }
 
+  /* ---- IA des bots : fuir le danger, casser des murs, poser des bombes avec retraite garantie ---- */
+  function dangerMap() {                            // cases menacées : explosions en cours + portée des bombes posées
+    const dg = new Set();
+    for (const bl of blasts) dg.add(idx(bl.gx, bl.gy));
+    for (const b of bombs) if (!b.dead) {
+      dg.add(idx(b.gx, b.gy));
+      for (const [dx, dy] of DIRS4) for (let r = 1; r <= b.power; r++) {
+        const gx = b.gx + dx * r, gy = b.gy + dy * r;
+        if (gx < 0 || gy < 0 || gx >= GW || gy >= GH) break;
+        const c = cells[idx(gx, gy)];
+        if (c === 1) break;
+        dg.add(idx(gx, gy));
+        if (c === 2) break;
+      }
+    }
+    return dg;
+  }
+  const botWalk = i2 => { const c = cells[i2]; return (c === 0 || c === 3) && !bombAt(i2 % GW, (i2 / GW) | 0); };
+  function botBfs(start, goal, blocked) {           // BFS borné -> PREMIER PAS (index) vers la plus proche case validant goal
+    const prev = new Map([[start, -1]]);
+    const q = [start];
+    while (q.length) {
+      const cur = q.shift();
+      if (cur !== start && goal(cur)) { let c = cur; while (prev.get(c) !== start) c = prev.get(c); return c; }
+      if (prev.size > 90) break;
+      const x = cur % GW, y = (cur / GW) | 0;
+      for (const [dx, dy] of DIRS4) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue;
+        const k = idx(nx, ny);
+        if (prev.has(k) || !botWalk(k) || (blocked && blocked.has(k))) continue;
+        prev.set(k, cur); q.push(k);
+      }
+    }
+    return -1;
+  }
+  function botSteer(p) {                            // pilote les inputs vers la case-étape (compense le malus inversé)
+    const inp = { up: false, down: false, left: false, right: false };
+    if (p.botNext != null) {
+      const tx = ccx(p.botNext % GW), ty = ccx((p.botNext / GW) | 0), dx = tx - p.x, dy = ty - p.y;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+        if (Math.abs(dx) >= Math.abs(dy)) inp[dx > 0 ? 'right' : 'left'] = true;
+        else inp[dy > 0 ? 'down' : 'up'] = true;
+      } else p.botNext = null;                       // arrivé sur la case
+    }
+    if (p.reverseUntil > tick) { const u = inp.up; inp.up = inp.down; inp.down = u; const l = inp.left; inp.left = inp.right; inp.right = l; }
+    p.inputs = inp;
+  }
+  function botThink(p) {
+    const gx = Math.floor(p.x / CELL), gy = Math.floor(p.y / CELL), cur = idx(gx, gy);
+    const inCenter = Math.abs(p.x - ccx(gx)) < 3 && Math.abs(p.y - ccx(gy)) < 3;
+    if (p.botNext != null && !inCenter) { botSteer(p); return; }   // entre deux cases : on finit le pas, on redécidera au centre
+    const dg = dangerMap();
+    let next = -1;
+    if (dg.has(cur)) next = botBfs(cur, i2 => !dg.has(i2), null);  // en danger : fuir vers la case sûre la plus proche
+    else {
+      if (tick >= p.botCd && p.bombsActive < p.maxBombs) {         // poser une bombe ? (mur cassable adjacent ou ennemi proche) seulement si une retraite existe
+        let want = false;
+        for (const [dx, dy] of DIRS4) if (cells[idx(gx + dx, gy + dy)] === 2) { want = true; break; }
+        if (!want) for (const q2 of players) if (active(q2) && q2 !== p && (mode === 'ffa' || q2.team !== p.team) && Math.abs(q2.x - p.x) + Math.abs(q2.y - p.y) < CELL * 2.2) { want = true; break; }
+        if (want) {
+          const my = new Set(dg); my.add(cur);                     // danger hypothétique si je pose ici
+          for (const [dx, dy] of DIRS4) for (let r = 1; r <= p.power; r++) { const x2 = gx + dx * r, y2 = gy + dy * r; if (x2 < 0 || y2 < 0 || x2 >= GW || y2 >= GH) break; const c = cells[idx(x2, y2)]; if (c === 1) break; my.add(idx(x2, y2)); if (c === 2) break; }
+          const esc = botBfs(cur, i2 => !my.has(i2), null);
+          if (esc >= 0) { placeBomb(p); p.botCd = tick + 24; next = esc; }
+        }
+      }
+      if (next < 0) next = botBfs(cur, i2 => {                     // sinon : viser un bonus sain, ou une case adjacente à un mur cassable
+        for (const pk of pickups) if (!pk.bad && idx(pk.gx, pk.gy) === i2) return true;
+        const x2 = i2 % GW, y2 = (i2 / GW) | 0;
+        for (const [dx, dy] of DIRS4) if (cells[idx(x2 + dx, y2 + dy)] === 2) return true;
+        return false;
+      }, dg);
+      if (next < 0) {                                              // rien à faire : errance prudente
+        const opts = [];
+        for (const [dx, dy] of DIRS4) { const nx = gx + dx, ny = gy + dy; if (nx < 1 || ny < 1 || nx >= GW - 1 || ny >= GH - 1) continue; const k2 = idx(nx, ny); if (botWalk(k2) && !dg.has(k2)) opts.push(k2); }
+        if (opts.length) next = opts[Math.floor(Math.random() * opts.length)];
+      }
+    }
+    p.botNext = next >= 0 ? next : null;
+    botSteer(p);
+  }
+
   function update() {
     fx = [];
     if (gameState === 'countdown') { tick++; if (tick >= countdownUntil) { gameState = 'play'; tick = 0; } return; }
@@ -358,7 +446,7 @@ export function createBomb(room) {
     bombs = bombs.filter(b => !b.dead);
     blasts = blasts.filter(bl => bl.until > tick);
     // déplacements + pose auto (malus)
-    for (const p of players) if (active(p)) { if (p.ghostUntil > 0 && p.ghostUntil <= tick && inSoftWall(p)) p.ghostUntil = tick + 1; movePlayer(p); if (p.autoUntil > tick && tick % AUTO_EVERY === 0) placeBomb(p, true); } // ghost prolongé tant qu'on est DANS un mur (anti-coincé) ; bombes auto = toujours minutées
+    for (const p of players) if (active(p)) { if (p.bot) botThink(p); if (p.ghostUntil > 0 && p.ghostUntil <= tick && inSoftWall(p)) p.ghostUntil = tick + 1; movePlayer(p); if (p.autoUntil > tick && tick % AUTO_EVERY === 0) placeBomb(p, true); } // ghost prolongé tant qu'on est DANS un mur (anti-coincé) ; bombes auto = toujours minutées
     for (const p of players) if (p.revenant) revMove(p);     // revanche : déplacement le long du bord
     // téléporteurs : on warpe à l'ENTRÉE d'une case 3 (pas de ping-pong), si la sortie n'est pas un bloc tombé (mort subite)
     for (const p of players) if (active(p)) {
@@ -397,14 +485,14 @@ export function createBomb(room) {
   function snapshot() {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount: 0, maxBots: 0, mode, nteams, sd, gen: genStyle, ff, revenge,
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), mode, nteams, sd, gen: genStyle, ff, revenge,
       grid: cells.join(''),
       bombs: bombs.map(b => ({ x: b.gx, y: b.gy, f: b.fuse, p: b.power, r: !!b.remote })),
       blasts: blasts.map(bl => ({ x: bl.gx, y: bl.gy })),
       pickups: pickups.map(pk => ({ x: pk.gx, y: pk.gy, t: pk.type, b: !!pk.bad })),
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, solo: nParts < 2 } : null,
       players: players.map(p => ({
-        seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive,
+        seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot,
         x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10,
         bombs: p.maxBombs, power: p.power, speed: Math.round((p.speed - SPD_BASE) / SPD_STEP),
         kick: p.kick, remote: p.remote, ghost: p.ghostUntil > tick, throw: p.throw, line: p.line, shield: p.shield,
@@ -419,8 +507,8 @@ export function createBomb(room) {
     const cur = seatOf(member); if (cur >= 0) return { role: 'player', seat: cur, hello: { t: 'welcome', seat: cur } }; // déjà assis (reconnexion within grace)
     let seat = -1;
     const rid = seatByMid[member.id];
-    if (rid != null && players[rid] && !players[rid].member) seat = rid;
-    if (seat < 0) { const free = players.find(p => !p.member); if (free) seat = free.seat; }
+    if (rid != null && players[rid] && !players[rid].member && !players[rid].bot) seat = rid;
+    if (seat < 0) { const free = players.find(p => !p.member && !p.bot); if (free) seat = free.seat; }   // siège de bot protégé
     if (seat < 0) return { role: 'spectator', hello: { t: 'welcome', seat: -1 } };
     const p = players[seat]; p.member = member; p.mid = member.id; p.name = member.name || ''; seatByMid[member.id] = seat;
     return { role: 'player', seat, hello: { t: 'welcome', seat } };
@@ -449,6 +537,7 @@ export function createBomb(room) {
     else if (m.t === 'gen') { if (editable()) genStyle = (genStyle + 1) % 3; }
     else if (m.t === 'ff') { if (editable()) ff = !ff; }
     else if (m.t === 'revenge') { if (editable()) revenge = !revenge; }
+    else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

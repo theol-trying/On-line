@@ -3,7 +3,9 @@ import { GW, GH, CELL, ARENA } from './shared.js';
 import { createMusic } from '../../music.js';
 
 // musique : synthwave sombre — nappe en quintes, basse pulsée, arpège néon ; climax (duel final) = arp rapide + charley + tempo
-const MUSIC_THEME = { bpm: 122, bpmBoost: 14, vol: 0.5, root: 82.41, len: 32, layers: [
+const MUSIC_THEME = { bpm: 122, bpmBoost: 14, vol: 0.5, root: 82.41, len: 32,
+  stingers: { kill: { notes: [0, -5], wave: 'sawtooth', oct: 0, gain: 0.05, dur: 0.22, rate: 0.09 }, win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16]], gain: 0.035, dur: 0.3, rate: 0.13 } },
+  layers: [
   { seq: [[0, 7], null, null, null, null, null, null, null, [-2, 5], null, null, null, null, null, null, null, [0, 7], null, null, null, null, null, null, null, [3, 10], null, null, null, null, null, null, null], wave: 'sawtooth', gain: 0.016, dur: 7 },
   { seq: [0, null, 0, null, 0, null, 0, null, 0, null, 0, null, -2, null, -2, null, 0, null, 0, null, 0, null, 0, null, 3, null, 3, null, -2, null, -2, null], wave: 'triangle', gain: 0.05, dur: 0.9, min: 1 },
   { seq: [12, null, null, null, 15, null, null, null, 19, null, null, null, 15, null, null, null], wave: 'square', gain: 0.014, dur: 1.2, min: 1 },
@@ -35,7 +37,7 @@ export default (function () {
   const particles = [];
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, boostHeld = false, killcam = null;
   const music = createMusic(() => actx, () => A, MUSIC_THEME);
-  let hud, cards, startBtn, pauseBtn, modeBtn, fadeBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
+  let hud, cards, startBtn, pauseBtn, modeBtn, fadeBtn, botsBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; };
@@ -62,7 +64,8 @@ export default (function () {
       cards[i].classList.toggle('me', i === mySeat);
       const tags = [];
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
-      if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
+      if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
+      else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       cards[i].querySelector('.pn').innerHTML = `${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
       cards[i].querySelector('.lv').textContent = p.playing ? (p.alive ? '● en vie' : '✖ crashé') : 'prêt';
       cards[i].querySelector('.lv').style.color = col;
@@ -105,7 +108,7 @@ export default (function () {
     if (m.round !== prevRound) { prevRound = m.round; buf = []; particles.length = 0; killcam = null; }
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
-    if (prevGs !== 'over' && m.gs === 'over') sound('win');
+    if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 quand il ne reste qu'un duel (parmi 3+)
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length; if (tot >= 3 && alive <= 2) inten = 2; }
@@ -114,12 +117,14 @@ export default (function () {
     if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } }
     else { endShown = false; endEl.classList.add('hidden'); }
     const idle = m.gs === 'lobby' || m.gs === 'over';
-    startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 2);
+    const total = m.connected + (m.botCount || 0);
+    startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1 && total >= 2);
     startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused');
     pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
-    modeBtn.disabled = !(idle && (m.connected === 4 || m.connected === 6));
+    if (botsBtn) { botsBtn.disabled = !idle; botsBtn.textContent = '🤖 Bots : ' + (m.botCount || 0); botsBtn.classList.toggle('on', (m.botCount || 0) > 0); }
+    modeBtn.disabled = !(idle && (total === 4 || total === 6));
     modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     fadeBtn.disabled = !idle; fadeBtn.textContent = m.fade ? '〰 Traînée courte' : '➖ Traînée ∞'; fadeBtn.classList.toggle('on', !!m.fade);
   }
@@ -130,7 +135,7 @@ export default (function () {
   function playFx(f) {
     if (f.type === 'pickup' || f.type === 'break') return sound('pickup');
     if (f.type === 'crash') {
-      sound('crash');
+      sound('crash'); music.sting('kill');
       if (f.seat === mySeat && !A.reduceFx) killcam = { x: f.x, y: f.y, born: performance.now() };   // killcam sur ta propre collision
       if (A.reduceFx) return;
       shakeMag = Math.max(shakeMag, 6);
@@ -254,9 +259,9 @@ export default (function () {
       if (snap.gs === 'paused') { ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', ARENA / 2, ARENA / 2 + 28); }
       else {
         ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(120,200,255,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 30px system-ui,sans-serif'; ctx.fillText('TRON', ARENA / 2, ARENA / 2 - 36); ctx.restore();
-        const n = snap.connected;
-        ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''}`, ARENA / 2, ARENA / 2 - 6);
-        ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText(n >= 2 ? '▶ Espace / clic pour lancer' : 'En attente d\'un 2ᵉ pilote…', ARENA / 2, ARENA / 2 + 24);
+        const n = snap.connected, nb = snap.botCount || 0, tot = n + nb;
+        ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''}`, ARENA / 2, ARENA / 2 - 6);
+        ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText(tot >= 2 ? '▶ Espace / clic pour lancer' : 'En attente d\'un 2ᵉ pilote… (ou ajoute un bot 🤖)', ARENA / 2, ARENA / 2 + 24);
       }
     }
     rafId = requestAnimationFrame(draw);
@@ -281,13 +286,14 @@ export default (function () {
     cv = $('trc'); ctx = cv.getContext('2d'); hud = $('trHud'); endEl = $('trEnd');
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = [0, 1, 2, 3, 4, 5].map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
-    startBtn = $('trStart'); pauseBtn = $('trPause'); modeBtn = $('trMode'); fadeBtn = $('trFade'); pauseFloat = $('trPauseFloat');
+    startBtn = $('trStart'); pauseBtn = $('trPause'); modeBtn = $('trMode'); fadeBtn = $('trFade'); botsBtn = $('trBots'); pauseFloat = $('trPauseFloat');
     lbBtn = $('trLbBtn'); lbPanel = $('trLbPanel'); lbBody = $('trLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' });
     pauseFloat.onclick = () => send({ t: 'pause' });
     modeBtn.onclick = () => send({ t: 'mode' });
     fadeBtn.onclick = () => send({ t: 'fade' });
+    if (botsBtn) botsBtn.onclick = () => send({ t: 'bots' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('trHelp'), helpPanel = $('trHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
     cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });

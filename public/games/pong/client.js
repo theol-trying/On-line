@@ -31,7 +31,9 @@ const INTERP_MS = 33;
 // musique : arcade néon — nappe aérienne, basse ronde, blips lead ; climax (échanges rapides) = charley + tempo
 // fond animé : starfield lent qui scintille (identité néon/arcade) — positions dérivées du temps, coupé par reduceFx
 const AMB_STARS = Array.from({ length: 40 }, () => ({ x: Math.random(), y: Math.random(), v: 4 + Math.random() * 9, r: 0.5 + Math.random() * 1.3, ph: Math.random() * 6.28 }));
-const MUSIC_THEME = { bpm: 126, bpmBoost: 18, vol: 0.45, root: 110, len: 32, layers: [
+const MUSIC_THEME = { bpm: 126, bpmBoost: 18, vol: 0.45, root: 110, len: 32,
+  stingers: { kill: { notes: [12, 5, 0], wave: 'square', oct: 1, gain: 0.035, dur: 0.14 }, win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16]], gain: 0.035, dur: 0.3, rate: 0.13 } },
+  layers: [
   { seq: [[0, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [-4, 3], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sine', gain: 0.022, dur: 12 },
   { seq: [0, null, 0, null, 3, null, 3, null, 5, null, 5, null, 3, null, 3, null], wave: 'triangle', gain: 0.04, dur: 1.2, min: 1 },
   { seq: [12, null, null, null, null, null, 15, null, null, null, null, null, 19, null, null, null, 17, null, null, null, null, null, 15, null, null, null, null, null, 12, null, null, null], oct: 1, wave: 'square', gain: 0.016, dur: 1.2, min: 1 },
@@ -201,11 +203,11 @@ export default (function () {
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     (m.fx || []).forEach(f => {
-      if (f.type === 'death' && f.elim) addKill(f.by, f.side);
+      if (f.type === 'death') { music.sting('kill'); if (f.elim) addKill(f.by, f.side); }
       else if (f.type === 'powerup' && f.bad) banner('⚠ ' + (PU_NAME[f.pu] || 'PIÈGE !'));
     });
     detectBanners(prev, m);
-    if (prevGs !== 'over' && m.gs === 'over') sound('win');
+    if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 quand les échanges deviennent rapides
       if (m.gs === 'play' || m.gs === 'countdown') inten = (m.gs === 'play' && musicIntensity() > 0.55) ? 2 : 1;
