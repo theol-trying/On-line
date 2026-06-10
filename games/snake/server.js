@@ -16,6 +16,7 @@ const RUSH_FOOD = 12;          // food-rush : beaucoup plus de pastilles
 const RUSH_TARGET = 20;        // food-rush : premier à ce score gagne
 const GHOST_TICKS = 5 * TICK_HZ, SHRINK_AMT = 4, ROCK_COUNT = 16;
 const VARIANT_NAMES = ['Classique', 'Murs traversants', 'Obstacles'];   // 0 / 1 / 2
+const SNDIFF = [{ err: 0.15, look: false }, { err: 0.05, look: true }, { err: 0, look: true }];   // IA : Facile / Normale / Difficile (inattention, anticipation à 2 cases)
 const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
 function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
@@ -48,7 +49,7 @@ function corners(cells) {
 }
 
 export function createSnake(room) {
-  let players, food, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, variant, rocks, rush, botCount;
+  let players, food, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, variant, rocks, rush, botCount, botDiff;
   let seatByMid = {};
 
   function lbEntry(name) {
@@ -84,7 +85,7 @@ export function createSnake(room) {
   function fullReset() {
     players = makePlayers(); food = []; rocks = new Set();
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = [];
-    mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; variant = 0; rush = false; botCount = 0; seatByMid = {};
+    mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; variant = 0; rush = false; botCount = 0; botDiff = 1; seatByMid = {};
   }
 
   const connectedCount = () => players.filter(p => p.member).length;
@@ -185,6 +186,8 @@ export function createSnake(room) {
     return { x: nx, y: ny };
   }
   function botThink(p) {                            // IA : éviter les obstacles, anticiper à 2 cases, viser la nourriture proche
+    const D = SNDIFF[botDiff] || SNDIFF[1];
+    if (D.err && Math.random() < D.err) return;                         // Facile : moments d'inattention (continue tout droit)
     const h = head(p), d = p.dir;
     const cands = [d, { x: d.y, y: -d.x }, { x: -d.y, y: d.x }];
     let best = null, bestScore = -Infinity;
@@ -192,7 +195,7 @@ export function createSnake(room) {
       const n = botSafe(h.x + c.x, h.y + c.y);
       if (!n) continue;
       let sc = c === d ? 0.5 : 0;                                       // inertie : préfère tout droit
-      if (!botSafe(n.x + c.x, n.y + c.y)) sc -= 2;                      // cul-de-sac probable à 2 cases
+      if (D.look && !botSafe(n.x + c.x, n.y + c.y)) sc -= 2;            // cul-de-sac probable à 2 cases (pas en Facile)
       let fd = Infinity;
       for (const f of food) { const dist = Math.abs(f.x - n.x) + Math.abs(f.y - n.y); if (dist < fd) fd = dist; }
       if (fd < Infinity) sc += 8 / (1 + fd);                            // attiré par la nourriture
@@ -266,7 +269,7 @@ export function createSnake(room) {
   function snapshot() {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), mode, nteams, variant, rush, rushTarget: RUSH_TARGET, rocks: [...rocks],
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, variant, rush, rushTarget: RUSH_TARGET, rocks: [...rocks],
       food: food.map(f => ({ x: f.x, y: f.y, t: f.t || 'apple' })),
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, solo: nParts < 2 } : null,
       players: players.map(p => ({
@@ -310,6 +313,7 @@ export function createSnake(room) {
     else if (m.t === 'variant') { if (editable()) variant = (variant + 1) % 3; }
     else if (m.t === 'rush') { if (editable()) rush = !rush; }
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
+    else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

@@ -15,6 +15,7 @@ const GHOST_DUR = 10 * TICK_HZ;                    // 👻 traverse-murs : tempo
 const SD_START = 65 * TICK_HZ, SD_EVERY = 10;
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const GOOD = ['bomb', 'flame', 'speed', 'kick', 'remote', 'shield', 'ghost', 'throw', 'line'];
+const BMDIFF = [{ skip: 0.5, cd: 44 }, { skip: 0.18, cd: 24 }, { skip: 0, cd: 12 }];   // IA : Facile / Normale / Difficile (hésitation, cadence de pose)
 const BAD = ['reverse', 'slow', 'auto', 'skull'];
 const SKULL_KINDS = ['reverse', 'slow', 'auto'];   // affliction aléatoire infligée par le skull (contagieux)
 const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
@@ -51,7 +52,8 @@ function bombConnected(solid, spawns) {
 }
 
 export function createBomb(room) {
-  let players, cells, bombs, blasts, pickups, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, sdIndex, sd, genStyle, ff, warpOf, revenge, botCount;
+  let players, cells, bombs, blasts, pickups, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, sdIndex, sd, genStyle, ff, warpOf, revenge, botCount, botDiff;
+  let lastGrid = '';                                 // dernière grille émise (delta : on n'émet que si changement)
   let seatByMid = {};
 
   function lbEntry(name) {
@@ -88,7 +90,7 @@ export function createBomb(room) {
   }
   function fullReset() {
     players = makePlayers(); cells = new Array(GW * GH).fill(0); bombs = []; blasts = []; pickups = [];
-    gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; sdIndex = 0; sd = false; genStyle = 0; ff = false; warpOf = {}; revenge = false; botCount = 0; seatByMid = {};
+    gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; sdIndex = 0; sd = false; genStyle = 0; ff = false; warpOf = {}; revenge = false; botCount = 0; botDiff = 1; seatByMid = {};
   }
 
   const connectedCount = () => players.filter(p => p.member).length;
@@ -219,7 +221,7 @@ export function createBomb(room) {
     if (bombAt(gx, gy) || cells[idx(gx, gy)] !== 0) return false;
     const pass = new Set();
     for (const q of players) if (active(q) && Math.floor(q.x / CELL) === gx && Math.floor(q.y / CELL) === gy) pass.add(q.seat);
-    bombs.push({ gx, gy, owner: p.seat, fuse: BOMB_FUSE, power: p.power, pass, dead: false, remote: p.remote && !forceFuse });
+    bombs.push({ gx, gy, owner: p.seat, fuse: BOMB_FUSE, power: p.power, pass, dead: false, remote: p.remote && !forceFuse && !p.bot });   // les bots n'utilisent jamais Action : leurs bombes restent minutées (sinon bombes éternelles)
     p.bombsActive++;
     fx.push({ type: 'place', x: gx, y: gy });
     return true;
@@ -399,8 +401,12 @@ export function createBomb(room) {
   function botThink(p) {
     const gx = Math.floor(p.x / CELL), gy = Math.floor(p.y / CELL), cur = idx(gx, gy);
     const inCenter = Math.abs(p.x - ccx(gx)) < 3 && Math.abs(p.y - ccx(gy)) < 3;
-    if (p.botNext != null && !inCenter) { botSteer(p); return; }   // entre deux cases : on finit le pas, on redécidera au centre
+    const stalled = p.botPX === p.x && p.botPY === p.y;            // n'a pas bougé depuis le dernier tick : étape devenue infranchissable (bloc tombé, bombe…)
+    p.botPX = p.x; p.botPY = p.y;
+    if (p.botNext != null && !inCenter && !stalled && botWalk(p.botNext)) { botSteer(p); return; }   // entre deux cases : on finit le pas, on redécidera au centre
+    const D = BMDIFF[botDiff] || BMDIFF[1];
     const dg = dangerMap();
+    if (!dg.has(idx(gx, gy)) && D.skip && Math.random() < D.skip) { botSteer(p); return; }   // Facile : hésite (sauf en danger)
     let next = -1;
     if (dg.has(cur)) next = botBfs(cur, i2 => !dg.has(i2), null);  // en danger : fuir vers la case sûre la plus proche
     else {
@@ -412,7 +418,7 @@ export function createBomb(room) {
           const my = new Set(dg); my.add(cur);                     // danger hypothétique si je pose ici
           for (const [dx, dy] of DIRS4) for (let r = 1; r <= p.power; r++) { const x2 = gx + dx * r, y2 = gy + dy * r; if (x2 < 0 || y2 < 0 || x2 >= GW || y2 >= GH) break; const c = cells[idx(x2, y2)]; if (c === 1) break; my.add(idx(x2, y2)); if (c === 2) break; }
           const esc = botBfs(cur, i2 => !my.has(i2), null);
-          if (esc >= 0) { placeBomb(p); p.botCd = tick + 24; next = esc; }
+          if (esc >= 0) { placeBomb(p); p.botCd = tick + D.cd; next = esc; }
         }
       }
       if (next < 0) next = botBfs(cur, i2 => {                     // sinon : viser un bonus sain, ou une case adjacente à un mur cassable
@@ -483,10 +489,13 @@ export function createBomb(room) {
   }
 
   function snapshot() {
+    const g = cells.join('');
+    const sendGrid = g !== lastGrid || tick % 15 === 0 || gameState !== 'play';   // delta + refresh 2×/s
+    if (sendGrid) lastGrid = g;
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), mode, nteams, sd, gen: genStyle, ff, revenge,
-      grid: cells.join(''),
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, sd, gen: genStyle, ff, revenge,
+      grid: sendGrid ? g : undefined,
       bombs: bombs.map(b => ({ x: b.gx, y: b.gy, f: b.fuse, p: b.power, r: !!b.remote })),
       blasts: blasts.map(bl => ({ x: bl.gx, y: bl.gy })),
       pickups: pickups.map(pk => ({ x: pk.gx, y: pk.gy, t: pk.type, b: !!pk.bad })),
@@ -538,6 +547,7 @@ export function createBomb(room) {
     else if (m.t === 'ff') { if (editable()) ff = !ff; }
     else if (m.t === 'revenge') { if (editable()) revenge = !revenge; }
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
+    else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

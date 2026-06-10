@@ -52,6 +52,7 @@ export function createPong(room) {
   let preset, cfg, roundBounces, nParts, deaths, endTick, countdownUntil;
   let rules, sdActive, sdScale, lastConceder, matchWonPending, matchWinner, slowUntil;
   let lastVoteTick = -999;
+  let geoVer = 0, geoSent = -1;  // version de la géométrie (delta : émise seulement quand elle change + refresh périodique)
   let seatByMid = {};            // memberId -> dernier siège (reprise après coupure)
 
   /* ---- leaderboard (schéma propre à Pong) ---- */
@@ -146,6 +147,7 @@ export function createPong(room) {
       e.bx = CX + (b.bx - CX) * s; e.by = CY + (b.by - CY) * s;
       e.len = b.len * s;
     }
+    geoVer++;
   }
   function configure() {
     for (const p of players) { p.playing = false; p.edge = -1; p.bot = false; }
@@ -157,7 +159,7 @@ export function createPong(room) {
     const N = Math.min(parts.length, MAX_SEATS);
     if (!validModes(N).includes(mode)) mode = 'ffa';
     const G = N <= 2 ? 4 : N;                          // solo : carré, 1 raquette + 3 murs (entraînement)
-    geo = buildGeometry(G);
+    geo = buildGeometry(G); geoVer++;
     let owners;
     if (N >= 3) owners = Array.from({ length: N }, (_, i) => i);
     else owners = [0, 1, 2, 3].sort((a, b) => Math.abs(geo.edges[b].nx) - Math.abs(geo.edges[a].nx)).slice(0, N);
@@ -460,6 +462,11 @@ export function createPong(room) {
     maybeSpawnPowerup();
   }
   function snapshot() {
+    let geoOut = null;                                 // null = pas de terrain ; undefined = inchangée (le client réutilise la sienne)
+    if (geo) {
+      if (geoSent !== geoVer || tick % 30 === 0 || gameState !== 'play') { geoSent = geoVer; geoOut = { edges: geo.edges.map(e => ({ ax: r1(e.ax), ay: r1(e.ay), bx: r1(e.bx), by: r1(e.by), tx: e.tx, ty: e.ty, nx: e.nx, ny: e.ny, len: r1(e.len), owner: e.owner })) }; }
+      else geoOut = undefined;
+    }
     return {
       gs: gameState, winner, fx, botCount, connected: connectedCount(), maxBots: maxBots(),
       mode, nteams, preset, maxLives: cfg.lives,
@@ -472,7 +479,7 @@ export function createPong(room) {
         negatives: rules.negatives, botDiff: rules.botDiff, botStyle: rules.botStyle, bumpers: rules.bumpers,
       },
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / 60), bounces: roundBounces, nParts, match: matchWonPending } : null,
-      geo: geo ? { edges: geo.edges.map(e => ({ ax: r1(e.ax), ay: r1(e.ay), bx: r1(e.bx), by: r1(e.by), tx: e.tx, ty: e.ty, nx: e.nx, ny: e.ny, len: r1(e.len), owner: e.owner })) } : null,
+      geo: geoOut,
       balls: balls.map(b => ({ x: r1(b.x), y: r1(b.y), vx: r1(b.vx), vy: r1(b.vy), o: b.last >= 0 ? geo.edges[b.last].owner : -1, gh: !!b.ghost, iv: b.invisUntil > tick })),
       powerups: powerups.map(p => ({ x: p.x | 0, y: p.y | 0, type: p.type, bad: !!p.bad })),
       bumpers: bumpers.map(bm => ({ x: r1(bm.x), y: r1(bm.y), r: bm.r, t: !!bm.until })),

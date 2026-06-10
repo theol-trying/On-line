@@ -57,7 +57,8 @@ export function createMusic(getCtx, getA11y, theme) {
   function sched() {                                   // ordonnanceur à fenêtre d'avance (220 ms) sur l'horloge audio
     const c = ensure(), A = getA11y();
     const on = !!(c && c.state === 'running' && A && A.music);
-    if (master && c) master.gain.setTargetAtTime(on ? (theme.vol == null ? 0.5 : theme.vol) : 0, c.currentTime, 0.12);
+    const vol = (theme.vol == null ? 0.5 : theme.vol) * (A && A.mvol != null ? A.mvol : 1);   // volume musique séparé (réglages 🎵)
+    if (master && c) master.gain.setTargetAtTime(on ? vol : 0, c.currentTime, 0.12);
     if (!on) { nextT = 0; return; }
     const spb = 60 / (theme.bpm + (intensity >= 2 ? (theme.bpmBoost || 0) : 0)) / 4;   // durée d'une double-croche
     if (!nextT || nextT < c.currentTime) { nextT = c.currentTime + 0.08; step = 0; }
@@ -67,6 +68,7 @@ export function createMusic(getCtx, getA11y, theme) {
     const c = ensure(), A = getA11y();
     const st = theme.stingers && theme.stingers[kind];
     if (!st || !c || c.state !== 'running' || !A || !A.music) return;
+    if (master && st.duck !== false) { const v = (theme.vol == null ? 0.5 : theme.vol) * (A.mvol != null ? A.mvol : 1); master.gain.cancelScheduledValues(c.currentTime); master.gain.setValueAtTime(Math.min(master.gain.value || v, v * 0.35), c.currentTime); }   // ducking : la musique s'efface brièvement (l'ordonnanceur la remonte en ~300 ms)
     const t0 = c.currentTime + 0.02, rate = st.rate || 0.075, base = st.base || theme.root * Math.pow(2, st.oct == null ? 1 : st.oct);
     st.notes.forEach((n, i) => { (Array.isArray(n) ? n : [n]).forEach(s => osc(t0 + i * rate, base * Math.pow(2, s / 12), st.dur || 0.16, st.wave || 'triangle', st.gain || 0.05)); });
   }

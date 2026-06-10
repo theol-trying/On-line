@@ -20,8 +20,12 @@
   <div class="shellrow">
     <div id="gamemenu"></div>
     <button id="globalBtn" class="ghosttab" aria-label="classement global">🏅 Global</button>
+    <button id="tourBtn" class="ghosttab" aria-label="tournoi">🏆 Tournoi</button>
     <button id="setBtn" class="ghosttab" aria-label="réglages d'affichage">⚙️ Affichage</button>
   </div>
+
+  <!-- ===== bandeau tournoi (jeu en cours + scores cumulés) ===== -->
+  <div id="tourBar" class="readybar hidden"></div>
 
   <!-- ===== barre « Prêt » (gate de démarrage, commune aux 6 jeux) ===== -->
   <div id="readyBar" class="readybar hidden">
@@ -140,6 +144,7 @@
       <button id="trPause" disabled>⏸ Pause</button>
       <span class="sep"></span>
       <button id="trBots">🤖 Bots : 0</button>
+      <button id="trDiff">🎯 IA : Normale</button>
       <button id="trMode" disabled>⚔ FFA</button>
       <button id="trFade">➖ Traînée ∞</button>
       <button id="trHelp">❔ Bonus</button>
@@ -189,6 +194,7 @@
       <button id="tkPause" disabled>⏸ Pause</button>
       <span class="sep"></span>
       <button id="tkBots">🤖 Bots : 0</button>
+      <button id="tkDiff">🎯 IA : Normale</button>
       <button id="tkMode" disabled>⚔ FFA</button>
       <button id="tkArena">🧱 Arène</button>
       <button id="tkWin">🏁 1 manche</button>
@@ -253,6 +259,7 @@
       <button id="bmPause" disabled>⏸ Pause</button>
       <span class="sep"></span>
       <button id="bmBots">🤖 Bots : 0</button>
+      <button id="bmDiff">🎯 IA : Normale</button>
       <button id="bmMode" disabled>⚔ FFA</button>
       <button id="bmGen">🧱 Map</button>
       <button id="bmFf" disabled>🤝 Tir allié : OFF</button>
@@ -314,6 +321,7 @@
       <button id="snPause" disabled>⏸ Pause</button>
       <span class="sep"></span>
       <button id="snBots">🤖 Bots : 0</button>
+      <button id="snDiff">🎯 IA : Normale</button>
       <button id="snMode" disabled>⚔ FFA</button>
       <button id="snVariant">🐍 Classique</button>
       <button id="snRush">🏁 Survie</button>
@@ -376,6 +384,7 @@
         <select id="setTheme"><option value="neon">Néon</option><option value="crt">Rétro CRT</option><option value="light">Clair</option></select></div>
       <label class="srow"><span>Musique d'ambiance</span><input type="checkbox" class="switch" id="setMusic"></label>
       <div class="srow"><span>Volume des effets</span><input type="range" id="setSfx" min="0" max="100" value="100" class="rng" aria-label="volume des effets sonores"></div>
+      <div class="srow"><span>Volume musique</span><input type="range" id="setMvol" min="0" max="100" value="70" class="rng" aria-label="volume de la musique"></div>
       <div class="srow"><span>Plein écran</span><button id="setFull" class="ghostbtn" style="margin:0;width:auto;padding:8px 14px;">⛶ Activer</button></div>
       <h4>Accessibilité</h4>
       <div class="srow"><span>Palette</span>
@@ -388,6 +397,12 @@
         <div class="note" style="margin-top:4px;">Visible uniquement avec ta clé admin. Efface définitivement tous les scores.</div>
       </div>
     </div>
+  </div>
+
+  <!-- ===== podium de fin de tournoi ===== -->
+  <div id="tourPanel" class="settings hidden" style="width:min(94vw,420px);">
+    <div class="shead"><h3>🏆 Résultats du tournoi</h3><button class="sclose" aria-label="fermer">✕</button></div>
+    <div class="sbody"><div id="tourBody"></div></div>
   </div>
 
   <!-- calques globaux : fondu de transition entre jeux + confettis de victoire -->

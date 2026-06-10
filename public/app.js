@@ -19,9 +19,10 @@ const setBtn = document.getElementById('setBtn'), setFloat = document.getElement
 const setTheme = document.getElementById('setTheme'), setMusic = document.getElementById('setMusic');
 const setPalette = document.getElementById('setPalette'), setContrast = document.getElementById('setContrast'), setFx = document.getElementById('setFx');
 const setSfx = document.getElementById('setSfx'), setFull = document.getElementById('setFull');
+const setMvol = document.getElementById('setMvol');
 
 /* ---------- accessibilité (partagée, persistée) ---------- */
-const a11y = Object.assign({ palette: 'normal', contrast: false, reduceFx: false, theme: 'neon', music: false, sfx: 1 },
+const a11y = Object.assign({ palette: 'normal', contrast: false, reduceFx: false, theme: 'neon', music: false, sfx: 1, mvol: 0.7 },
   JSON.parse(localStorage.getItem('pong-lan-a11y') || localStorage.getItem('pong-a11y') || '{}'));
 function applyA11y() {
   document.body.classList.toggle('flat', a11y.reduceFx);
@@ -30,6 +31,7 @@ function applyA11y() {
   setTheme.value = a11y.theme; setMusic.checked = a11y.music;
   setPalette.value = a11y.palette; setContrast.checked = a11y.contrast; setFx.checked = a11y.reduceFx;
   if (setSfx) setSfx.value = Math.round((a11y.sfx == null ? 1 : a11y.sfx) * 100);
+  if (setMvol) setMvol.value = Math.round((a11y.mvol == null ? 0.7 : a11y.mvol) * 100);
   localStorage.setItem('pong-lan-a11y', JSON.stringify(a11y));
   if (mod && mod.onA11y) mod.onA11y();
 }
@@ -39,6 +41,7 @@ setFx.onchange = () => { a11y.reduceFx = setFx.checked; applyA11y(); };
 setTheme.onchange = () => { a11y.theme = setTheme.value; applyA11y(); };
 setMusic.onchange = () => { a11y.music = setMusic.checked; applyA11y(); };
 if (setSfx) setSfx.oninput = () => { a11y.sfx = (parseInt(setSfx.value, 10) || 0) / 100; applyA11y(); };
+if (setMvol) setMvol.oninput = () => { a11y.mvol = (parseInt(setMvol.value, 10) || 0) / 100; applyA11y(); };
 if (setFull) setFull.onclick = () => { if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen(); else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); };
 /* vibration tactile (mobile) sur les boutons de contrôle .touch */
 document.addEventListener('pointerdown', e => { if (e.target.closest && e.target.closest('.touch')) { try { navigator.vibrate && navigator.vibrate(8); } catch {} } }, { passive: true });
@@ -146,6 +149,36 @@ if (forceBtn) forceBtn.onclick = () => send({ t: 'forcestart' });
 if (reseatBtn) reseatBtn.onclick = () => send({ t: 'reseat' });
 function note(txt) { if (!emoteToasts) return; const el = document.createElement('div'); el.className = 'etoast'; el.textContent = txt; emoteToasts.appendChild(el); while (emoteToasts.children.length > 6) emoteToasts.removeChild(emoteToasts.firstChild); setTimeout(() => el.remove(), 2600); }
 
+/* ---------- tournoi (orchestré par le hub : une manche de chaque jeu, points cumulés) ---------- */
+let tourState = null;
+const tourBtn = document.getElementById('tourBtn');
+const tourBar = document.getElementById('tourBar');
+function renderTour() {
+  if (!tourBar) return;
+  if (!tourState || !tourState.on) { tourBar.classList.add('hidden'); return; }
+  tourBar.classList.remove('hidden');
+  const gname = (gamesMeta.find(g => g.id === tourState.game) || {}).name || tourState.game;
+  const med = ['🥇', '🥈', '🥉'];
+  const sc = (tourState.scores || []).slice(0, 4).map((e, i) => `${med[i] || '·'} ${esc(e.name)} <b>${e.pts}</b>`).join(' &nbsp; ');
+  tourBar.innerHTML = `<b>🏆 Manche ${Math.min(tourState.idx + 1, tourState.total)}/${tourState.total}</b> — ${esc(gname)}${sc ? ' &nbsp;·&nbsp; ' + sc : ''}`;
+}
+function showPodium(scores) {
+  const panel = document.getElementById('tourPanel'), body = document.getElementById('tourBody');
+  if (!panel || !body) return;
+  const med = ['🥇', '🥈', '🥉'];
+  body.innerHTML = (scores && scores.length)
+    ? `<div class="champ">👑 ${esc(scores[0].name)} remporte le tournoi !</div>` +
+      scores.map((e, i) => `<div class="lbrow"><span class="lbn">${med[i] || '#' + (i + 1)} ${esc(e.name)}</span><span>${e.pts} pts</span></div>`).join('')
+    : '<div class="lbnote">Aucun point marqué.</div>';
+  closePanels(); panel.classList.remove('hidden'); scrim.classList.remove('hidden');
+  fireConfetti();
+}
+if (tourBtn) tourBtn.onclick = () => {
+  if (you.id !== roomHost) { note('👑 Seul l\'hôte (1ᵉʳ joueur) peut gérer le tournoi'); return; }
+  if (tourState && tourState.on && !confirm('Annuler le tournoi en cours ?')) return;
+  send({ t: 'tour' });
+};
+
 /* ---------- pseudo ---------- */
 nameInput.value = myName;
 nameInput.onchange = () => { myName = nameInput.value.trim().slice(0, 12); localStorage.setItem('pong-lan-name', myName); send({ t: 'name', name: myName }); };
@@ -249,6 +282,10 @@ function connect() {
       showEmote(m.name, m.e);
     } else if (m.t === 'png') {
       const rtt = Math.max(0, Math.round(performance.now() - m.ts)); if (pingTxt) pingTxt.textContent = ' · ⚡ ' + rtt + ' ms';
+    } else if (m.t === 'tour') {
+      if (m.done) { tourState = null; renderTour(); showPodium(m.scores); }
+      else if (m.on) { const was = tourState && tourState.on; tourState = m; renderTour(); if (!was) note('🏆 Tournoi lancé — que le meilleur gagne !'); }
+      else { if (tourState) note('🏆 Tournoi annulé'); tourState = null; renderTour(); }
     } else if (m.t === 'notready') {
       if (!window.__lastNR || performance.now() - window.__lastNR > 1500) { window.__lastNR = performance.now(); note('⏳ En attente que tous les joueurs soient prêts'); } // anti-spam (Espace en auto-répétition)
     } else if (m.t === 'state') {

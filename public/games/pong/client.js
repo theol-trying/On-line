@@ -29,10 +29,12 @@ const THEMES = {
 const INTERP_MS = 33;
 
 // musique : arcade néon — nappe aérienne, basse ronde, blips lead ; climax (échanges rapides) = charley + tempo
+let _lastCount = -1, _prevSd = false;   // décompte musical + riser de mort subite
 // fond animé : starfield lent qui scintille (identité néon/arcade) — positions dérivées du temps, coupé par reduceFx
 const AMB_STARS = Array.from({ length: 40 }, () => ({ x: Math.random(), y: Math.random(), v: 4 + Math.random() * 9, r: 0.5 + Math.random() * 1.3, ph: Math.random() * 6.28 }));
 const MUSIC_THEME = { bpm: 126, bpmBoost: 18, vol: 0.45, root: 110, len: 32,
-  stingers: { kill: { notes: [12, 5, 0], wave: 'square', oct: 1, gain: 0.035, dur: 0.14 }, win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16]], gain: 0.035, dur: 0.3, rate: 0.13 } },
+  stingers: { kill: { notes: [12, 5, 0], wave: 'square', oct: 1, gain: 0.035, dur: 0.14 }, win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16]], gain: 0.035, dur: 0.3, rate: 0.13 },
+    count: { notes: [0], oct: 2, wave: 'square', dur: 0.09, gain: 0.045, duck: false }, go: { notes: [[0, 4, 7]], oct: 1, dur: 0.4, gain: 0.05, duck: false }, alert: { notes: [0, 2, 4, 6, 8, 10, 12], oct: 1, wave: 'sawtooth', rate: 0.06, dur: 0.12, gain: 0.035 } },
   layers: [
   { seq: [[0, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [-4, 3], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sine', gain: 0.022, dur: 12 },
   { seq: [0, null, 0, null, 3, null, 3, null, 5, null, 5, null, 3, null, 3, null], wave: 'triangle', gain: 0.04, dur: 1.2, min: 1 },
@@ -193,6 +195,7 @@ export default (function () {
     if (snap && snap.gs === 'over' && endShown) showEndscreen(snap);
   }
   function onState(m) {
+    if (m.geo === undefined && snap) m.geo = snap.geo;      // delta réseau : géométrie absente = inchangée (null = vraiment vide)
     const prev = snap; snap = m;
     teamMode = m.mode && m.mode !== 'ffa';
     if (typeof m.maxLives === 'number') maxLives = m.maxLives;
@@ -208,6 +211,10 @@ export default (function () {
     });
     detectBanners(prev, m);
     if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
+    if (m.gs === 'countdown' && m.count > 0 && m.count !== _lastCount) music.sting('count');      // décompte musical 3·2·1
+    if (prevGs === 'countdown' && m.gs === 'play') music.sting('go');
+    _lastCount = m.count;
+    if (m.sd && !_prevSd) music.sting('alert'); _prevSd = !!m.sd;                                 // riser : mort subite
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 quand les échanges deviennent rapides
       if (m.gs === 'play' || m.gs === 'countdown') inten = (m.gs === 'play' && musicIntensity() > 0.55) ? 2 : 1;

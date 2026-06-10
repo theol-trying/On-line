@@ -4,7 +4,8 @@ import { createMusic } from '../../music.js';
 
 // musique : cartoon enjoué — basse bondissante, mélodie espiègle, woodblock ; climax (mort subite) = motif chromatique + grosse caisse + tempo
 const MUSIC_THEME = { bpm: 134, bpmBoost: 16, vol: 0.48, root: 130.81, len: 32,
-  stingers: { kill: { notes: [12, 7, 0], wave: 'square', oct: 0, gain: 0.04, dur: 0.15 }, win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16]], gain: 0.035, dur: 0.3, rate: 0.13 } },
+  stingers: { kill: { notes: [12, 7, 0], wave: 'square', oct: 0, gain: 0.04, dur: 0.15 }, win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16]], gain: 0.035, dur: 0.3, rate: 0.13 },
+    count: { notes: [0], oct: 2, wave: 'square', dur: 0.09, gain: 0.045, duck: false }, go: { notes: [[0, 4, 7]], oct: 1, dur: 0.4, gain: 0.05, duck: false }, alert: { notes: [0, 2, 4, 6, 8, 10, 12], oct: 1, wave: 'sawtooth', rate: 0.06, dur: 0.12, gain: 0.035 } },
   layers: [
   { seq: [[0, 4, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sine', gain: 0.02, dur: 12 },
   { seq: [0, null, 7, null, 0, null, 7, null, 5, null, 12, null, 5, null, 12, null, 0, null, 7, null, 0, null, 7, null, -4, null, 3, null, 7, null, 3, null], wave: 'square', gain: 0.03, dur: 0.9, min: 1 },
@@ -31,14 +32,15 @@ const SKIN = { bg: '#173a2a', floor: '#2f8f5b', floor2: '#36a268', solid: '#8a93
 export default (function () {
   let A, send, root, cv, ctx, togglePanel = () => {}, closePanels = () => {};
   let CC = PAL.normal, TEAMCC = TEAMPAL.normal, TH = SKIN, FX = 1;
-  let mySeat = -1, snap = null, prevGs = 'lobby', teamMode = false, endShown = false, inGamePrev = false, prevRound = -1;
+  let mySeat = -1, snap = null, prevGs = 'lobby', teamMode = false, endShown = false, inGamePrev = false, prevRound = -1, lastCount = -1, prevSd = false;
   const wallAnims = [];                                // blocs détruits : petite anim d'écrasement cartoon
   let board = [], buf = [];
   const particles = [];
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null;
   const music = createMusic(() => actx, () => A, MUSIC_THEME);
   const input = { up: false, down: false, left: false, right: false };
-  let hud, cards, startBtn, pauseBtn, modeBtn, genBtn, ffBtn, revBtn, botsBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
+  let hud, cards, startBtn, pauseBtn, modeBtn, genBtn, ffBtn, revBtn, botsBtn, diffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
+  const DIFF_NAMES = ['Facile', 'Normale', 'Difficile'];
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; };
@@ -100,6 +102,7 @@ export default (function () {
   function onMessage(m) { if (m && m.t === 'welcome') mySeat = m.seat; }
   function onLb(d) { board = d.board || []; renderLB(); }
   function onState(m) {
+    if (m.grid === undefined && snap) m.grid = snap.grid;   // delta réseau : grille absente = inchangée
     snap = m; teamMode = m.mode && m.mode !== 'ffa';
     const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
@@ -109,6 +112,10 @@ export default (function () {
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
+    if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) music.sting('count');   // décompte musical 3·2·1
+    if (prevGs === 'countdown' && m.gs === 'play') music.sting('go');
+    lastCount = m.count;
+    if (m.sd && !prevSd) music.sting('alert'); prevSd = !!m.sd;                                // riser : mort subite
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 dès la mort subite
       if (m.gs === 'play' || m.gs === 'countdown') inten = m.sd ? 2 : 1;
@@ -121,6 +128,7 @@ export default (function () {
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
     const total = m.connected + (m.botCount || 0);
     if (botsBtn) { botsBtn.disabled = !idle; botsBtn.textContent = '🤖 Bots : ' + (m.botCount || 0); botsBtn.classList.toggle('on', (m.botCount || 0) > 0); }
+    if (diffBtn) { diffBtn.disabled = !idle; diffBtn.textContent = '🎯 IA : ' + (DIFF_NAMES[m.botDiff] || 'Normale'); }
     modeBtn.disabled = !(idle && (total === 4 || total === 6)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     genBtn.disabled = !idle; genBtn.textContent = '🧱 ' + (GEN_NAMES[m.gen] || 'Map');
     ffBtn.disabled = !(idle && teamMode); ffBtn.textContent = '🤝 Tir allié : ' + (m.ff ? 'ON' : 'OFF'); ffBtn.classList.toggle('on', !!m.ff);
@@ -128,16 +136,18 @@ export default (function () {
   }
 
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); gg.connect(actx.destination); o.start(t0); o.stop(t0 + d); }
+  let sndPan = 0;                                   // pan stéréo du prochain son
+  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); let dest = actx.destination; if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); dest = pn; } gg.connect(dest); o.start(t0); o.stop(t0 + d); }
+  function psound(k, gx) { sndPan = Math.max(-1, Math.min(1, (cpx(gx) / ARENA - 0.5) * 1.7)); sound(k); sndPan = 0; }   // son positionné gauche/droite
   function sound(k) { if (!actx) return; if (k === 'place') tone(330, 0.05, 'square', 0.03); else if (k === 'wall') tone(240, 0.07, 'square', 0.04); else if (k === 'pickup') { tone(660, 0.07, 'square', 0.05); tone(880, 0.08, 'square', 0.05, 0.06); } else if (k === 'bad') { tone(300, 0.1, 'sawtooth', 0.05); tone(180, 0.18, 'sawtooth', 0.05, 0.08); } else if (k === 'boom') { tone(140, 0.28, 'sawtooth', 0.07); tone(70, 0.34, 'sawtooth', 0.05, 0.05); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
-    if (f.type === 'place' || f.type === 'throw') return sound('place');
-    if (f.type === 'wall') { sound('wall'); if (!A.reduceFx) { wallAnims.push({ x: f.x, y: f.y, born: performance.now() }); if (wallAnims.length > 30) wallAnims.shift(); } return; }
+    if (f.type === 'place' || f.type === 'throw') return psound('place', f.x);
+    if (f.type === 'wall') { psound('wall', f.x); if (!A.reduceFx) { wallAnims.push({ x: f.x, y: f.y, born: performance.now() }); if (wallAnims.length > 30) wallAnims.shift(); } return; }
     if (f.type === 'guard' || f.type === 'warp') return sound('pickup');
     if (f.type === 'spawn') { sound('pickup'); if (!A.reduceFx) { const x = cpx(f.x), y = cpx(f.y), now = performance.now(); for (let k = 0; k < 14; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 3.2; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 320 + Math.random() * 220, color: colSeat(f.seat) }); } } return; } // retour de revanche
     if (f.type === 'drop') { if (!A.reduceFx) shakeMag = Math.max(shakeMag, 4); return; }
     if (f.type === 'pickup') return sound(f.bad ? 'bad' : 'pickup');
-    if (f.type === 'boom') { sound('boom'); music.sting('kill'); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 6); const col = colSeat(f.seat), now = performance.now(), x = cpx(f.x), y = cpx(f.y); for (let k = 0; k < 16; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 4; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 240, color: col }); } }
+    if (f.type === 'boom') { psound('boom', f.x); music.sting('kill'); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 6); const col = colSeat(f.seat), now = performance.now(), x = cpx(f.x), y = cpx(f.y); for (let k = 0; k < 16; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 4; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 240, color: col }); } }
   }
   function viewPlayers(now) {
     if (buf.length === 0) return null;
@@ -307,6 +317,7 @@ export default (function () {
     pauseBtn.onclick = () => send({ t: 'pause' }); pauseFloat.onclick = () => send({ t: 'pause' }); modeBtn.onclick = () => send({ t: 'mode' }); genBtn.onclick = () => send({ t: 'gen' }); ffBtn.onclick = () => send({ t: 'ff' });
     if (revBtn) revBtn.onclick = () => send({ t: 'revenge' });
     if (botsBtn) botsBtn.onclick = () => send({ t: 'bots' });
+    diffBtn = $('bmDiff'); if (diffBtn) diffBtn.onclick = () => send({ t: 'botdiff' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('bmHelp'), helpPanel = $('bmHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
     cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });

@@ -18,6 +18,7 @@ let members = [];                             // membres connectés { id, name, 
 const identities = new Map();                 // token -> { id, name }  (reprise après coupure)
 let idSeq = 1;
 let loop = null, curHz = 0, idleTick = 0, wasIdle = true;
+let tour = null;                               // tournoi : { order:[ids mélangés], idx, scores:{nom:pts}, wait (ticks avant le jeu suivant) }
 const RECONNECT_GRACE = 12000;                 // délai pour reprendre son siège après une coupure (F5) en pleine partie
 const pendingLeaves = new Map();               // token -> { member, timer } : joueurs déconnectés dont le siège est gardé
 const newToken = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -33,6 +34,11 @@ function ensureGame() { if (!game) game = GAMES[activeId].create(room); }
 function roomMsg() { return { t: 'room', active: activeId, host: hostId(), players: members.map(m => ({ id: m.id, name: m.name, role: m.role, ready: !!m.ready })) }; }
 function hostId() { const p = members.find(m => m.role === 'player'); return (p || members[0] || {}).id || null; }   // hôte = 1er joueur connecté
 function allReady() { const ps = members.filter(m => m.role === 'player'); return ps.length <= 1 || ps.every(m => m.ready); } // solo : pas de gate ; bots = non-membres → exclus → jamais bloquants
+function tourMsg() {
+  if (!tour) return { t: 'tour', on: false };
+  const scores = Object.entries(tour.scores).map(([name, pts]) => ({ name, pts })).sort((a, b) => b.pts - a.pts);
+  return { t: 'tour', on: true, idx: tour.idx, total: tour.order.length, game: tour.order[Math.min(tour.idx, tour.order.length - 1)], scores };
+}
 function broadcastRoom() { room.broadcast(roomMsg()); }
 function setLoop() { const hz = GAMES[activeId].meta.tickHz || 60; if (hz === curHz && loop) return; if (loop) clearInterval(loop); curHz = hz; loop = setInterval(step, 1000 / hz); }
 
@@ -57,7 +63,19 @@ function step() {
   const snap = game.tick();
   const idleNow = game.isIdle();
   if (wasIdle && !idleNow) { let ch = false; for (const m of members) if (m.ready) { m.ready = false; ch = true; } if (ch) broadcastRoom(); } // manche lancée : on réarme les « Prêt »
+  if (tour && !wasIdle && idleNow && snap && snap.gs === 'over') {                 // manche de tournoi terminée : points selon le classement (bots exclus)
+    const ps = (snap.players || []).filter(p => p.place > 0 && !p.bot && p.name);
+    const n = ps.length;
+    for (const p of ps) tour.scores[p.name] = (tour.scores[p.name] || 0) + Math.max(1, n - p.place + 1);
+    tour.idx++;
+    if (tour.idx >= tour.order.length) {                                           // tournoi fini : podium chez tous, puis on libère
+      const scores = Object.entries(tour.scores).map(([name, pts]) => ({ name, pts })).sort((a, b) => b.pts - a.pts);
+      room.broadcast({ t: 'tour', on: false, done: true, scores });
+      tour = null;
+    } else { tour.wait = Math.max(30, Math.round(curHz * 6)); room.broadcast(tourMsg()); }   // ~6 s pour savourer l'écran de fin
+  }
   wasIdle = idleNow;
+  if (tour && tour.wait > 0 && --tour.wait <= 0) { tour.wait = 0; pick(tour.order[tour.idx]); room.broadcast(tourMsg()); }   // au jeu suivant !
   if (snap) {
     // plein régime en jeu ; en lobby/pause/fin on diffuse ~4×/s (économie CPU/réseau)
     const live = snap.gs === 'play' || snap.gs === 'countdown';
@@ -79,9 +97,22 @@ function wire(member) {                          // (re)branche les handlers d'u
       if (game && game.onRename) game.onRename(member);
       broadcastRoom();
     } else if (m.t === 'pick') {
+      if (tour) return;                              // pendant un tournoi, c'est lui qui choisit les jeux
       pick(m.id);
+    } else if (m.t === 'tour') {
+      if (member.id !== hostId()) return;            // réservé à l'hôte
+      ensureGame();
+      if (tour) { tour = null; room.broadcast({ t: 'tour', on: false }); }                  // annulation
+      else if (game.isIdle()) {
+        const order = META.map(g => g.id);
+        for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+        tour = { order, idx: 0, scores: {}, wait: 0 };
+        pick(order[0]);                               // no-op si c'est déjà le jeu actif
+        room.broadcast(tourMsg());
+      }
     } else if (m.t === 'g') {
       ensureGame();
+      if (m.m && m.m.t === 'start' && tour && tour.wait > 0) return;                        // transition de tournoi : pas de relance de l'ancien jeu
       if (m.m && m.m.t === 'start' && game.isIdle() && !allReady()) { room.send(member, { t: 'notready' }); return; } // gate « Prêt » : démarrage seulement si tous les joueurs sont prêts
       game.onMessage(member, m.m);
     } else if (m.t === 'ready') {
@@ -101,6 +132,7 @@ function wire(member) {                          // (re)branche les handlers d'u
   });
   member.conn.onClose(() => {
     members = members.filter(x => x !== member);
+    if (members.length === 0) tour = null;             // salle vide : le tournoi tombe
     if (game && member.role === 'player' && !game.isIdle()) {
       // partie en cours : on garde le siège quelques secondes pour une reprise (F5) au lieu d'éliminer tout de suite
       const tok = member.token;
@@ -122,6 +154,7 @@ function onConnection(conn, token) {
     conn.send(JSON.stringify({ t: 'hello', you: { id: member.id, name: member.name, token: member.token }, games: META, active: activeId }));
     joinGame(member);                           // onJoin idempotent -> renvoie le même siège (welcome)
     for (const meta of META) conn.send(lbMsg(meta.id)); // tous les classements (sinon vides au changement de jeu sans recharger)
+    if (tour) conn.send(JSON.stringify(tourMsg()));     // tournoi en cours : resynchronise le bandeau
     broadcastRoom();
     wire(member);
     return;
@@ -135,6 +168,7 @@ function onConnection(conn, token) {
   conn.send(JSON.stringify({ t: 'hello', you: { id: member.id, name: member.name, token: tok }, games: META, active: activeId }));
   joinGame(member);
   for (const meta of META) conn.send(lbMsg(meta.id)); // tous les classements (sinon vides au changement de jeu sans recharger)
+  if (tour) conn.send(JSON.stringify(tourMsg()));     // tournoi en cours : resynchronise le bandeau
   broadcastRoom();
   wire(member);
 }
