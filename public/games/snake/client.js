@@ -3,7 +3,9 @@ import { GW, GH, CELL, ARENA } from './shared.js';
 import { createMusic } from '../../music.js';
 
 // musique : jardin léger — nappe douce majeure, plucks pentatoniques ; climax (sprint food-rush / duel) = contre-voix + tempo
-const MUSIC_THEME = { bpm: 102, bpmBoost: 12, vol: 0.42, root: 130.81, len: 32, layers: [
+const MUSIC_THEME = { bpm: 102, bpmBoost: 12, vol: 0.42, root: 130.81, len: 32,
+  stingers: { kill: { notes: [7, 3, 0], wave: 'triangle', oct: 1, gain: 0.04, dur: 0.16 }, win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16]], gain: 0.035, dur: 0.3, rate: 0.13 } },
+  layers: [
   { seq: [[0, 4], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [5, 9], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sine', gain: 0.022, dur: 14 },
   { seq: [0, null, 2, null, 4, null, 7, null, 9, null, 7, null, 4, null, 2, null, 0, null, 4, null, 7, null, 9, null, 12, null, 9, null, 7, null, 4, null], oct: 1, wave: 'triangle', gain: 0.028, dur: 1.4, min: 1 },
   { seq: [null, null, 16, null, null, null, 14, null, null, null, 12, null, null, null, 9, null], oct: 1, wave: 'sine', gain: 0.018, dur: 1.2, min: 2 },
@@ -31,7 +33,7 @@ export default (function () {
   const particles = [];
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null;
   const music = createMusic(() => actx, () => A, MUSIC_THEME);
-  let hud, cards, startBtn, pauseBtn, modeBtn, variantBtn, rushBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
+  let hud, cards, startBtn, pauseBtn, modeBtn, variantBtn, rushBtn, botsBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; };
@@ -58,7 +60,8 @@ export default (function () {
       cards[i].classList.toggle('me', i === mySeat);
       const tags = [];
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
-      if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
+      if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
+      else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       cards[i].querySelector('.pn').innerHTML = `${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       lv.textContent = p.playing ? (p.alive ? `● L${p.len} · 🍎${p.score}` : '✖ mort') : 'prêt';
@@ -102,7 +105,7 @@ export default (function () {
     if (m.round !== prevRound) { prevRound = m.round; buf = []; particles.length = 0; }
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
-    if (prevGs !== 'over' && m.gs === 'over') sound('win');
+    if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 = sprint final food-rush ou duel (parmi 3+)
       if (m.gs === 'play' || m.gs === 'countdown') {
@@ -120,7 +123,9 @@ export default (function () {
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused');
     pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
-    modeBtn.disabled = !(idle && (m.connected === 4 || m.connected === 6));
+    const total = m.connected + (m.botCount || 0);
+    if (botsBtn) { botsBtn.disabled = !idle; botsBtn.textContent = '🤖 Bots : ' + (m.botCount || 0); botsBtn.classList.toggle('on', (m.botCount || 0) > 0); }
+    modeBtn.disabled = !(idle && (total === 4 || total === 6));
     modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     if (variantBtn) { variantBtn.disabled = !idle; variantBtn.textContent = VARIANT_NAMES[m.variant] || VARIANT_NAMES[0]; variantBtn.classList.toggle('on', m.variant > 0); }
     if (rushBtn) { rushBtn.disabled = !idle; rushBtn.textContent = '🏁 ' + (m.rush ? 'Food-rush' : 'Survie'); rushBtn.classList.toggle('on', !!m.rush); }
@@ -132,7 +137,7 @@ export default (function () {
   function playFx(f) {
     if (f.type === 'eat') { if (f.seat === mySeat) sound('eat'); if (!A.reduceFx) { const x = px(f.x), y = px(f.y), now = performance.now(); for (let k = 0; k < 8; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.2; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 300 + Math.random() * 180, color: '#ff5a6a' }); } } return; }   // éclaboussure de pomme
     if (f.type === 'crash') {
-      sound('crash'); if (A.reduceFx) return;
+      sound('crash'); music.sting('kill'); if (A.reduceFx) return;
       shakeMag = Math.max(shakeMag, 6);
       const x = px(f.x), y = px(f.y), col = colSeat(f.seat), now = performance.now();
       for (let k = 0; k < 16; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 4; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 420 + Math.random() * 260, color: col }); }
@@ -185,10 +190,15 @@ export default (function () {
       (snap.food || []).forEach(fd => {
         const x = px(fd.x), y = px(fd.y), pulse = 1 + 0.12 * Math.sin(now / 220 + fd.x + fd.y), r = CELL * 0.32 * pulse, t = fd.t || 'apple';
         ctx.save();
-        if (t === 'shrink' || t === 'ghost') {
-          if (!A.reduceFx) { ctx.shadowColor = t === 'ghost' ? '#bfe3ff' : '#d39bff'; ctx.shadowBlur = 8; }
-          ctx.font = `${Math.round(CELL * 0.8)}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillText(t === 'ghost' ? '👻' : '🍄', x, y + 1);
+        if (t === 'shrink') {                       // champignon vectoriel (rendu identique sur tous les OS)
+          if (!A.reduceFx) { ctx.shadowColor = '#ff8a8a'; ctx.shadowBlur = 8; }
+          ctx.fillStyle = '#f4e7d0'; ctx.fillRect(x - 2.2, y, 4.4, 6);
+          ctx.fillStyle = '#e8413a'; ctx.beginPath(); ctx.arc(x, y + 0.5, 7, Math.PI, 0); ctx.closePath(); ctx.fill();
+          ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x - 3, y - 2.5, 1.3, 0, 6.29); ctx.arc(x + 2.5, y - 3.5, 1.5, 0, 6.29); ctx.fill();
+        } else if (t === 'ghost') {                 // fantôme vectoriel
+          if (!A.reduceFx) { ctx.shadowColor = '#bfe3ff'; ctx.shadowBlur = 8; }
+          ctx.fillStyle = '#dceaff'; ctx.beginPath(); ctx.arc(x, y - 1, 6, Math.PI, 0); ctx.lineTo(x + 6, y + 4); ctx.arc(x + 4, y + 4, 2, 0, Math.PI); ctx.arc(x, y + 4, 2, 0, Math.PI); ctx.arc(x - 4, y + 4, 2, 0, Math.PI); ctx.closePath(); ctx.fill();
+          ctx.fillStyle = '#33405e'; ctx.beginPath(); ctx.arc(x - 2, y - 1.5, 1.2, 0, 6.29); ctx.arc(x + 2, y - 1.5, 1.2, 0, 6.29); ctx.fill();
         } else {
           const gold = t === 'gold', body = gold ? '#ffcf4a' : '#e8413a';
           if (gold && !A.reduceFx) { ctx.shadowColor = '#ffd24a'; ctx.shadowBlur = 13; }
@@ -266,8 +276,8 @@ export default (function () {
       if (snap.gs === 'paused') { ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', ARENA / 2, ARENA / 2 + 28); }
       else {
         ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(120,220,150,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 30px system-ui,sans-serif'; ctx.fillText('SNAKE', ARENA / 2, ARENA / 2 - 36); ctx.restore();
-        const n = snap.connected;
-        ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} joueur${n > 1 ? 's' : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n < 2 ? ' (solo : entraînement)' : '')}`, ARENA / 2, ARENA / 2 - 6);
+        const n = snap.connected, nb = snap.botCount || 0;
+        ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} joueur${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n + nb < 2 ? ' (solo : entraînement)' : '')}`, ARENA / 2, ARENA / 2 - 6);
         if (snap.rush) { ctx.fillStyle = '#ffd24a'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('🏁 Food-rush — premier à ' + (snap.rushTarget || 20) + ' 🍎 gagne', ARENA / 2, ARENA / 2 + 14); }
         ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('▶ Espace / clic pour lancer', ARENA / 2, ARENA / 2 + (snap.rush ? 34 : 24));
       }
@@ -291,7 +301,7 @@ export default (function () {
     cv = $('snc'); ctx = cv.getContext('2d'); hud = $('snHud'); endEl = $('snEnd');
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = [0, 1, 2, 3, 4, 5].map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
-    startBtn = $('snStart'); pauseBtn = $('snPause'); modeBtn = $('snMode'); variantBtn = $('snVariant'); rushBtn = $('snRush'); pauseFloat = $('snPauseFloat');
+    startBtn = $('snStart'); pauseBtn = $('snPause'); modeBtn = $('snMode'); variantBtn = $('snVariant'); rushBtn = $('snRush'); botsBtn = $('snBots'); pauseFloat = $('snPauseFloat');
     lbBtn = $('snLbBtn'); lbPanel = $('snLbPanel'); lbBody = $('snLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' });
@@ -299,6 +309,7 @@ export default (function () {
     modeBtn.onclick = () => send({ t: 'mode' });
     if (variantBtn) variantBtn.onclick = () => send({ t: 'variant' });
     if (rushBtn) rushBtn.onclick = () => send({ t: 'rush' });
+    if (botsBtn) botsBtn.onclick = () => send({ t: 'bots' });
     { const helpBtn = $('snHelp'), helpPanel = $('snHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel); }
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });

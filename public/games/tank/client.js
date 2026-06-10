@@ -3,7 +3,9 @@ import { ARENA, TANK_R, SHELL_R, BLK, G } from './shared.js';
 import { createMusic } from '../../music.js';
 
 // musique : guerre/désert — drone grave en quintes, tambours martiaux ; climax (1 vie / duel final) = cor de tension + roulement
-const MUSIC_THEME = { bpm: 96, bpmBoost: 12, vol: 0.55, root: 73.42, len: 32, layers: [
+const MUSIC_THEME = { bpm: 96, bpmBoost: 12, vol: 0.55, root: 73.42, len: 32,
+  stingers: { kill: { notes: [0, -7], wave: 'sawtooth', oct: 0, gain: 0.055, dur: 0.26, rate: 0.1 }, win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16]], gain: 0.035, dur: 0.3, rate: 0.13 } },
+  layers: [
   { seq: [[0, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [-2, 5], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sawtooth', gain: 0.018, dur: 14 },
   { drums: 'K..K....K..K.S..K..K....K.KKS...', min: 1 },
   { seq: [0, null, null, null, null, null, null, null, 3, null, null, null, 2, null, null, null, 0, null, null, null, null, null, null, null, -2, null, null, null, null, null, null, null], wave: 'sawtooth', gain: 0.02, dur: 4, min: 2 },
@@ -47,6 +49,17 @@ export default (function () {
     cv.style.width = size + 'px'; cv.style.height = size + 'px'; cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr);
   }
 
+  const TANK_VECT = { speed: 1, repair: 1, emp: 1, homing: 1, camo: 1, radar: 1 };   // power-ups dessinés en vectoriel (les emoji varient selon l'OS)
+  function drawTankIcon(t, x, y, s, col) {
+    const k = s / 10; ctx.save(); ctx.translate(x, y); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = col; ctx.fillStyle = col;
+    if (t === 'speed') { ctx.lineWidth = 2 * k; for (const o of [-3, 2]) { ctx.beginPath(); ctx.moveTo((o - 2) * k, -4.5 * k); ctx.lineTo((o + 3) * k, 0); ctx.lineTo((o - 2) * k, 4.5 * k); ctx.stroke(); } }
+    else if (t === 'repair') { ctx.lineWidth = 2.4 * k; ctx.beginPath(); ctx.moveTo(-4 * k, 4 * k); ctx.lineTo(2 * k, -2 * k); ctx.stroke(); ctx.lineWidth = 1.8 * k; ctx.beginPath(); ctx.arc(3.5 * k, -3.5 * k, 3 * k, 0.6, 5.2); ctx.stroke(); }                       // clé à molette
+    else if (t === 'emp') { ctx.beginPath(); ctx.moveTo(1.5 * k, -6 * k); ctx.lineTo(-2.5 * k, 0.5 * k); ctx.lineTo(0.5 * k, 0.5 * k); ctx.lineTo(-1.5 * k, 6 * k); ctx.lineTo(3.5 * k, -1 * k); ctx.lineTo(0.5 * k, -1 * k); ctx.closePath(); ctx.fill(); }              // éclair
+    else if (t === 'homing') { ctx.beginPath(); ctx.moveTo(0, -6 * k); ctx.quadraticCurveTo(3 * k, -2 * k, 2 * k, 3 * k); ctx.lineTo(-2 * k, 3 * k); ctx.quadraticCurveTo(-3 * k, -2 * k, 0, -6 * k); ctx.fill(); ctx.beginPath(); ctx.moveTo(-2 * k, 3 * k); ctx.lineTo(-4 * k, 6 * k); ctx.lineTo(-1.2 * k, 4.5 * k); ctx.closePath(); ctx.moveTo(2 * k, 3 * k); ctx.lineTo(4 * k, 6 * k); ctx.lineTo(1.2 * k, 4.5 * k); ctx.closePath(); ctx.fill(); }   // missile
+    else if (t === 'camo') { ctx.lineWidth = 1.8 * k; ctx.beginPath(); ctx.ellipse(0, 0, 5.5 * k, 3.4 * k, 0, 0, 6.29); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, 1.7 * k, 0, 6.29); ctx.fill(); }   // œil
+    else if (t === 'radar') { ctx.lineWidth = 1.8 * k; ctx.beginPath(); ctx.arc(0, 1 * k, 1.5 * k, 0, 6.29); ctx.fill(); for (const r of [3.5, 5.8]) { ctx.beginPath(); ctx.arc(0, 1 * k, r * k, -2.4, -0.74); ctx.stroke(); } }                                            // ondes radar
+    ctx.restore();
+  }
   function refreshHUD() {
     if (!snap) return;
     snap.players.forEach((p, i) => {
@@ -105,7 +118,7 @@ export default (function () {
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
-    if (prevGs !== 'over' && m.gs === 'over') sound('win');
+    if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 si un tank est à 1 vie ou duel final (parmi 3+)
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive); if ((tot >= 3 && alive.length <= 2) || alive.some(p => p.lives === 1)) inten = 2; }
@@ -138,7 +151,7 @@ export default (function () {
     if (f.type === 'pickup' || f.type === 'mineset') return sound('pickup');
     if (f.type === 'barrel') { sound('boom'); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 9); const now = performance.now(); for (let k = 0; k < 26; k++) { const a = Math.random() * Math.PI * 2, sp = 1.5 + Math.random() * 5; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 320, color: Math.random() < 0.5 ? '#ff8a3a' : '#ffd23f' }); } return; } // explosion de baril (orange/jaune)
     if (f.type === 'boom') {
-      sound('boom'); if (A.reduceFx) return;
+      sound('boom'); if (!f.small) music.sting('kill'); if (A.reduceFx) return;
       if (!f.small) shakeMag = Math.max(shakeMag, 7);
       const col = colSeat(f.seat), now = performance.now(), n = f.small ? 8 : 18;
       for (let k = 0; k < n; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 4.5; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 280, color: col }); }
@@ -187,7 +200,7 @@ export default (function () {
       // barils explosifs
       (snap.barrels || []).forEach(b => { ctx.save(); ctx.translate(b.x, b.y); const r = 11; ctx.shadowColor = '#000'; ctx.shadowBlur = 4 * FX; ctx.fillStyle = '#b5532a'; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0; ctx.strokeStyle = '#3a1d0e'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.moveTo(-r + 1, -r * 0.32); ctx.lineTo(r - 1, -r * 0.32); ctx.moveTo(-r + 1, r * 0.32); ctx.lineTo(r - 1, r * 0.32); ctx.stroke(); ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', 0, 1); ctx.restore(); });
       // power-ups
-      (snap.pickups || []).forEach(k => { const d = PU[k.t] || { i: '?', c: '#fff' }, pulse = 1 + 0.1 * Math.sin(now / 200); ctx.save(); ctx.shadowColor = d.c; ctx.shadowBlur = 12 * FX; ctx.fillStyle = d.c + '22'; ctx.strokeStyle = d.c; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(k.x, k.y, 13 * pulse, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0; ctx.fillStyle = d.c; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(d.i, k.x, k.y + 1); ctx.restore(); });
+      (snap.pickups || []).forEach(k => { const d = PU[k.t] || { i: '?', c: '#fff' }, pulse = 1 + 0.1 * Math.sin(now / 200); ctx.save(); ctx.shadowColor = d.c; ctx.shadowBlur = 12 * FX; ctx.fillStyle = d.c + '22'; ctx.strokeStyle = d.c; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(k.x, k.y, 13 * pulse, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0; ctx.restore(); if (TANK_VECT[k.t]) drawTankIcon(k.t, k.x, k.y, 11, d.c); else { ctx.save(); ctx.fillStyle = d.c; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(d.i, k.x, k.y + 1); ctx.restore(); } });
       // mines
       (snap.mines || []).forEach(mn => { const col = colSeat(mn.o); ctx.save(); ctx.fillStyle = mn.armed ? '#ff5a5a' : '#888'; ctx.globalAlpha = mn.armed ? 0.6 + 0.4 * Math.sin(now / 120) : 0.6; ctx.beginPath(); ctx.arc(mn.x, mn.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.7; ctx.stroke(); ctx.restore(); });
       // tanks

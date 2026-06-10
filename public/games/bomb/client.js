@@ -3,7 +3,9 @@ import { GW, GH, CELL, ARENA } from './shared.js';
 import { createMusic } from '../../music.js';
 
 // musique : cartoon enjoué — basse bondissante, mélodie espiègle, woodblock ; climax (mort subite) = motif chromatique + grosse caisse + tempo
-const MUSIC_THEME = { bpm: 134, bpmBoost: 16, vol: 0.48, root: 130.81, len: 32, layers: [
+const MUSIC_THEME = { bpm: 134, bpmBoost: 16, vol: 0.48, root: 130.81, len: 32,
+  stingers: { kill: { notes: [12, 7, 0], wave: 'square', oct: 0, gain: 0.04, dur: 0.15 }, win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16]], gain: 0.035, dur: 0.3, rate: 0.13 } },
+  layers: [
   { seq: [[0, 4, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sine', gain: 0.02, dur: 12 },
   { seq: [0, null, 7, null, 0, null, 7, null, 5, null, 12, null, 5, null, 12, null, 0, null, 7, null, 0, null, 7, null, -4, null, 3, null, 7, null, 3, null], wave: 'square', gain: 0.03, dur: 0.9, min: 1 },
   { seq: [12, null, 12, null, 7, null, null, null, 9, null, 9, null, 4, null, null, null, 12, null, 14, null, 16, null, null, null, 12, null, 9, null, 7, null, null, null], oct: 1, wave: 'square', gain: 0.016, dur: 1.1, min: 1 },
@@ -36,7 +38,7 @@ export default (function () {
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null;
   const music = createMusic(() => actx, () => A, MUSIC_THEME);
   const input = { up: false, down: false, left: false, right: false };
-  let hud, cards, startBtn, pauseBtn, modeBtn, genBtn, ffBtn, revBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
+  let hud, cards, startBtn, pauseBtn, modeBtn, genBtn, ffBtn, revBtn, botsBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; };
@@ -60,7 +62,8 @@ export default (function () {
       const col = colSeat(i); cards[i].style.color = col; cards[i].classList.toggle('dead', p.playing && !p.alive && !p.rvn); cards[i].classList.toggle('me', i === mySeat);
       const tags = [];
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
-      if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
+      if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
+      else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       cards[i].querySelector('.pn').innerHTML = `${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       const ab = [p.kick ? '🦵' : '', p.remote ? '📡' : '', p.ghost ? '👻' : '', p.throw ? '🧤' : '', p.line ? '📏' : '', p.shield ? '🛡' : '', p.rev ? '🔀' : '', p.slow ? '🐌' : '', p.auto ? '⏱' : '', p.skull ? '💀' : ''].filter(Boolean).join('');
@@ -105,7 +108,7 @@ export default (function () {
     if (m.round !== prevRound) { prevRound = m.round; buf = []; particles.length = 0; }
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
-    if (prevGs !== 'over' && m.gs === 'over') sound('win');
+    if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 dès la mort subite
       if (m.gs === 'play' || m.gs === 'countdown') inten = m.sd ? 2 : 1;
@@ -116,7 +119,9 @@ export default (function () {
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1); startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused'); pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
-    modeBtn.disabled = !(idle && (m.connected === 4 || m.connected === 6)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
+    const total = m.connected + (m.botCount || 0);
+    if (botsBtn) { botsBtn.disabled = !idle; botsBtn.textContent = '🤖 Bots : ' + (m.botCount || 0); botsBtn.classList.toggle('on', (m.botCount || 0) > 0); }
+    modeBtn.disabled = !(idle && (total === 4 || total === 6)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     genBtn.disabled = !idle; genBtn.textContent = '🧱 ' + (GEN_NAMES[m.gen] || 'Map');
     ffBtn.disabled = !(idle && teamMode); ffBtn.textContent = '🤝 Tir allié : ' + (m.ff ? 'ON' : 'OFF'); ffBtn.classList.toggle('on', !!m.ff);
     if (revBtn) { revBtn.disabled = !idle; revBtn.textContent = '☠ Revanche : ' + (m.revenge ? 'ON' : 'OFF'); revBtn.classList.toggle('on', !!m.revenge); }
@@ -132,7 +137,7 @@ export default (function () {
     if (f.type === 'spawn') { sound('pickup'); if (!A.reduceFx) { const x = cpx(f.x), y = cpx(f.y), now = performance.now(); for (let k = 0; k < 14; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 3.2; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 320 + Math.random() * 220, color: colSeat(f.seat) }); } } return; } // retour de revanche
     if (f.type === 'drop') { if (!A.reduceFx) shakeMag = Math.max(shakeMag, 4); return; }
     if (f.type === 'pickup') return sound(f.bad ? 'bad' : 'pickup');
-    if (f.type === 'boom') { sound('boom'); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 6); const col = colSeat(f.seat), now = performance.now(), x = cpx(f.x), y = cpx(f.y); for (let k = 0; k < 16; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 4; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 240, color: col }); } }
+    if (f.type === 'boom') { sound('boom'); music.sting('kill'); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 6); const col = colSeat(f.seat), now = performance.now(), x = cpx(f.x), y = cpx(f.y); for (let k = 0; k < 16; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 4; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 240, color: col }); } }
   }
   function viewPlayers(now) {
     if (buf.length === 0) return null;
@@ -143,6 +148,25 @@ export default (function () {
     const out = {};
     b.s.players.forEach(pb => { if (!pb.playing) return; const pa = a.s.players[pb.seat]; let x = pb.x, y = pb.y; if (pa && pa.playing && Math.hypot(pb.x - pa.x, pb.y - pa.y) < 60) { x = pa.x + (pb.x - pa.x) * al; y = pa.y + (pb.y - pa.y) * al; } out[pb.seat] = { x, y }; });
     return out;
+  }
+  function drawPickIcon(t, x, y, s) {                 // glyphes vectoriels des bonus/malus (rendu identique sur tous les OS, contrairement aux emoji)
+    ctx.save(); ctx.translate(x, y); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const k = s / 10;
+    if (t === 'bomb') { ctx.fillStyle = '#1a1a22'; ctx.beginPath(); ctx.arc(0, 1.5 * k, 6 * k, 0, 6.29); ctx.fill(); ctx.strokeStyle = '#caa64a'; ctx.lineWidth = 1.6 * k; ctx.beginPath(); ctx.moveTo(2 * k, -3 * k); ctx.quadraticCurveTo(5 * k, -6 * k, 7 * k, -5 * k); ctx.stroke(); ctx.fillStyle = '#ffd36e'; ctx.beginPath(); ctx.arc(7 * k, -5 * k, 1.8 * k, 0, 6.29); ctx.fill(); }
+    else if (t === 'flame') { ctx.fillStyle = '#ff8a3a'; ctx.beginPath(); ctx.moveTo(0, -7 * k); ctx.quadraticCurveTo(6 * k, -2 * k, 4 * k, 3 * k); ctx.quadraticCurveTo(3 * k, 6.5 * k, 0, 7 * k); ctx.quadraticCurveTo(-3 * k, 6.5 * k, -4 * k, 3 * k); ctx.quadraticCurveTo(-6 * k, -2 * k, 0, -7 * k); ctx.fill(); ctx.fillStyle = '#ffd36e'; ctx.beginPath(); ctx.arc(0, 3 * k, 2.6 * k, 0, 6.29); ctx.fill(); }
+    else if (t === 'speed') { ctx.strokeStyle = '#7ff0bd'; ctx.lineWidth = 2.2 * k; for (const o of [-3, 2]) { ctx.beginPath(); ctx.moveTo((o - 2) * k, -5 * k); ctx.lineTo((o + 3) * k, 0); ctx.lineTo((o - 2) * k, 5 * k); ctx.stroke(); } }
+    else if (t === 'kick') { ctx.strokeStyle = '#ffd76b'; ctx.lineWidth = 2.2 * k; ctx.beginPath(); ctx.moveTo(-2 * k, -6 * k); ctx.lineTo(-2 * k, 2 * k); ctx.stroke(); ctx.fillStyle = '#ffd76b'; ctx.fillRect(-3 * k, 2 * k, 7.5 * k, 3 * k); }
+    else if (t === 'remote') { ctx.fillStyle = '#9fe6ff'; ctx.beginPath(); ctx.arc(0, 3 * k, 1.8 * k, 0, 6.29); ctx.fill(); ctx.strokeStyle = '#9fe6ff'; ctx.lineWidth = 1.5 * k; for (const r of [4, 6.5]) { ctx.beginPath(); ctx.arc(0, 3 * k, r * k, -2.3, -0.85); ctx.stroke(); } }
+    else if (t === 'ghost') { ctx.fillStyle = '#e8ecff'; ctx.beginPath(); ctx.arc(0, -0.5 * k, 5 * k, Math.PI, 0); ctx.lineTo(5 * k, 4 * k); ctx.arc(3.3 * k, 4 * k, 1.7 * k, 0, Math.PI); ctx.arc(0, 4 * k, 1.7 * k, 0, Math.PI); ctx.arc(-3.3 * k, 4 * k, 1.7 * k, 0, Math.PI); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#3a3f55'; ctx.beginPath(); ctx.arc(-1.8 * k, -1 * k, 1 * k, 0, 6.29); ctx.arc(1.8 * k, -1 * k, 1 * k, 0, 6.29); ctx.fill(); }
+    else if (t === 'throw') { ctx.strokeStyle = '#ffb1d8'; ctx.lineWidth = 2 * k; ctx.beginPath(); ctx.arc(0, 0, 5 * k, 2.2, 4.6); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(3.4 * k, -2.6 * k, 2.4 * k, 0, 6.29); ctx.fill(); }
+    else if (t === 'shield') { ctx.fillStyle = '#7fd1ff'; ctx.beginPath(); ctx.moveTo(0, -6.5 * k); ctx.lineTo(5.5 * k, -4 * k); ctx.lineTo(5 * k, 2 * k); ctx.quadraticCurveTo(3 * k, 6 * k, 0, 7 * k); ctx.quadraticCurveTo(-3 * k, 6 * k, -5 * k, 2 * k); ctx.lineTo(-5.5 * k, -4 * k); ctx.closePath(); ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1.2 * k; ctx.beginPath(); ctx.moveTo(0, -4 * k); ctx.lineTo(0, 4.5 * k); ctx.stroke(); }
+    else if (t === 'line') { ctx.fillStyle = '#1a1a22'; for (const o of [-5, 0, 5]) { ctx.beginPath(); ctx.arc(o * k, 0, 2.2 * k, 0, 6.29); ctx.fill(); } }
+    else if (t === 'reverse') { ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 2 * k; ctx.beginPath(); ctx.arc(0, 0, 5 * k, -0.6, 2.2); ctx.stroke(); ctx.fillStyle = '#ff5a5a'; ctx.beginPath(); ctx.moveTo(5.8 * k, -4.4 * k); ctx.lineTo(2.2 * k, -3.4 * k); ctx.lineTo(5 * k, -0.8 * k); ctx.closePath(); ctx.fill(); }
+    else if (t === 'slow') { ctx.strokeStyle = '#ff9b6b'; ctx.lineWidth = 1.8 * k; ctx.beginPath(); for (let a = 0; a < 12; a += 0.4) { const r = a * 0.42 * k; const px2 = Math.cos(a) * r, py2 = Math.sin(a) * r; a === 0 ? ctx.moveTo(px2, py2) : ctx.lineTo(px2, py2); } ctx.stroke(); }
+    else if (t === 'auto') { ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 1.8 * k; ctx.beginPath(); ctx.arc(0, 0, 5.5 * k, 0, 6.29); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -3.6 * k); ctx.moveTo(0, 0); ctx.lineTo(2.6 * k, 1.4 * k); ctx.stroke(); }
+    else if (t === 'skull') { ctx.fillStyle = '#f2f4ff'; ctx.beginPath(); ctx.arc(0, -1.2 * k, 4.8 * k, 0, 6.29); ctx.fill(); ctx.fillRect(-2.6 * k, 1.5 * k, 5.2 * k, 4 * k); ctx.fillStyle = '#272b3c'; ctx.beginPath(); ctx.arc(-1.9 * k, -1.6 * k, 1.4 * k, 0, 6.29); ctx.arc(1.9 * k, -1.6 * k, 1.4 * k, 0, 6.29); ctx.fill(); ctx.fillRect(-1.8 * k, 3.2 * k, 1.1 * k, 2 * k); ctx.fillRect(0.7 * k, 3.2 * k, 1.1 * k, 2 * k); }
+    else { ctx.fillStyle = '#fff'; ctx.font = `${Math.round(8 * k)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', 0, 0); }
+    ctx.restore();
   }
   function rangeCells(g, bx, by, power) {                 // prévisualisation de portée (s'arrête comme le serveur)
     const out = [];
@@ -196,7 +220,8 @@ export default (function () {
         ctx.save(); ctx.globalAlpha = 0.95; ctx.fillStyle = pk.b ? 'rgba(255,90,90,0.18)' : 'rgba(255,255,255,0.12)';
         ctx.beginPath(); ctx.arc(x, y, CELL * 0.34 * pulse, 0, Math.PI * 2); ctx.fill();
         if (pk.b) { ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 1.5; ctx.stroke(); }
-        ctx.font = `${Math.round(CELL * 0.5)}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(PICK_ICON[pk.t] || '?', x, y + 1); ctx.restore();
+        ctx.restore();
+        drawPickIcon(pk.t, x, y, CELL * 0.26);
       });
       // bombes + compte à rebours
       (snap.bombs || []).forEach(b => {
@@ -249,7 +274,7 @@ export default (function () {
     if (snap && (snap.gs === 'lobby' || snap.gs === 'paused')) {
       ctx.fillStyle = 'rgba(4,5,12,0.66)'; ctx.fillRect(0, 0, ARENA, ARENA); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if (snap.gs === 'paused') { ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', ARENA / 2, ARENA / 2 + 28); }
-      else { ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,160,80,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 26px system-ui,sans-serif'; ctx.fillText('BOMBERMAN', ARENA / 2, ARENA / 2 - 32); ctx.restore(); const n = snap.connected; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText(`${n} joueur${n > 1 ? 's' : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n < 2 ? ' (solo : entraînement)' : '')}`, ARENA / 2, ARENA / 2 - 4); if (snap.revenge) { ctx.fillStyle = '#ff9b6b'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('☠ Revanche — les morts bombardent depuis le bord et peuvent revenir', ARENA / 2, ARENA / 2 + 14); } ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('▶ Espace / clic pour lancer', ARENA / 2, ARENA / 2 + (snap.revenge ? 34 : 24)); }
+      else { ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,160,80,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 26px system-ui,sans-serif'; ctx.fillText('BOMBERMAN', ARENA / 2, ARENA / 2 - 32); ctx.restore(); const n = snap.connected, nb = snap.botCount || 0; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText(`${n} joueur${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n + nb < 2 ? ' (solo : entraînement)' : '')}`, ARENA / 2, ARENA / 2 - 4); if (snap.revenge) { ctx.fillStyle = '#ff9b6b'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('☠ Revanche — les morts bombardent depuis le bord et peuvent revenir', ARENA / 2, ARENA / 2 + 14); } ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('▶ Espace / clic pour lancer', ARENA / 2, ARENA / 2 + (snap.revenge ? 34 : 24)); }
     }
     rafId = requestAnimationFrame(draw);
   }
@@ -277,10 +302,11 @@ export default (function () {
     cv = $('bmc'); ctx = cv.getContext('2d'); hud = $('bmHud'); endEl = $('bmEnd');
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = [0, 1, 2, 3, 4, 5].map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
-    startBtn = $('bmStart'); pauseBtn = $('bmPause'); modeBtn = $('bmMode'); genBtn = $('bmGen'); ffBtn = $('bmFf'); revBtn = $('bmRevenge'); pauseFloat = $('bmPauseFloat'); lbBtn = $('bmLbBtn'); lbPanel = $('bmLbPanel'); lbBody = $('bmLbBody');
+    startBtn = $('bmStart'); pauseBtn = $('bmPause'); modeBtn = $('bmMode'); genBtn = $('bmGen'); ffBtn = $('bmFf'); revBtn = $('bmRevenge'); botsBtn = $('bmBots'); pauseFloat = $('bmPauseFloat'); lbBtn = $('bmLbBtn'); lbPanel = $('bmLbPanel'); lbBody = $('bmLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' }); pauseFloat.onclick = () => send({ t: 'pause' }); modeBtn.onclick = () => send({ t: 'mode' }); genBtn.onclick = () => send({ t: 'gen' }); ffBtn.onclick = () => send({ t: 'ff' });
     if (revBtn) revBtn.onclick = () => send({ t: 'revenge' });
+    if (botsBtn) botsBtn.onclick = () => send({ t: 'bots' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('bmHelp'), helpPanel = $('bmHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
     cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });

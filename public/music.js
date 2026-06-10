@@ -63,9 +63,17 @@ export function createMusic(getCtx, getA11y, theme) {
     if (!nextT || nextT < c.currentTime) { nextT = c.currentTime + 0.08; step = 0; }
     while (nextT < c.currentTime + 0.22) { playStep(nextT, step, spb); step = (step + 1) % LEN; nextT += spb; }
   }
+  function sting(kind) {                               // petite fanfare ponctuelle (kill, victoire…) par-dessus la musique
+    const c = ensure(), A = getA11y();
+    const st = theme.stingers && theme.stingers[kind];
+    if (!st || !c || c.state !== 'running' || !A || !A.music) return;
+    const t0 = c.currentTime + 0.02, rate = st.rate || 0.075, base = st.base || theme.root * Math.pow(2, st.oct == null ? 1 : st.oct);
+    st.notes.forEach((n, i) => { (Array.isArray(n) ? n : [n]).forEach(s => osc(t0 + i * rate, base * Math.pow(2, s / 12), st.dur || 0.16, st.wave || 'triangle', st.gain || 0.05)); });
+  }
   return {
     start() { if (!timer) timer = setInterval(sched, 90); },
     stop() { if (timer) { clearInterval(timer); timer = null; } if (master && ctx) master.gain.setTargetAtTime(0, ctx.currentTime, 0.06); nextT = 0; },
     setIntensity(v) { intensity = Math.max(0, Math.min(2, v | 0)); },
+    sting,
   };
 }

@@ -48,7 +48,7 @@ function corners(cells) {
 }
 
 export function createSnake(room) {
-  let players, food, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, variant, rocks, rush;
+  let players, food, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, variant, rocks, rush, botCount;
   let seatByMid = {};
 
   function lbEntry(name) {
@@ -58,7 +58,7 @@ export function createSnake(room) {
   function recordRound() {
     if (nParts < 2) return;                         // le solo ne compte pas
     for (const p of players) {
-      if (!p.playing || !p.name) continue;
+      if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
       const e = lbEntry(p.name); e.games++;
       if (winner >= 0 && p.team === winner) e.wins++;
       e.kills += p.kills;
@@ -76,7 +76,7 @@ export function createSnake(room) {
 
   function makePlayers() {
     return Array.from({ length: MAX_SEATS }, (_, seat) => ({
-      seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false,
+      seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false, bot: false,
       dir: DIRS.right, pendingDir: null, cells: [], grow: 0, score: 0, ghostUntil: 0,
       kills: 0, place: 0, elimTick: -1,
     }));
@@ -84,11 +84,12 @@ export function createSnake(room) {
   function fullReset() {
     players = makePlayers(); food = []; rocks = new Set();
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = [];
-    mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; variant = 0; rush = false; seatByMid = {};
+    mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; variant = 0; rush = false; botCount = 0; seatByMid = {};
   }
 
   const connectedCount = () => players.filter(p => p.member).length;
-  const partCount = () => connectedCount();
+  const maxBots = () => MAX_SEATS - connectedCount();
+  const partCount = () => Math.min(connectedCount() + botCount, MAX_SEATS);
   const canStart = () => connectedCount() >= 1;
   const editable = () => gameState === 'lobby' || gameState === 'over';
   const seatOf = member => { for (const p of players) if (p.member === member) return p.seat; return -1; };
@@ -146,8 +147,12 @@ export function createSnake(room) {
 
   function startGame() {
     if (!editable() || !canStart()) return;
-    for (const p of players) p.playing = false;
+    for (const p of players) { p.playing = false; p.bot = false; }
+    if (botCount > maxBots()) botCount = maxBots();
     const parts = players.filter(p => p.member);
+    let bots = botCount;
+    for (const p of players) { if (bots <= 0) break; if (!p.member) { p.bot = true; parts.push(p); bots--; } } // complète avec des bots
+    parts.forEach((p, i) => { if (p.bot) p.name = '🤖 Bot ' + (i + 1); });
     if (parts.length < 1) return;
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
@@ -172,6 +177,31 @@ export function createSnake(room) {
     for (const p of players) { p.playing = false; p.alive = false; p.cells = []; p.pendingDir = null; }
   }
 
+  function botSafe(x, y) {                          // IA : la case (avec wrap éventuel) est-elle praticable ?
+    let nx = x, ny = y;
+    if (variant === 1) { nx = (nx + GW) % GW; ny = (ny + GH) % GH; }
+    else if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) return null;
+    if (rocks.has(key(nx, ny)) || occupiedBySnake(nx, ny)) return null;
+    return { x: nx, y: ny };
+  }
+  function botThink(p) {                            // IA : éviter les obstacles, anticiper à 2 cases, viser la nourriture proche
+    const h = head(p), d = p.dir;
+    const cands = [d, { x: d.y, y: -d.x }, { x: -d.y, y: d.x }];
+    let best = null, bestScore = -Infinity;
+    for (const c of cands) {
+      const n = botSafe(h.x + c.x, h.y + c.y);
+      if (!n) continue;
+      let sc = c === d ? 0.5 : 0;                                       // inertie : préfère tout droit
+      if (!botSafe(n.x + c.x, n.y + c.y)) sc -= 2;                      // cul-de-sac probable à 2 cases
+      let fd = Infinity;
+      for (const f of food) { const dist = Math.abs(f.x - n.x) + Math.abs(f.y - n.y); if (dist < fd) fd = dist; }
+      if (fd < Infinity) sc += 8 / (1 + fd);                            // attiré par la nourriture
+      sc += Math.random() * 0.3;
+      if (sc > bestScore) { bestScore = sc; best = c; }
+    }
+    if (best && best !== d) p.pendingDir = best;
+  }
+
   function killSnake(p, killer, x, y) {
     p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++;
     if (killer >= 0 && players[killer] && killer !== p.seat) players[killer].kills++;
@@ -186,6 +216,7 @@ export function createSnake(room) {
     if (gameState !== 'play') return;
     tick++;
     const alive = players.filter(p => p.alive);
+    for (const p of alive) if (p.bot) botThink(p);
     // applique la direction en attente (interdit le demi-tour)
     for (const p of alive) { const pd = p.pendingDir; if (pd && !(pd.x === -p.dir.x && pd.y === -p.dir.y)) p.dir = pd; p.pendingDir = null; }
     // têtes suivantes + croissance prévue (mange une pastille ou reste à digérer)
@@ -235,11 +266,11 @@ export function createSnake(room) {
   function snapshot() {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount: 0, maxBots: 0, mode, nteams, variant, rush, rushTarget: RUSH_TARGET, rocks: [...rocks],
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), mode, nteams, variant, rush, rushTarget: RUSH_TARGET, rocks: [...rocks],
       food: food.map(f => ({ x: f.x, y: f.y, t: f.t || 'apple' })),
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, solo: nParts < 2 } : null,
       players: players.map(p => ({
-        seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive,
+        seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot,
         head: p.cells.length ? { x: head(p).x, y: head(p).y } : { x: 0, y: 0 },
         path: corners(p.cells), len: p.cells.length, score: p.score, ghost: p.ghostUntil > tick,
         kills: p.kills, place: p.place, elimTick: p.elimTick,
@@ -252,8 +283,8 @@ export function createSnake(room) {
     const cur = seatOf(member); if (cur >= 0) return { role: 'player', seat: cur, hello: { t: 'welcome', seat: cur } }; // déjà assis (reconnexion within grace)
     let seat = -1;
     const rid = seatByMid[member.id];
-    if (rid != null && players[rid] && !players[rid].member) seat = rid;
-    if (seat < 0) { const free = players.find(p => !p.member); if (free) seat = free.seat; }
+    if (rid != null && players[rid] && !players[rid].member && !players[rid].bot) seat = rid;
+    if (seat < 0) { const free = players.find(p => !p.member && !p.bot); if (free) seat = free.seat; }   // siège de bot protégé
     if (seat < 0) return { role: 'spectator', hello: { t: 'welcome', seat: -1 } };
     const p = players[seat]; p.member = member; p.mid = member.id; p.name = member.name || ''; seatByMid[member.id] = seat;
     return { role: 'player', seat, hello: { t: 'welcome', seat } };
@@ -278,6 +309,7 @@ export function createSnake(room) {
     else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; } }
     else if (m.t === 'variant') { if (editable()) variant = (variant + 1) % 3; }
     else if (m.t === 'rush') { if (editable()) rush = !rush; }
+    else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }
