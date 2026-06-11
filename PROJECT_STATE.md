@@ -211,6 +211,8 @@ Refactor plateforme : tampon de messages shell (welcome/1er state non perdus) ; 
 - **Snake murs traversants : queue dessinée d'un bord à l'autre** — `corners()` coupe désormais le chemin à chaque wrap (`null` = lever de crayon côté client) ; yeux corrigés au passage du bord.
 - **Bomberman 👻 permanent** — devient temporaire (10 s) avec prolongation tant qu'on est dans un mur (anti-coincé).
 - **Bomberman bombe « sans timer » jamais explosée** — bombes à mèche 📡 posées par la **pose auto** (malus ⏱, souvent via 💀) restaient orphelines. Corrigé : la pose auto force des bombes **minutées** ; légende précise que les bombes 📡 se déclenchent avec Action.
+- **Bomberman cassé à la pose de bombe (écran noir ensuite)** — le lot perf avait déplacé `const g = snap.grid` dans `ensureTerrain`, mais la **prévisualisation de portée** (`rangeCells(g, …)`) le référençait encore dans `draw()` → ReferenceError dès qu'une bombe existait, boucle rAF morte (bombe + joueur invisibles, puis écran noir). Corrigé : `rangeCells(snap.grid, …)`.
+- **Filet de rendu (les 5 jeux)** — `drawLoop()` : `try { draw() } catch { console.error }` puis **replanifie toujours** la frame suivante ; `init()` lance `drawLoop` et `draw()` ne s'auto-replanifie plus. Une exception de rendu ne fige plus jamais un jeu (erreur visible en console, le jeu continue).
 **Revue de code complète (post-musique)** :
 - **Injection HTML via pseudo** — les clients injectent les noms en innerHTML sans échappement ; pseudo désormais **assaini à la source** dans le hub (`replace(/[<>&"']/g,'')`), protège HUD/fin/classements des 6 jeux.
 - **note() shell** — suppression du toast à 2,2 s avant la fin de l'animation de sortie (2,6 s) → durée alignée.

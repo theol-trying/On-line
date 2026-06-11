@@ -282,8 +282,8 @@ export default (function () {
       if (snap.gs === 'paused') { ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', ARENA / 2, ARENA / 2 + 28); }
       else { ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,180,120,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 30px system-ui,sans-serif'; ctx.fillText('TANKS', ARENA / 2, ARENA / 2 - 36); ctx.restore(); const n = snap.connected, nb = snap.botCount || 0, tot = n + nb; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''} · ${snap.winTarget === 1 ? '1 manche' : snap.winTarget + ' manches'}`, ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText(tot >= 2 ? '▶ Espace / clic pour lancer' : 'En attente d\'un 2ᵉ pilote… (ou ajoute un bot 🤖)', ARENA / 2, ARENA / 2 + 24); }
     }
-    rafId = requestAnimationFrame(draw);
   }
+  function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }   // filet : une erreur de rendu ne fige plus le jeu
 
   function pushInput() { send({ t: 'input', left: input.left, right: input.right, fwd: input.fwd, back: input.back, fire: input.fire }); }
   function setIn(k, v) { if (input[k] === v) return; input[k] = v; pushInput(); }
@@ -323,7 +323,7 @@ export default (function () {
     applyColors(); resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
     music.start();
-    rafId = requestAnimationFrame(draw);
+    rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
   function teardown() { destroyed = true; music.stop(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur); }
