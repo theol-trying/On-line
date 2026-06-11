@@ -169,13 +169,15 @@ export default (function () {
     return heads;
   }
 
-  function draw() {
-    if (destroyed) return;
-    const now = performance.now();
-    const sc = cv.width / ARENA;
-    let ox = 0, oy = 0;
-    if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.85; } else shakeMag = 0;
-    ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
+  let terrainCv = null, terrainKey = '';            // décor statique pré-rendu (damier + grille + bordure + fleurs) — redessiné seulement au resize
+  function ensureTerrain() {
+    const key = '' + cv.width;
+    if (terrainCv && key === terrainKey) return;
+    terrainKey = key;
+    if (!terrainCv) terrainCv = document.createElement('canvas');
+    terrainCv.width = cv.width; terrainCv.height = cv.height;
+    const old = ctx; ctx = terrainCv.getContext('2d');
+    ctx.setTransform(cv.width / ARENA, 0, 0, cv.width / ARENA, 0, 0);
     ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, ARENA, ARENA);
     if (TH.field2) { for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) { ctx.fillStyle = ((gx + gy) & 1) ? TH.field : TH.field2; ctx.fillRect(gx * CELL, gy * CELL, CELL, CELL); } } // damier d'herbe (skin Jardin)
     else { ctx.fillStyle = TH.field; ctx.fillRect(0, 0, ARENA, ARENA); }
@@ -183,6 +185,16 @@ export default (function () {
     ctx.strokeStyle = TH.grid; ctx.lineWidth = 1;
     for (let i = 0; i <= GW; i += 5) { const x = i * CELL; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ARENA); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, x); ctx.lineTo(ARENA, x); ctx.stroke(); }
     ctx.strokeStyle = TH.border || 'rgba(255,255,255,0.22)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, ARENA - 3, ARENA - 3);
+    ctx = old;
+  }
+  function draw() {
+    if (destroyed) return;
+    const now = performance.now();
+    const sc = cv.width / ARENA;
+    let ox = 0, oy = 0;
+    if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.85; } else shakeMag = 0;
+    ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
+    ensureTerrain(); ctx.drawImage(terrainCv, 0, 0, ARENA, ARENA);   // décor statique pré-rendu (1 drawImage au lieu de ~950 tracés)
     if (!A.reduceFx) {                                 // lucioles + pétales (ambiance jardin)
       ctx.save();
       ctx.fillStyle = '#d8ff9a';
