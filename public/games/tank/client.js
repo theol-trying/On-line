@@ -177,6 +177,31 @@ export default (function () {
     return out;
   }
 
+  let terrainCv = null, terrainKey = '';            // décor statique pré-rendu (sol, murs, bordure, boue) — redessiné seulement si grille/boue/taille change
+  function ensureTerrain() {
+    const key = cv.width + '|' + snap.grid + '|' + (snap.mud || []).join(',');
+    if (terrainCv && key === terrainKey) return;
+    terrainKey = key;
+    if (!terrainCv) terrainCv = document.createElement('canvas');
+    terrainCv.width = cv.width; terrainCv.height = cv.height;
+    const old = ctx; ctx = terrainCv.getContext('2d');
+    ctx.setTransform(cv.width / ARENA, 0, 0, cv.width / ARENA, 0, 0);
+    const g = snap.grid;
+    for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
+      const c = g[gy * G + gx], x = gx * BLK, y = gy * BLK;
+      ctx.fillStyle = ((gx + gy) & 1) ? TH.floor : TH.floor2; ctx.fillRect(x, y, BLK, BLK);
+      if (c === '1') {
+        ctx.fillStyle = TH.solid; ctx.fillRect(x + 1, y + 1, BLK - 2, BLK - 2); ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(x + 1, y + 1, BLK - 2, 4);
+        if (TH.steel) { ctx.fillStyle = 'rgba(0,0,0,0.34)'; for (const rx of [x + 6, x + BLK - 6]) for (const ry of [y + 6, y + BLK - 6]) { ctx.beginPath(); ctx.arc(rx, ry, 2.1, 0, Math.PI * 2); ctx.fill(); } ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1; ctx.strokeRect(x + 2.5, y + 2.5, BLK - 5, BLK - 5); } // plaque d'acier rivetée
+      } else if (c === '2') {
+        ctx.fillStyle = TH.soft; ctx.fillRect(x + 2, y + 2, BLK - 4, BLK - 4); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 2, y + 2, BLK - 4, 5);
+        if (TH.crate) { ctx.strokeStyle = 'rgba(0,0,0,0.22)'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 3, y + 3, BLK - 6, BLK - 6); ctx.beginPath(); ctx.moveTo(x + 3, y + 3); ctx.lineTo(x + BLK - 3, y + BLK - 3); ctx.moveTo(x + BLK - 3, y + 3); ctx.lineTo(x + 3, y + BLK - 3); ctx.stroke(); } // caisse en bois
+      }
+    }
+    ctx.strokeStyle = TH.border || 'rgba(255,255,255,0.2)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, ARENA - 3, ARENA - 3);
+    (snap.mud || []).forEach(i2 => { const gx = i2 % G, gy = (i2 / G) | 0, x = gx * BLK, y = gy * BLK; ctx.fillStyle = 'rgba(86,60,28,0.6)'; ctx.fillRect(x, y, BLK, BLK); ctx.fillStyle = 'rgba(54,38,16,0.7)'; ctx.beginPath(); ctx.arc(x + BLK * 0.32, y + BLK * 0.4, 4, 0, Math.PI * 2); ctx.arc(x + BLK * 0.68, y + BLK * 0.62, 5, 0, Math.PI * 2); ctx.arc(x + BLK * 0.5, y + BLK * 0.8, 3, 0, Math.PI * 2); ctx.fill(); });   // boue cuite dans le décor
+    ctx = old;
+  }
   function draw() {
     if (destroyed) return;
     const now = performance.now(); const sc = cv.width / ARENA;
@@ -185,28 +210,13 @@ export default (function () {
     ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
     ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, ARENA, ARENA);
     if (snap && snap.grid) {
-      const g = snap.grid;
-      for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
-        const c = g[gy * G + gx], x = gx * BLK, y = gy * BLK;
-        ctx.fillStyle = ((gx + gy) & 1) ? TH.floor : TH.floor2; ctx.fillRect(x, y, BLK, BLK);
-        if (c === '1') {
-          ctx.fillStyle = TH.solid; ctx.fillRect(x + 1, y + 1, BLK - 2, BLK - 2); ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(x + 1, y + 1, BLK - 2, 4);
-          if (TH.steel) { ctx.fillStyle = 'rgba(0,0,0,0.34)'; for (const rx of [x + 6, x + BLK - 6]) for (const ry of [y + 6, y + BLK - 6]) { ctx.beginPath(); ctx.arc(rx, ry, 2.1, 0, Math.PI * 2); ctx.fill(); } ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1; ctx.strokeRect(x + 2.5, y + 2.5, BLK - 5, BLK - 5); } // plaque d'acier rivetée
-        }
-        else if (c === '2') {
-          ctx.fillStyle = TH.soft; ctx.fillRect(x + 2, y + 2, BLK - 4, BLK - 4); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 2, y + 2, BLK - 4, 5);
-          if (TH.crate) { ctx.strokeStyle = 'rgba(0,0,0,0.22)'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 3, y + 3, BLK - 6, BLK - 6); ctx.beginPath(); ctx.moveTo(x + 3, y + 3); ctx.lineTo(x + BLK - 3, y + BLK - 3); ctx.moveTo(x + BLK - 3, y + 3); ctx.lineTo(x + 3, y + BLK - 3); ctx.stroke(); } // caisse en bois
-        }
-      }
-      ctx.strokeStyle = TH.border || 'rgba(255,255,255,0.2)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, ARENA - 3, ARENA - 3);
+      ensureTerrain(); ctx.drawImage(terrainCv, 0, 0, ARENA, ARENA);   // décor statique pré-rendu (sol + murs + bordure + boue : 1 drawImage au lieu de ~500 tracés)
       if (!A.reduceFx) { ctx.save(); ctx.fillStyle = 'rgb(214,196,150)'; for (const d of AMB_DUST) { const x = (d.ph * 100 + now / 1000 * d.v) % ARENA, y = d.y * ARENA + Math.sin(now / 1400 + d.ph) * d.a; ctx.globalAlpha = 0.06 + 0.05 * Math.sin(now / 800 + d.ph); ctx.beginPath(); ctx.arc(x, y, d.r, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); }   // poussière portée par le vent
       // cratères (murs détruits) : taches sombres + éclats, persistants jusqu'à la fin de la manche
       if (craters.length) { ctx.save(); for (const cr of craters) { const x = (cr.gx + 0.5) * BLK, y = (cr.gy + 0.5) * BLK, r1 = Math.abs(Math.sin(cr.gx * 13.3 + cr.gy * 7.7)), r2 = Math.abs(Math.sin(cr.gx * 5.1 + cr.gy * 11.9)); ctx.globalAlpha = 0.30; ctx.fillStyle = '#1c1910'; ctx.beginPath(); ctx.arc(x + (r1 - 0.5) * 8, y + (r2 - 0.5) * 8, 7 + r1 * 4, 0, Math.PI * 2); ctx.arc(x - (r2 - 0.5) * 9, y + (r1 - 0.5) * 6, 5 + r2 * 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 0.22; ctx.fillStyle = '#6b522e'; ctx.fillRect(x - 8 + r1 * 10, y - 6 + r2 * 8, 3.5, 2); ctx.fillRect(x + 2 - r2 * 8, y + 4 - r1 * 6, 3, 2); } ctx.restore(); }
       // traces de chenilles : deux pointillés parallèles qui s'estompent (~5 s)
       if (!A.reduceFx && tracks.length) { ctx.save(); ctx.fillStyle = '#3a3424'; for (let i = tracks.length - 1; i >= 0; i--) { const tr = tracks[i], age = (now - tr.born) / 5000; if (age >= 1) { tracks.splice(i, 1); continue; } ctx.globalAlpha = 0.16 * (1 - age); const pxp = -Math.sin(tr.a) * 5, pyp = Math.cos(tr.a) * 5; ctx.fillRect(tr.x + pxp - 1.5, tr.y + pyp - 1.5, 3, 3); ctx.fillRect(tr.x - pxp - 1.5, tr.y - pyp - 1.5, 3, 3); } ctx.restore(); }
-      // zones de boue (ralentissent)
-      (snap.mud || []).forEach(idx => { const gx = idx % G, gy = (idx / G) | 0, x = gx * BLK, y = gy * BLK; ctx.save(); ctx.fillStyle = 'rgba(86,60,28,0.6)'; ctx.fillRect(x, y, BLK, BLK); ctx.fillStyle = 'rgba(54,38,16,0.7)'; ctx.beginPath(); ctx.arc(x + BLK * 0.32, y + BLK * 0.4, 4, 0, Math.PI * 2); ctx.arc(x + BLK * 0.68, y + BLK * 0.62, 5, 0, Math.PI * 2); ctx.arc(x + BLK * 0.5, y + BLK * 0.8, 3, 0, Math.PI * 2); ctx.fill(); ctx.restore(); });
-      // barils explosifs
+      // barils explosifs (la boue est dans le pré-rendu)
       (snap.barrels || []).forEach(b => { ctx.save(); ctx.translate(b.x, b.y); const r = 11; ctx.shadowColor = '#000'; ctx.shadowBlur = 4 * FX; ctx.fillStyle = '#b5532a'; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0; ctx.strokeStyle = '#3a1d0e'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.moveTo(-r + 1, -r * 0.32); ctx.lineTo(r - 1, -r * 0.32); ctx.moveTo(-r + 1, r * 0.32); ctx.lineTo(r - 1, r * 0.32); ctx.stroke(); ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', 0, 1); ctx.restore(); });
       // power-ups
       (snap.pickups || []).forEach(k => { const d = PU[k.t] || { i: '?', c: '#fff' }, pulse = 1 + 0.1 * Math.sin(now / 200); ctx.save(); ctx.shadowColor = d.c; ctx.shadowBlur = 12 * FX; ctx.fillStyle = d.c + '22'; ctx.strokeStyle = d.c; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(k.x, k.y, 13 * pulse, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0; ctx.restore(); if (TANK_VECT[k.t]) drawTankIcon(k.t, k.x, k.y, 11, d.c); else { ctx.save(); ctx.fillStyle = d.c; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(d.i, k.x, k.y + 1); ctx.restore(); } });

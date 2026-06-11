@@ -187,6 +187,29 @@ export default (function () {
     return out;
   }
 
+  let terrainCv = null, terrainKey = '', warpCells = [];   // décor statique pré-rendu (sol + murs) ; les portails restent animés en live
+  function ensureTerrain() {
+    const key = cv.width + '|' + snap.grid;
+    if (terrainCv && key === terrainKey) return;
+    terrainKey = key;
+    if (!terrainCv) terrainCv = document.createElement('canvas');
+    terrainCv.width = cv.width; terrainCv.height = cv.height;
+    const old = ctx; ctx = terrainCv.getContext('2d');
+    ctx.setTransform(cv.width / ARENA, 0, 0, cv.width / ARENA, 0, 0);
+    const g = snap.grid; warpCells = [];
+    for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+      const c = g[gy * GW + gx], x = gx * CELL, y = gy * CELL;
+      ctx.fillStyle = ((gx + gy) & 1) ? TH.floor : TH.floor2; ctx.fillRect(x, y, CELL, CELL);
+      if (c === '1') {
+        if (TH.round) { ctx.fillStyle = TH.solid; rrect(x + 2, y + 2, CELL - 4, CELL - 4, 6); ctx.fill(); ctx.fillStyle = TH.solidTop || 'rgba(255,255,255,0.12)'; ctx.fillRect(x + 6, y + 5, CELL - 12, 3); } // pierre arrondie (cartoon)
+        else { ctx.fillStyle = TH.solid; ctx.fillRect(x + 1, y + 1, CELL - 2, CELL - 2); ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(x + 1, y + 1, CELL - 2, 4); }
+      } else if (c === '2') {
+        if (TH.round) { ctx.fillStyle = TH.soft; rrect(x + 3, y + 3, CELL - 6, CELL - 6, 5); ctx.fill(); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 7, y + 6, CELL - 14, 3); ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1.5; rrect(x + 3, y + 3, CELL - 6, CELL - 6, 5); ctx.stroke(); } // caisse bois arrondie
+        else { ctx.fillStyle = TH.soft; ctx.fillRect(x + 2, y + 2, CELL - 4, CELL - 4); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 2, y + 2, CELL - 4, 5); ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.strokeRect(x + 2.5, y + 2.5, CELL - 5, CELL - 5); }
+      } else if (c === '3') warpCells.push([gx, gy]);
+    }
+    ctx = old;
+  }
   function draw() {
     if (destroyed) return;
     const now = performance.now(); const sc = cv.width / ARENA;
@@ -195,24 +218,13 @@ export default (function () {
     ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
     ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, ARENA, ARENA);
     if (snap && snap.grid) {
-      const g = snap.grid;
-      for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
-        const c = g[gy * GW + gx], x = gx * CELL, y = gy * CELL;
-        ctx.fillStyle = ((gx + gy) & 1) ? TH.floor : TH.floor2; ctx.fillRect(x, y, CELL, CELL);
-        if (c === '1') {
-          if (TH.round) { ctx.fillStyle = TH.solid; rrect(x + 2, y + 2, CELL - 4, CELL - 4, 6); ctx.fill(); ctx.fillStyle = TH.solidTop || 'rgba(255,255,255,0.12)'; ctx.fillRect(x + 6, y + 5, CELL - 12, 3); } // pierre arrondie (cartoon)
-          else { ctx.fillStyle = TH.solid; ctx.fillRect(x + 1, y + 1, CELL - 2, CELL - 2); ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(x + 1, y + 1, CELL - 2, 4); }
-        }
-        else if (c === '2') {
-          if (TH.round) { ctx.fillStyle = TH.soft; rrect(x + 3, y + 3, CELL - 6, CELL - 6, 5); ctx.fill(); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 7, y + 6, CELL - 14, 3); ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1.5; rrect(x + 3, y + 3, CELL - 6, CELL - 6, 5); ctx.stroke(); } // caisse bois arrondie
-          else { ctx.fillStyle = TH.soft; ctx.fillRect(x + 2, y + 2, CELL - 4, CELL - 4); ctx.fillStyle = TH.softTop; ctx.fillRect(x + 2, y + 2, CELL - 4, 5); ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.strokeRect(x + 2.5, y + 2.5, CELL - 5, CELL - 5); }
-        }
-        else if (c === '3') {                                       // téléporteur (portail)
-          const cxp = x + CELL / 2, cyp = y + CELL / 2, ph = A.reduceFx ? 1 : 1 + 0.12 * Math.sin(now / 200 + gx + gy), rot = A.reduceFx ? 0 : now / 600;
-          ctx.save(); if (!A.reduceFx) { ctx.shadowColor = '#b98bff'; ctx.shadowBlur = 12; }
-          for (let r = 0; r < 3; r++) { ctx.strokeStyle = `rgba(${185 - r * 30},${139},${240},${0.8 - r * 0.22})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cxp, cyp, (CELL * 0.13 + r * CELL * 0.11) * ph, rot + r, rot + r + Math.PI * 1.5); ctx.stroke(); }
-          ctx.restore();
-        }
+      ensureTerrain(); ctx.drawImage(terrainCv, 0, 0, ARENA, ARENA);   // décor statique pré-rendu (1 drawImage au lieu de ~340 tracés)
+      for (const [gx, gy] of warpCells) {                              // téléporteurs : portails animés (live)
+        const x = gx * CELL, y = gy * CELL;
+        const cxp = x + CELL / 2, cyp = y + CELL / 2, ph = A.reduceFx ? 1 : 1 + 0.12 * Math.sin(now / 200 + gx + gy), rot = A.reduceFx ? 0 : now / 600;
+        ctx.save(); if (!A.reduceFx) { ctx.shadowColor = '#b98bff'; ctx.shadowBlur = 12; }
+        for (let r = 0; r < 3; r++) { ctx.strokeStyle = `rgba(${185 - r * 30},${139},${240},${0.8 - r * 0.22})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cxp, cyp, (CELL * 0.13 + r * CELL * 0.11) * ph, rot + r, rot + r + Math.PI * 1.5); ctx.stroke(); }
+        ctx.restore();
       }
       if (!A.reduceFx) { ctx.save(); ctx.fillStyle = '#fff'; for (const cl of AMB_CLOUDS) { const x = (cl.ph + now / 1000 * cl.v) % (ARENA + cl.s * 3) - cl.s * 1.5, y = cl.y * ARENA; ctx.globalAlpha = 0.05; ctx.beginPath(); ctx.ellipse(x, y, cl.s, cl.s * 0.42, 0, 0, Math.PI * 2); ctx.ellipse(x + cl.s * 0.6, y - cl.s * 0.18, cl.s * 0.6, cl.s * 0.3, 0, 0, Math.PI * 2); ctx.ellipse(x - cl.s * 0.6, y + cl.s * 0.08, cl.s * 0.55, cl.s * 0.26, 0, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); }   // nuages doux qui défilent
       // blocs détruits : écrasement cartoon (squash & stretch ~240 ms)

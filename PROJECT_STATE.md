@@ -172,6 +172,7 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
   · **Décompte musical** : stingers `count` (note par tick du 3·2·1, timbre du thème) + `go` (accord) déclenchés dans les 5 clients (changement de `m.count`, transition countdown→play).
   · **Riser de mort subite** : stinger `alert` (montée chromatique) sur `sd` false→true (Pong/Bomb) et `shrink` 0→1 (Tron).
   · **Pan stéréo** : `sndPan` module + routage `StereoPannerNode` dans `tone()` + helper `psound(kind, x)` — câblé sur shot/hit/boom/barrel (Tanks), crash (Tron), eat/crash (Snake), place/wall/boom (Bomb). Pong non panné (balle centrale).
+- **Perf mobile — pré-rendu du décor** (Snake/Tanks/Bomberman) : `ensureTerrain()` dessine le décor statique sur un **canvas offscreen** (`terrainCv`), re-rendu **seulement si `terrainKey` change** (taille canvas + grille + boue) ; `draw()` fait un seul `drawImage(terrainCv, 0, 0, ARENA, ARENA)` **en coordonnées monde** (suit shake/zoom). Technique : swap temporaire du `ctx` module vers l'offscreen. Contenu : Snake = fond+damier(900 rects)+fleurs+grille+bordure (clé = taille seule) ; Tanks = sol+murs rivetés+caisses+bordure+**boue** ; Bomberman = sol+murs (les **portails 🌀 restent animés en live** via `warpCells` collecté au rendu). Tron/Pong non concernés (rendu déjà léger). Économie : ~300-950 tracés canvas par frame et par jeu.
 - **Optimisation hub** : diffusion plein régime en jeu, ~4 Hz en lobby/pause/fin, boucle suspendue si 0 membre.
 
 ## Bugs corrigés (historique)
