@@ -540,8 +540,8 @@ export default (function () {
         ctx.fillText(n >= 2 ? '▶ Espace / clic pour lancer' : '▶ Espace / clic — entraînement solo (mur) · ou ajoute un bot 🤖', W / 2, H / 2 + 52);
       }
     }
-    rafId = requestAnimationFrame(draw);
   }
+  function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }   // filet : une erreur de rendu ne fige plus le jeu
 
   /* ---- inputs ---- */
   function keyToAction(code) {
@@ -625,7 +625,7 @@ export default (function () {
     addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
     music.start();
-    rafId = requestAnimationFrame(draw);
+    rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
   function teardown() {

@@ -234,7 +234,7 @@ export default (function () {
         const danger = b.f <= 30;                                   // mèche < ~1 s : on alerte
         const a = danger ? (A.reduceFx ? 0.3 : 0.14 + 0.22 * (0.5 + 0.5 * Math.sin(now / 80))) : 0.10;
         const gch = danger ? 90 : 160;
-        rangeCells(g, b.x, b.y, b.p).forEach(([gx, gy]) => { ctx.fillStyle = `rgba(255,${gch},60,${a})`; ctx.fillRect(gx * CELL + 3, gy * CELL + 3, CELL - 6, CELL - 6); });
+        rangeCells(snap.grid, b.x, b.y, b.p).forEach(([gx, gy]) => { ctx.fillStyle = `rgba(255,${gch},60,${a})`; ctx.fillRect(gx * CELL + 3, gy * CELL + 3, CELL - 6, CELL - 6); });
       });
       // bonus / malus
       (snap.pickups || []).forEach(pk => {
@@ -298,8 +298,8 @@ export default (function () {
       if (snap.gs === 'paused') { ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', ARENA / 2, ARENA / 2 + 28); }
       else { ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,160,80,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 26px system-ui,sans-serif'; ctx.fillText('BOMBERMAN', ARENA / 2, ARENA / 2 - 32); ctx.restore(); const n = snap.connected, nb = snap.botCount || 0; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText(`${n} joueur${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n + nb < 2 ? ' (solo : entraînement)' : '')}`, ARENA / 2, ARENA / 2 - 4); if (snap.revenge) { ctx.fillStyle = '#ff9b6b'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('☠ Revanche — les morts bombardent depuis le bord et peuvent revenir', ARENA / 2, ARENA / 2 + 14); } ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('▶ Espace / clic pour lancer', ARENA / 2, ARENA / 2 + (snap.revenge ? 34 : 24)); }
     }
-    rafId = requestAnimationFrame(draw);
   }
+  function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }   // filet : une erreur de rendu ne fige plus le jeu
 
   function pushInput() { send({ t: 'input', up: input.up, down: input.down, left: input.left, right: input.right }); }
   function setIn(k, v) { if (input[k] === v) return; input[k] = v; pushInput(); }
@@ -340,7 +340,7 @@ export default (function () {
     applyColors(); resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
     music.start();
-    rafId = requestAnimationFrame(draw);
+    rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
   function teardown() { destroyed = true; music.stop(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur); }
