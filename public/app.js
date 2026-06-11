@@ -190,10 +190,18 @@ function renderMenu() {
   gamemenu.querySelectorAll('.gtab').forEach(b => b.onclick = () => send({ t: 'pick', id: b.dataset.id }));
 }
 
+/* ---------- identité visuelle de la page selon le jeu actif ---------- */
+const GAME_SUB = { pong: 'Arcade néon · duel de raquettes', tron: 'Cyber-grid · light cycles', tank: 'Combat blindé · zone désertique', snake: 'Jardin · serpents gourmands', bomb: 'Labyrinthe explosif · cartoon' };
+function setGameSkin(id) {
+  const b = document.body;
+  ['pong', 'tron', 'tank', 'bomb', 'snake'].forEach(g => b.classList.toggle('game-' + g, g === id));
+  const sub = document.getElementById('sub'); if (sub && GAME_SUB[id]) sub.textContent = GAME_SUB[id];
+}
+
 /* ---------- chargement dynamique du module de jeu actif ---------- */
 async function loadModule(id) {
   if (modId === id || loadingId === id) return;
-  loadingId = id;
+  loadingId = id; setGameSkin(id);
   const xf = document.getElementById('xfade'); if (xf) xf.style.opacity = '1';   // fondu de transition entre jeux
   if (mod && mod.teardown) { try { mod.teardown(); } catch {} }
   mod = null; modId = null; modReady = false;

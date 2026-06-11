@@ -315,3 +315,62 @@ body.flat .fxon{ animation:none; }
   .help{ font-size:11px; } button{ padding:9px 13px; }
   .bar .sep{ display:none; }
 }
+
+/* ============================================================================
+   REFONTE PAR JEU — body.game-<id> habille toute la page à l'identité du jeu.
+   Tanks/Snake/Bomberman : palette fixe. Pong/Tron : palette via le sélecteur de
+   thème (on n'ajoute que police d'accent + motif + formes). Tout gaté par .flat.
+   Repli police système si Google Fonts indisponible (jeu LAN hors-ligne).
+   ============================================================================ */
+.logo, .gtab, .ghosttab, .shead h3, .settings h4, .etitle, .bann, .champ,
+button.primary, #tourBar, #readyBar .rbtn{ font-family:var(--display-font,inherit); letter-spacing:var(--display-ls,normal); }
+
+/* ---------- 🏓 PONG — Arcade Synthwave (palette via thème) ---------- */
+body.game-pong{ --display-font:'Orbitron','Segoe UI',sans-serif; --display-ls:.04em; --accent:#ff5db4; }
+body.game-pong:not(.theme-light):not(.flat)::after{ content:''; position:fixed; left:0; right:0; bottom:0; height:44vh; z-index:-1; pointer-events:none;
+  background:linear-gradient(transparent,rgba(255,60,180,.07)),repeating-linear-gradient(90deg,rgba(120,200,255,.06) 0 1px,transparent 1px 46px);
+  -webkit-mask:linear-gradient(transparent,#000); mask:linear-gradient(transparent,#000); }
+body.game-pong .logo{ background:linear-gradient(92deg,#5be4ff,#ff5db4); -webkit-background-clip:text; background-clip:text; }
+
+/* ---------- 🟦 TRON — Cyber Grid (palette via thème, formes tranchantes) ---------- */
+body.game-tron{ --display-font:'Orbitron','Segoe UI',sans-serif; --display-ls:.05em; --accent:#1fe0ff; }
+body.game-tron:not(.theme-light):not(.flat)::after{ content:''; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(31,224,255,.05) 0 1px,transparent 1px 46px),repeating-linear-gradient(90deg,rgba(31,224,255,.05) 0 1px,transparent 1px 46px); }
+body.game-tron button, body.game-tron #gamemenu, body.game-tron .bar, body.game-tron #msg,
+body.game-tron .pc, body.game-tron .settings, body.game-tron .readybar, body.game-tron .touch{ border-radius:3px; }
+body.game-tron .gtab.on, body.game-tron button.primary, body.game-tron .bar>button.primary{ background:linear-gradient(92deg,#1fe0ff,#0a86ff); color:#021018; box-shadow:0 0 18px -4px #1fe0ff; }
+body.game-tron .logo{ background:linear-gradient(92deg,#1fe0ff,#9ff7ff); -webkit-background-clip:text; background-clip:text; }
+
+/* ---------- 🟫 TANKS — Désert / Militaire ---------- */
+body.game-tank{ --bg0:#15100a; --bg1:#241a0e; --panel:rgba(58,48,30,.82); --panel2:rgba(78,64,38,.6);
+  --border:rgba(214,184,120,.16); --border2:rgba(214,184,120,.32); --txt:#f4ecd7; --txt2:#bda878; --accent:#e0a92e;
+  --display-font:'Black Ops One','Impact',sans-serif; --display-ls:.04em; }
+body.game-tank::before{ background:radial-gradient(60vw 50vw at 50% 0%,rgba(200,150,60,.18),transparent 60%),radial-gradient(50vw 40vw at 15% 92%,rgba(120,90,40,.22),transparent 60%),var(--bg1); }
+body.game-tank button, body.game-tank #gamemenu, body.game-tank .bar, body.game-tank #msg,
+body.game-tank .pc, body.game-tank .settings, body.game-tank .touch{ border-radius:5px; }
+body.game-tank .gtab.on, body.game-tank button.primary, body.game-tank .bar>button.primary{ background:linear-gradient(180deg,#8a7a2e,#5e4a1c); color:#fff6dc; border-color:#caa64a; box-shadow:0 2px 0 #2a2010,0 6px 14px -6px rgba(0,0,0,.6); text-transform:uppercase; }
+body.game-tank .logo{ background:linear-gradient(92deg,#e8d28a,#c8902e); -webkit-background-clip:text; background-clip:text; filter:drop-shadow(0 2px 1px rgba(0,0,0,.5)); }
+body.game-tank:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.6),0 0 0 3px #4a3a1e inset; }
+
+/* ---------- 🟩 SNAKE — Jardin ---------- */
+body.game-snake{ --bg0:#08160a; --bg1:#0f2611; --panel:rgba(30,58,32,.82); --panel2:rgba(42,78,40,.6);
+  --border:rgba(150,220,140,.16); --border2:rgba(150,220,140,.32); --txt:#eef7e2; --txt2:#9fc79a; --accent:#5fc36a;
+  --display-font:'Fredoka','Segoe UI',sans-serif; --display-ls:.01em; }
+body.game-snake::before{ background:radial-gradient(55vw 45vw at 20% 10%,rgba(120,200,90,.18),transparent 60%),radial-gradient(50vw 45vw at 85% 90%,rgba(60,150,70,.20),transparent 60%),var(--bg1); }
+body.game-snake button, body.game-snake #gamemenu, body.game-snake .bar, body.game-snake #msg,
+body.game-snake .pc, body.game-snake .settings, body.game-snake .touch, body.game-snake .readybar{ border-radius:16px; }
+body.game-snake .gtab.on, body.game-snake button.primary, body.game-snake .bar>button.primary{ background:linear-gradient(92deg,#3da34d,#8fd14f); color:#06210a; box-shadow:0 6px 16px -7px rgba(60,170,70,.9); }
+body.game-snake .logo{ background:linear-gradient(92deg,#9fe27a,#e8413a); -webkit-background-clip:text; background-clip:text; }
+body.game-snake:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.5),0 0 0 3px #2e6b2e inset; }
+
+/* ---------- 🎈 BOMBERMAN — Cartoon / Candy ---------- */
+body.game-bomb{ --bg0:#16092e; --bg1:#241043; --panel:rgba(58,36,90,.82); --panel2:rgba(78,50,116,.62);
+  --border:rgba(255,200,240,.16); --border2:rgba(255,200,240,.34); --txt:#fdeeff; --txt2:#c8a6d8; --accent:#ff7ac0;
+  --display-font:'Baloo 2','Segoe UI',sans-serif; }
+body.game-bomb::before{ background:radial-gradient(45vw 40vw at 15% 12%,rgba(255,120,200,.20),transparent 60%),radial-gradient(45vw 40vw at 85% 16%,rgba(120,170,255,.18),transparent 60%),radial-gradient(50vw 45vw at 50% 96%,rgba(255,210,90,.16),transparent 60%),var(--bg1); }
+body.game-bomb button, body.game-bomb #gamemenu, body.game-bomb .bar, body.game-bomb #msg,
+body.game-bomb .pc, body.game-bomb .settings, body.game-bomb .touch, body.game-bomb .readybar{ border-radius:18px; }
+body.game-bomb .gtab.on, body.game-bomb button.primary, body.game-bomb .bar>button.primary{ background:linear-gradient(92deg,#ff5aa0,#ffb13c); color:#2a0c33; box-shadow:0 6px 0 -1px rgba(0,0,0,.25),0 10px 20px -8px rgba(255,90,160,.8); font-weight:800; }
+body.game-bomb:not(.flat) button.primary:hover{ transform:translateY(-2px); }
+body.game-bomb .logo{ background:linear-gradient(92deg,#ff7ac0,#ffd23c,#7ab8ff); -webkit-background-clip:text; background-clip:text; }
+body.game-bomb:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.5),0 0 0 3px #b06ad0 inset; }
