@@ -157,10 +157,12 @@
       Direction : <b>↑ ↓ ← →</b> / <b>W A S D</b> · <b>Maj</b> = boost (jauge) · <b>Espace</b> = lancer · <b>P / Échap</b> = pause.
       Bonus : » vitesse · ◌ fantôme · ✄ coupe ta traînée. L'arène se referme avec le temps !
     </div>
-    <div class="dpad">
-      <button id="trUp" class="touch" aria-label="haut">▲</button>
-      <div><button id="trLeft" class="touch" aria-label="gauche">◀</button><button id="trDown" class="touch" aria-label="bas">▼</button><button id="trRight" class="touch" aria-label="droite">▶</button></div>
-      <button id="trBoost" class="touch fire" aria-label="boost">⚡</button>
+    <div class="gpad">
+      <div class="dirs">
+        <button id="trUp" class="touch" aria-label="haut">▲</button>
+        <div class="drow"><button id="trLeft" class="touch" aria-label="gauche">◀</button><button id="trDown" class="touch" aria-label="bas">▼</button><button id="trRight" class="touch" aria-label="droite">▶</button></div>
+      </div>
+      <div class="acts"><button id="trBoost" class="touch fire" aria-label="boost">⚡</button></div>
     </div>
     <button id="trPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
     <div id="trLbPanel" class="settings hidden" style="width:min(94vw,460px);">
@@ -209,15 +211,17 @@
       Tourne <b>← →</b> (A/D), avance/recule <b>↑ ↓</b> (W/S), tire <b>Espace</b>, pose une mine <b>E / Maj</b>.
       <b>P / Échap</b> = pause. Tirs à rebonds, murs cassables, power-ups » ⋔ ⛉ 👟 ➳ ◈ !
     </div>
-    <div class="dpad">
-      <button id="tkFwd" class="touch" aria-label="avancer">▲</button>
-      <div>
-        <button id="tkLeft" class="touch" aria-label="tourner à gauche">↺</button>
-        <button id="tkFire" class="touch fire" aria-label="tirer">🔥</button>
-        <button id="tkRight" class="touch" aria-label="tourner à droite">↻</button>
+    <div class="gpad">
+      <div class="dirs">
+        <button id="tkFwd" class="touch" aria-label="avancer">▲</button>
+        <div class="drow">
+          <button id="tkLeft" class="touch" aria-label="tourner à gauche">↺</button>
+          <button id="tkBack" class="touch" aria-label="reculer">▼</button>
+          <button id="tkRight" class="touch" aria-label="tourner à droite">↻</button>
+        </div>
       </div>
-      <div>
-        <button id="tkBack" class="touch" aria-label="reculer">▼</button>
+      <div class="acts">
+        <button id="tkFire" class="touch fire" aria-label="tirer">🔥</button>
         <button id="tkMine" class="touch" aria-label="poser une mine">◈</button>
       </div>
     </div>
@@ -274,10 +278,15 @@
       Déplace-toi <b>↑ ↓ ← →</b> / <b>W A S D</b>, bombe <b>Espace</b> (B), action <b>X / Maj</b> (lancer/détonateur).
       <b>P / Échap</b> = pause. Bonus 💣🔥👟🦵📡👻🧤🛡 · malus 🔀🐌⏱ · l'arène se referme (mort subite) !
     </div>
-    <div class="dpad">
-      <button id="bmUp" class="touch" aria-label="haut">▲</button>
-      <div><button id="bmLeft" class="touch" aria-label="gauche">◀</button><button id="bmBomb" class="touch fire" aria-label="bombe">💣</button><button id="bmRight" class="touch" aria-label="droite">▶</button></div>
-      <div><button id="bmDown" class="touch" aria-label="bas">▼</button><button id="bmAct" class="touch" aria-label="action">🧤</button></div>
+    <div class="gpad">
+      <div class="dirs">
+        <button id="bmUp" class="touch" aria-label="haut">▲</button>
+        <div class="drow"><button id="bmLeft" class="touch" aria-label="gauche">◀</button><button id="bmDown" class="touch" aria-label="bas">▼</button><button id="bmRight" class="touch" aria-label="droite">▶</button></div>
+      </div>
+      <div class="acts">
+        <button id="bmBomb" class="touch fire" aria-label="bombe">💣</button>
+        <button id="bmAct" class="touch" aria-label="action">🧤</button>
+      </div>
     </div>
     <button id="bmPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
     <div id="bmLbPanel" class="settings hidden" style="width:min(94vw,460px);">
@@ -335,9 +344,11 @@
       Dirige ton serpent <b>↑ ↓ ← →</b> / <b>W A S D</b> (ou le pavé tactile). <b>Espace</b> = lancer · <b>P / Échap</b> = pause.
       Mange les pastilles 🍎 pour grandir ; toucher un mur ou un serpent (le tien ou un autre) = mort. Le dernier en vie gagne !
     </div>
-    <div class="dpad">
-      <button id="snUp" class="touch" aria-label="haut">▲</button>
-      <div><button id="snLeft" class="touch" aria-label="gauche">◀</button><button id="snDown" class="touch" aria-label="bas">▼</button><button id="snRight" class="touch" aria-label="droite">▶</button></div>
+    <div class="gpad solo">
+      <div class="dirs">
+        <button id="snUp" class="touch" aria-label="haut">▲</button>
+        <div class="drow"><button id="snLeft" class="touch" aria-label="gauche">◀</button><button id="snDown" class="touch" aria-label="bas">▼</button><button id="snRight" class="touch" aria-label="droite">▶</button></div>
+      </div>
     </div>
     <button id="snPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
     <div id="snLbPanel" class="settings hidden" style="width:min(94vw,460px);">

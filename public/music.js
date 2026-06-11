@@ -72,6 +72,8 @@ export function createMusic(getCtx, getA11y, theme) {
     const t0 = c.currentTime + 0.02, rate = st.rate || 0.075, base = st.base || theme.root * Math.pow(2, st.oct == null ? 1 : st.oct);
     st.notes.forEach((n, i) => { (Array.isArray(n) ? n : [n]).forEach(s => osc(t0 + i * rate, base * Math.pow(2, s / 12), st.dur || 0.16, st.wave || 'triangle', st.gain || 0.05)); });
   }
+  // écran verrouillé / onglet masqué : on suspend tout l'audio (musique + SFX) ; on relance au retour
+  document.addEventListener('visibilitychange', () => { const c = getCtx(); if (!c) return; try { if (document.hidden) c.suspend(); else c.resume(); } catch {} });
   return {
     start() { if (!timer) timer = setInterval(sched, 90); },
     stop() { if (timer) { clearInterval(timer); timer = null; } if (master && ctx) master.gain.setTargetAtTime(0, ctx.currentTime, 0.06); nextT = 0; },
