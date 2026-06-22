@@ -417,10 +417,14 @@ export function createPong(room) {
     return false;
   }
   function humanMove(p) {
-    const e = geo.edges[p.edge], L = padLenOf(p), inv = p.invertUntil > tick;
-    const up = inv ? p.dn : p.up, dn = inv ? p.up : p.dn;
-    if (up) p.pos = Math.max(L / 2, p.pos - PAD_SPD);
-    if (dn) p.pos = Math.min(e.len - L / 2, p.pos + PAD_SPD);
+    const e = geo.edges[p.edge], L = padLenOf(p);
+    let d = (p.up ? -1 : 0) + (p.dn ? 1 : 0);          // intention ÉCRAN : -1 = haut/gauche, +1 = bas/droite
+    if (p.invertUntil > tick) d = -d;                   // malus inversion
+    if (!d) return;
+    // selon le sens de parcours de l'arête, +pos va vers le bas/droite (sign=+1) ou le haut/gauche (sign=-1).
+    // On l'inverse pour que « haut » fasse TOUJOURS monter la raquette à l'écran (sinon les arêtes opposées sont inversées entre joueurs).
+    const sign = ((Math.abs(e.ty) >= Math.abs(e.tx)) ? e.ty > 0 : e.tx > 0) ? 1 : -1;
+    p.pos = Math.max(L / 2, Math.min(e.len - L / 2, p.pos + d * sign * PAD_SPD));
   }
   function update() {
     fx = [];
