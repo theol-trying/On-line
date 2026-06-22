@@ -382,19 +382,23 @@ body.game-bomb:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.5),0 0 0 3p
    ============================================================================ */
 .gpad{ display:none; }                                  /* desktop : clavier, pas de pavé tactile */
 @media (max-width:600px){
-  /* manette : croix à gauche, actions à droite (convention gamepad) */
-  .gpad{ display:flex; align-items:flex-end; justify-content:space-between; gap:14px; width:min(96vw,480px); margin:4px auto 0; }
+  /* manette : croix directionnelle à gauche, actions à droite.
+     Compat vieux iOS : PAS de clamp()/min() (tailles px fixes) ni de flex-gap (espacement par marges). */
+  .gpad{ display:flex; align-items:flex-end; justify-content:space-between; width:100%; max-width:480px; margin:6px auto 0; }
   .gpad.solo{ justify-content:center; }                 /* Snake : pas d'action → croix centrée */
-  .dirs{ display:flex; flex-direction:column; align-items:center; gap:8px; }
-  .drow{ display:flex; gap:8px; }
-  .acts{ display:flex; flex-direction:column-reverse; gap:10px; }   /* action principale (tir/bombe) en bas, près du pouce */
-  .gpad .touch{ width:clamp(58px,19vw,78px); height:clamp(58px,19vw,78px); font-size:27px; }
-  .gpad .acts .touch{ width:clamp(64px,21vw,86px); height:clamp(64px,21vw,86px); }
+  .dirs{ display:flex; flex-direction:column; align-items:center; }
+  .dirs > .touch{ margin-bottom:8px; }
+  .drow{ display:flex; }
+  .drow > .touch{ margin:0 5px; }
+  .acts{ display:flex; flex-direction:column-reverse; }
+  .acts > .touch{ margin-top:10px; }                    /* action principale (tir/bombe) en bas, près du pouce */
+  .gpad .touch{ width:66px; height:66px; font-size:26px; }
+  .gpad .acts .touch{ width:74px; height:74px; }
 
   /* Pong : les deux flèches passent SOUS le plateau, larges et côte à côte */
-  .stage{ flex-direction:row; flex-wrap:wrap; gap:8px; }
+  .stage{ flex-direction:row; flex-wrap:wrap; }
   .stage > .canvas-wrap{ order:0; flex:1 1 100%; display:flex; justify-content:center; }
-  .stage > div:not(.canvas-wrap){ order:1; flex:1 1 0; }
+  .stage > div:not(.canvas-wrap){ order:1; flex:1 1 40%; padding:0 4px; }
   .stage > div:not(.canvas-wrap) .touch{ width:100%; height:64px; font-size:30px; }
 
   /* boutons flottants : petits, translucides, dans une bande en haut qui ne couvre plus le plateau */
@@ -406,6 +410,12 @@ body.game-bomb:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.5),0 0 0 3p
   #quitFloat::before{ content:'✕'; font-size:17px; }
   #pauseFloat:active, .pauseFloat:active, #quitFloat:active, #setFloat:active{ opacity:1; }
   #emoteFloat{ width:40px; height:40px; font-size:18px; opacity:.55; }
+  body.playing #emoteFloat, body.playing #emoteBar{ display:none; }   /* en partie : libère le coin bas-gauche du pavé directionnel */
+}
+@media (max-width:370px){                               /* très petits écrans (ancien iPhone) : on réduit pour tout faire tenir sans chevauchement */
+  .gpad .touch{ width:54px; height:54px; font-size:22px; }
+  .gpad .acts .touch{ width:60px; height:60px; }
+  .drow > .touch{ margin:0 4px; }
 }
 
 /* ============================================================================
