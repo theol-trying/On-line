@@ -1,6 +1,13 @@
 # 🎮 Plateforme multijeux en ligne
 
 **5 jeux multijoueur temps réel** dans un hub commun : 🏓 Pong · 🟦 Tron · 🟫 Tanks · 🎈 Bomberman · 🟩 Snake.
+
+| Jeu | Joueurs | Pourquoi ce plafond |
+|---|---|---|
+| Pong · Tron · Snake | **2 à 10** | Géométrie et grilles générées : elles s'adaptent au nombre de participants |
+| Tanks · Bomberman | **2 à 8** | Au-delà, même sur une carte agrandie, on meurt trop souvent sans avoir vu venir |
+
+L'arène grandit automatiquement avec le nombre de participants (bots compris).
 Serveur Node.js **autoritatif**, **zéro dépendance npm**, **aucun fichier binaire** (graphismes dessinés au canvas, musique générée en WebAudio).
 
 Une seule partie active à la fois : les joueurs choisissent le jeu dans un lobby commun, un appareil = un joueur.

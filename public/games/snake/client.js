@@ -3,7 +3,7 @@ import { GW as GW0, GH as GH0, CELL as CELL0, ARENA } from './shared.js';
 // grille dynamique (nb de joueurs) : l'arène garde la MÊME taille logique, seule la taille des cases change
 let GW = GW0, GH = GH0, CELL = CELL0;
 import { createMusic } from '../../music.js';
-import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (lisibilité daltonien / 6 joueurs)
+import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (lisibilité daltonien / jusqu'à 10 joueurs)
 
 // musique : jardin léger — nappe douce majeure, plucks pentatoniques ; climax (sprint food-rush / duel) = contre-voix + tempo
 const MUSIC_THEME = { bpm: 102, bpmBoost: 12, vol: 0.42, root: 130.81, len: 32,
@@ -15,10 +15,14 @@ const MUSIC_THEME = { bpm: 102, bpmBoost: 12, vol: 0.42, root: 130.81, len: 32,
   { seq: [null, null, 16, null, null, null, 14, null, null, null, 12, null, null, null, 9, null], oct: 1, wave: 'sine', gain: 0.018, dur: 1.2, min: 2 },
 ] };
 
-const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9'] };
-const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E69F00', '#009E73'] };
-const TEAM_LETTER = ['A', 'B', 'C'];
-const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3' };
+const MAX_SEATS = 10;                               // sièges max côté serveur pour Snake
+// au-delà de 8 sièges il n'existe plus de teintes toutes distinguables : c'est le MOTIF par siège (patterns.js) qui porte l'identification
+const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0', '#25c9c0', '#9ec93a', '#d06ef0', '#f2f0e6'],
+              cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9', '#D55E00', '#F5F5F5', '#7B68EE', '#9A9A9A'] };
+const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7'] };
+const TEAM_LETTER = ['A', 'B', 'C', 'D', 'E'];
+const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3', '4v4': '4 v 4', '2v2v2v2': '2 v 2 v 2 v 2', '3v3v3': '3 v 3 v 3', '5v5': '5 v 5', '2v2v2v2v2': '2 v 2 v 2 v 2 v 2' };
+const TEAM_TOTALS = [4, 6, 8, 9, 10];               // effectifs pour lesquels un mode par équipes existe (4→2v2 … 10→5v5 / 2v2v2v2v2)
 const VARIANT_NAMES = ['🐍 Classique', '🌀 Murs traversants', '🪨 Obstacles'];
 // identité visuelle propre au jeu (fixe) : Jardin / Terrarium
 const SKIN = { bg: '#0f2410', field: '#1c3a17', field2: '#234a1d', grid: 'rgba(170,255,150,0.05)', border: 'rgba(120,200,110,0.55)', apple: true };
@@ -41,7 +45,7 @@ export default (function () {
   const DIFF_NAMES = ['Facile', 'Normale', 'Difficile'];
 
   const $ = id => root.querySelector('#' + id);
-  const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team] : CC[s]; };
+  const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team % TEAMCC.length] : CC[s % CC.length]; };   // modulo : jamais de couleur indéfinie si un siège dépasse la palette
   const px = c => c * CELL + CELL / 2;
   function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; FX = A.reduceFx ? 0 : 1; TH = SKIN; }
 
@@ -56,6 +60,7 @@ export default (function () {
   function refreshHUD() {
     if (!snap) return;
     snap.players.forEach((p, i) => {
+      if (!cards[i]) return;        // filet : le serveur annonce plus de sièges que de cartes créées
       const shown = p.connected || p.playing;
       cards[i].classList.toggle('hidden', !shown);
       if (!shown) return;
@@ -67,7 +72,7 @@ export default (function () {
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
-      const gly = `<span class="sc" title="motif du siège">${SEAT_GLYPH[i] || ''}</span>`;   // constante : jamais de texte réseau ici
+      const gly = `<span class="sc" title="motif du siège">${SEAT_GLYPH[i % SEAT_GLYPH.length] || ''}</span>`;   // constante : jamais de texte réseau ici
       cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${gly}${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       lv.textContent = p.playing ? (p.alive ? `● L${p.len} · 🍎${p.score}` : '✖ mort') : 'prêt';
@@ -136,7 +141,7 @@ export default (function () {
     const total = m.connected + (m.botCount || 0);
     if (botsBtn) { botsBtn.disabled = !idle; botsBtn.textContent = '🤖 Bots : ' + (m.botCount || 0); botsBtn.classList.toggle('on', (m.botCount || 0) > 0); }
     if (diffBtn) { diffBtn.disabled = !idle; diffBtn.textContent = '🎯 IA : ' + (DIFF_NAMES[m.botDiff] || 'Normale'); }
-    modeBtn.disabled = !(idle && (total === 4 || total === 6));
+    modeBtn.disabled = !(idle && TEAM_TOTALS.indexOf(total) >= 0);   // effectifs qui admettent au moins un mode par équipes
     modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     if (variantBtn) { variantBtn.disabled = !idle; variantBtn.textContent = VARIANT_NAMES[m.variant] || VARIANT_NAMES[0]; variantBtn.classList.toggle('on', m.variant > 0); }
     if (rushBtn) { rushBtn.disabled = !idle; rushBtn.textContent = '🏁 ' + (m.rush ? 'Food-rush' : 'Survie'); rushBtn.classList.toggle('on', !!m.rush); }
@@ -405,7 +410,7 @@ export default (function () {
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('snc'); ctx = cv.getContext('2d'); hud = $('snHud'); endEl = $('snEnd');
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
-    cards = [0, 1, 2, 3, 4, 5].map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
+    cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('snStart'); pauseBtn = $('snPause'); modeBtn = $('snMode'); variantBtn = $('snVariant'); rushBtn = $('snRush'); botsBtn = $('snBots'); pauseFloat = $('snPauseFloat');
     lbBtn = $('snLbBtn'); lbPanel = $('snLbPanel'); lbBody = $('snLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };

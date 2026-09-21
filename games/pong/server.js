@@ -15,10 +15,12 @@ const R0 = 232, PAD_LEN0 = 84, PAD_SPD0 = 5.5;
 let W = W0, H = H0;
 let CX = W / 2, CY = H / 2, R = R0;
 let PAD_LEN = PAD_LEN0, PAD_SPD = PAD_SPD0;
-const MAX_SEATS = 6;
+const MAX_SEATS = 10;
 const MIN_SPD = 2.6, TICK_HZ = 60;
 function setArena(n) {
-  const k = 1 + 0.13 * (Math.max(2, Math.min(MAX_SEATS, n)) - 2);   // 2 j : ×1.00 … 6 j : ×1.52
+  const k = 1 + 0.13 * (Math.max(2, Math.min(MAX_SEATS, n)) - 2);   // 2 j : ×1.00 · 6 j : ×1.52 · 10 j : ×2.04
+  // À 10 joueurs le polygone a des arêtes plus COURTES (2·R·sin(π/N)) alors que la raquette suit k :
+  // chacun couvre ~59 % de son bord contre ~36 % à 6 → la défense individuelle reste confortable.
   W = Math.round(W0 * k); H = Math.round(H0 * k);
   CX = W / 2; CY = H / 2; R = R0 * k;
   PAD_LEN = PAD_LEN0 * k; PAD_SPD = PAD_SPD0 * k;
@@ -55,9 +57,18 @@ const PRESET_ORDER = ['classique', 'rapide', 'chaos'];
 const WINMODE_ORDER = ['survivor', 'rounds', 'kills'];
 const SUDDEN_ORDER = ['off', 'shrink', 'accel'];
 const SERVE_ORDER = ['random', 'loser'];
-const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
+const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2, '4v4': 2, '2v2v2v2': 4, '3v3v3': 3, '5v5': 2, '2v2v2v2v2': 5 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
-function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
+// modes d'équipe proposés selon le nombre EXACT de participants (humains + bots) ; 5 équipes au maximum
+function validModes(N) {
+  const v = ['ffa'];
+  if (N === 4) v.push('2v2');
+  if (N === 6) v.push('2v2v2', '3v3');
+  if (N === 8) v.push('4v4', '2v2v2v2');
+  if (N === 9) v.push('3v3v3');
+  if (N === 10) v.push('5v5', '2v2v2v2v2');
+  return v;
+}
 const BOTSTYLE_ORDER = ['equilibre', 'agressif', 'defensif'];   // style d'IA : équilibré / agressif (frappe du bord de raquette, met la pression) / défensif (suit toujours la balle)
 const defaultRules = () => ({ winMode: 'survivor', roundsTarget: 3, killsTarget: 8, sudden: 'off', serve: 'random', handicap: false, negatives: false, botDiff: 'normal', botStyle: 'equilibre', bumpers: false });
 
@@ -94,7 +105,7 @@ export function createPong(room) {
     }
     const champ = winner >= 0 ? players.find(p => p.edge >= 0 && p.team === winner) : null;
     pushHistory(GID, { when: Date.now(), mode, preset,
-      winner: champ ? (nteams < nParts ? 'Équipe ' + 'ABC'[winner] : champ.name) : 'Égalité',
+      winner: champ ? (nteams < nParts ? 'Équipe ' + 'ABCDE'[winner] : champ.name) : 'Égalité',
       durationSec: Math.round(endTick / 60), nParts });
     save(); markDirty(GID);
   }
@@ -607,4 +618,4 @@ export function createPong(room) {
   return { onJoin, onLeave, onRename, onMessage, tick: tick_, isIdle: editable };
 }
 
-export default { meta: { id: GID, name: 'Pong', min: 2, max: 6, tickHz: TICK_HZ, desc: '2 à 6 joueurs · terrain adaptatif · équipes · power-ups' }, create: createPong };
+export default { meta: { id: GID, name: 'Pong', min: 2, max: 10, tickHz: TICK_HZ, desc: '2 à 10 joueurs · terrain adaptatif · équipes · power-ups' }, create: createPong };

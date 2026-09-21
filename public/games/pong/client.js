@@ -4,16 +4,16 @@
 import { W as W0, H as H0, BALL_R, PAD_W, PAD_OFF, PU_R } from './shared.js';
 let W = W0, H = H0;        // espace logique : agrandi par le serveur selon le nombre de joueurs (snapshot aw/ah)
 import { createMusic } from '../../music.js';
-import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège : lisibles même à 6 ou en mode équipe
+import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège : lisibles même à 10 ou en mode équipe
 
-const SHAPE = { 2: 'Face à face', 3: 'Triangle', 4: 'Carré', 5: 'Pentagone', 6: 'Hexagone' };
+const SHAPE = { 2: 'Face à face', 3: 'Triangle', 4: 'Carré', 5: 'Pentagone', 6: 'Hexagone', 7: 'Heptagone', 8: 'Octogone', 9: 'Ennéagone', 10: 'Décagone' };
 const PU_GLYPH = { multi: '+1', grow: 'XL', shield: '⛉', ghost: '◌', invert: '⇄', shrinkT: '▭', slow: '≈', mini: '▽', flip: '✕', speed: '»', blocker: '🧱', magnet: '🧲', invis: '∅' };
 const PU_COL = { multi: '#fff', grow: '#ffd76b', shield: '#7fd1ff', ghost: '#cbb3ff', invert: '#ff9be0', shrinkT: '#ffb36b', slow: '#9fe6ff', mini: '#ff5a5a', flip: '#ff5a5a', speed: '#ff5a5a', blocker: '#c9a06a', magnet: '#ff8e6e', invis: '#ff5a5a' };
 const PU_NAME = { multi: 'Multi-balle', grow: 'Raquette XL', shield: 'Bouclier', ghost: 'Balle fantôme', invert: 'Inversion (adversaire)', shrinkT: 'Raquette réduite (adversaire)', slow: 'Ralenti', mini: 'Malus : ta raquette réduit', flip: 'Malus : tes contrôles inversés', speed: 'Malus : balle accélérée', blocker: 'Mur-bloqueur', magnet: 'Aimant', invis: 'Malus : balle invisible' };
 const BUFF_ICON = { grow: 'XL', shield: '⛉', invert: '⇄', shrink: '▭', magnet: '🧲' };           // effets affichés sur les cartes (barres dégressives)
 const BUFF_COL = { grow: '#ffd76b', shield: '#7fd1ff', invert: '#ff9be0', shrink: '#ffb36b', magnet: '#ff8e6e' };
-const TEAM_LETTER = ['A', 'B', 'C'];
-const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3' };
+const TEAM_LETTER = ['A', 'B', 'C', 'D', 'E'];
+const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3', '4v4': '4 v 4', '2v2v2v2': '2 v 2 v 2 v 2', '3v3v3': '3 v 3 v 3', '5v5': '5 v 5', '2v2v2v2v2': '2 v 2 v 2 v 2 v 2' };
 const PRESET_LABEL = { classique: 'Classique', rapide: 'Rapide', chaos: 'Chaos', custom: 'Personnalisé' };
 const PRESET_DESC = { classique: '5 vies · vitesse posée · sans power-ups', rapide: '3 vies · balle vive + accélération · power-ups', chaos: '5 vies · power-ups fréquents · multi-balle', custom: 'réglages personnalisés' };
 const SPEED_LABEL = { lente: 'Lente', normale: 'Normale', rapide: 'Rapide' };
@@ -21,8 +21,12 @@ const WINMODE_LABEL = { survivor: 'Dernier survivant', rounds: 'Manches', kills:
 const SUDDEN_LABEL = { off: 'Off', shrink: 'Terrain rétrécit', accel: 'Balle accélère' };
 const SERVE_LABEL = { random: 'Aléatoire', loser: 'Dernier perdant' };
 const BOTDIFF_LABEL = { easy: 'Facile', normal: 'Normal', hard: 'Difficile', insane: 'Insane' };
-const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9'] };
-const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E69F00', '#009E73'] };
+const MAX_SEATS = 10;   // sièges maximum côté serveur pour Pong
+// Palette des sièges. Au-delà de 8 il n'existe plus de teintes toutes distinguables :
+// c'est le MOTIF par siège (patterns.js) qui porte l'identification.
+const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0', '#25c9c0', '#9ec93a', '#d06ef0', '#f2f0e6'],
+              cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9', '#D55E00', '#F5F5F5', '#7B68EE', '#9A9A9A'] };
+const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7'] };
 const THEMES = {
   neon: { bg: '#0a0a14', field: '#0d0e1c', grid: 'rgba(255,255,255,0.04)', ball: '#ffffff' },
   crt: { bg: '#04140b', field: '#06190e', grid: 'rgba(120,255,170,0.07)', ball: '#d8ffe4' },
@@ -99,7 +103,7 @@ export default (function () {
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
-      const gl = `<span style="opacity:.75;margin-right:3px" title="motif de la raquette">${SEAT_GLYPH[i % 6]}</span>`;   // glyphe = motif du siège (constante, jamais du réseau)
+      const gl = `<span style="opacity:.75;margin-right:3px" title="motif de la raquette">${SEAT_GLYPH[i % SEAT_GLYPH.length]}</span>`;   // glyphe = motif du siège (constante, jamais du réseau)
       document.getElementById('pn' + i).innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${gl}${p.name || ('P' + (i + 1))} <span class="sc">${p.score} pt</span> ${tags.join('')}`;
       cards[i].classList.toggle('dead', p.playing && !p.alive);
       cards[i].classList.toggle('me', i === mySeat);
@@ -234,7 +238,7 @@ export default (function () {
     pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
     botsBtn.disabled = !idle; botsBtn.textContent = '🤖 Bots : ' + m.botCount; botsBtn.classList.toggle('on', m.botCount > 0);
-    modeBtn.disabled = !(idle && (n === 4 || n === 6)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
+    modeBtn.disabled = !(idle && (n === 4 || n === 6 || n === 8 || n === 9 || n === 10)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);   // effectifs pour lesquels des modes en équipes existent
     presetBtn.disabled = !idle; presetBtn.textContent = '🎮 ' + (PRESET_LABEL[m.preset] || m.preset);
     if (m.opts) {
       optLives.textContent = m.opts.lives;
@@ -623,7 +627,7 @@ export default (function () {
     cv = $('c'); ctx = cv.getContext('2d');
     hud = $('hud');
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
-    cards = [0, 1, 2, 3, 4, 5].map(i => {
+    cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => {
       const el = document.createElement('div');
       el.className = 'pc hidden';
       el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn" id="pn${i}">P${i + 1}</div><div class="lv" id="lv${i}"></div></div>`;

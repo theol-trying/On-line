@@ -1,10 +1,21 @@
-// Jeu BOMBERMAN v2 — équipes, bonus avancés, malus, mort subite, chaînage. 1 à 6 joueurs.
-import { GW, GH, CELL, ARENA } from '../../public/games/bomb/shared.js';
+// Jeu BOMBERMAN v2 — équipes, bonus avancés, malus, mort subite, chaînage. 1 à 8 joueurs.
+import { GW as GW0, GH as GH0 } from '../../public/games/bomb/shared.js';
+// Grille dimensionnée au nombre de participants : la CELLULE garde sa taille (personnages et souffles
+// restent proportionnés), c'est le nombre de cases qui augmente. Dimensions IMPAIRES obligatoires :
+// le damier de piliers (x et y pairs) et les générateurs symétriques en dépendent.
+let GW = GW0, GH = GH0;
+function setGridB(n) {
+  const side = GW0 + 2 * Math.max(0, Math.min(2, Math.ceil((Math.min(8, n) - 4) / 2)));   // ≤4 j : 13 · 5-6 j : 15 · 7-8 j : 17
+  if (side === GW) return;
+  GW = side; GH = side;                           // le client dérive CELL et ARENA de gw/gh
+  SD_SPIRAL = buildSpiral();                      // spirale de mort subite et anneau du mode revanche
+  RING = buildRing(); RING_LEN = RING.length;     // sont dérivés de la grille : à refaire à chaque changement
+}
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { dailyRng } from '../../dayseed.js';
 
 const GID = 'bomb';
-const MAX_SEATS = 6;
+const MAX_SEATS = 8;          // Bomberman plafonne à 8 : au-delà on meurt trop souvent sans avoir vu la bombe
 const TICK_HZ = 30;
 const COUNTDOWN_TICKS = 3 * TICK_HZ;
 const PR = 13;
@@ -19,17 +30,33 @@ const GOOD = ['bomb', 'flame', 'speed', 'kick', 'remote', 'shield', 'ghost', 'th
 const BMDIFF = [{ skip: 0.5, cd: 44 }, { skip: 0.18, cd: 24 }, { skip: 0, cd: 12 }];   // IA : Facile / Normale / Difficile (hésitation, cadence de pose)
 const BAD = ['reverse', 'slow', 'auto', 'skull'];
 const SKULL_KINDS = ['reverse', 'slow', 'auto'];   // affliction aléatoire infligée par le skull (contagieux)
-const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
+const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2, '4v4': 2, '2v2v2v2': 4, '3v3v3': 3, '5v5': 2, '2v2v2v2v2': 5 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
-function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
+// modes d'équipe proposés selon le nombre EXACT de participants (humains + bots) ; Bomberman plafonne à 8
+function validModes(N) {
+  const v = ['ffa'];
+  if (N === 4) v.push('2v2');
+  if (N === 6) v.push('2v2v2', '3v3');
+  if (N === 8) v.push('4v4', '2v2v2v2');
+  return v;
+}
 const idx = (gx, gy) => gy * GW + gx;
 const ccx = c => (c + 0.5) * CELL;
-const SPAWNS = [[1, 1], [GW - 2, GH - 2], [GW - 2, 1], [1, GH - 2], [(GW - 1) / 2 | 0, 1], [(GW - 1) / 2 | 0, GH - 2]];
-const SD_SPIRAL = (() => { const res = []; let x0 = 1, y0 = 1, x1 = GW - 2, y1 = GH - 2; while (x0 <= x1 && y0 <= y1) { for (let x = x0; x <= x1; x++) res.push([x, y0]); for (let y = y0 + 1; y <= y1; y++) res.push([x1, y]); if (y1 > y0) for (let x = x1 - 1; x >= x0; x--) res.push([x, y1]); if (x1 > x0) for (let y = y1 - 1; y >= y0 + 1; y--) res.push([x0, y]); x0++; y0++; x1--; y1--; } return res; })();
+// Départs calculés : 4 coins, puis milieux haut/bas, puis milieux gauche/droite.
+// L'ordre des 6 premiers reproduit exactement l'ancien tableau en dur (rien ne change à ≤ 6 joueurs).
+function spawnsFor(n) {
+  const a = 1, bx = GW - 2, by = GH - 2, mx = (GW - 1) / 2 | 0, my = (GH - 1) / 2 | 0;
+  return [[a, a], [bx, by], [bx, a], [a, by], [mx, a], [mx, by], [a, my], [bx, my]].slice(0, Math.max(2, n));
+}
+let SPAWNS = spawnsFor(MAX_SEATS);
+// Spirale de mort subite — recalculée à chaque changement de taille de grille (cf. setGridB).
+const buildSpiral = () => { const res = []; let x0 = 1, y0 = 1, x1 = GW - 2, y1 = GH - 2; while (x0 <= x1 && y0 <= y1) { for (let x = x0; x <= x1; x++) res.push([x, y0]); for (let y = y0 + 1; y <= y1; y++) res.push([x1, y]); if (y1 > y0) for (let x = x1 - 1; x >= x0; x--) res.push([x, y1]); if (x1 > x0) for (let y = y1 - 1; y >= y0 + 1; y--) res.push([x0, y]); x0++; y0++; x1--; y1--; } return res; };
+let SD_SPIRAL = buildSpiral();
 const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
 // mode revanche : anneau des cases du cadre (sens horaire) où les morts viennent bombarder l'arène
-const RING = (() => { const r = []; for (let x = 0; x < GW - 1; x++) r.push([x, 0]); for (let y = 0; y < GH - 1; y++) r.push([GW - 1, y]); for (let x = GW - 1; x > 0; x--) r.push([x, GH - 1]); for (let y = GH - 1; y > 0; y--) r.push([0, y]); return r; })();
-const RING_LEN = RING.length, REV_MOVE_EVERY = 5;
+const buildRing = () => { const r = []; for (let x = 0; x < GW - 1; x++) r.push([x, 0]); for (let y = 0; y < GH - 1; y++) r.push([GW - 1, y]); for (let x = GW - 1; x > 0; x--) r.push([x, GH - 1]); for (let y = GH - 1; y > 0; y--) r.push([0, y]); return r; };
+let RING = buildRing(), RING_LEN = RING.length;
+const REV_MOVE_EVERY = 5;
 // génération procédurale des murs solides (sym180 / aléatoire / 4 coins) avec connectivité garantie
 function genSolidSetB(style, density, safe, rnd) {
   const cache = new Map();
@@ -76,7 +103,7 @@ export function createBomb(room) {
     }
     const champ = winner >= 0 ? players.find(p => p.playing && p.team === winner) : null;
     pushHistory(GID, { when: Date.now(), mode, preset: 'bomb',
-      winner: champ ? (nteams < nParts ? 'Équipe ' + 'ABC'[winner] : (champ.name || ('P' + (champ.seat + 1)))) : 'Égalité',
+      winner: champ ? (nteams < nParts ? 'Équipe ' + 'ABCDE'[winner] : (champ.name || ('P' + (champ.seat + 1)))) : 'Égalité',
       durationSec: Math.round(endTick / TICK_HZ), nParts });
     save(); markDirty(GID);
   }
@@ -141,6 +168,7 @@ export function createBomb(room) {
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
+    setGridB(N); SPAWNS = spawnsFor(N);          // grille + départs dimensionnés AVANT la génération (buildGrid réalloue `cells`)
     buildGrid(parts);
     nParts = N; deaths = 0; endTick = 0; winner = null; fx = []; bombs = []; blasts = []; pickups = []; sdIndex = 0; sd = false;
     parts.forEach((p, i) => {
@@ -500,6 +528,7 @@ export function createBomb(room) {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
       round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, sd, gen: genStyle, ff, revenge,
+      gw: GW, gh: GH,                                                              // taille de grille : le client recale CELL et ARENA
       grid: sendGrid ? g : undefined,
       bombs: bombs.map(b => ({ x: b.gx, y: b.gy, f: b.fuse, p: b.power, r: !!b.remote })),
       blasts: blasts.map(bl => ({ x: bl.gx, y: bl.gy })),
@@ -562,4 +591,4 @@ export function createBomb(room) {
   return { onJoin, onLeave, onRename, onMessage, tick: tick_, isIdle: editable };
 }
 
-export default { meta: { id: GID, name: 'Bomberman', min: 1, max: 6, tickHz: TICK_HZ, desc: 'Labyrinthe, bombes, bonus/malus, équipes, mort subite' }, create: createBomb };
+export default { meta: { id: GID, name: 'Bomberman', min: 1, max: 8, tickHz: TICK_HZ, desc: 'Labyrinthe, bombes, bonus/malus, équipes, mort subite' }, create: createBomb };

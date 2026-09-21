@@ -1,16 +1,16 @@
-// Jeu TRON / Light Cycles. 2 à 6 joueurs. FFA ou équipes. Bonus, boost à la jauge, rétrécissement, traînée qui s'efface.
+// Jeu TRON / Light Cycles. 2 à 10 joueurs. FFA ou équipes. Bonus, boost à la jauge, rétrécissement, traînée qui s'efface.
 import { GW as GW0, GH as GH0 } from '../../public/games/tron/shared.js';
 // Grille À L'ÉCHELLE du nombre de participants : chaque joueur occupe un nombre FIXE de cases,
 // donc agrandir la grille réduit réellement l'encombrement (contrairement à Pong où ce serait un zoom).
 let GW = GW0, GH = GH0;
 function setGrid(n) {
-  const side = Math.min(76, Math.round(GW0 * (1 + 0.14 * (Math.max(2, n) - 2))));   // 2 j : 50 … 6 j : 76
+  const side = Math.min(92, Math.round(GW0 * (1 + 0.14 * (Math.max(2, n) - 2))));   // 2 j : 50 · 6 j : 76 · 8 j et + : 92 (plafond)
   GW = side; GH = side;
 }
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 
 const GID = 'tron';
-const MAX_SEATS = 6;
+const MAX_SEATS = 10;
 const TICK_HZ = 15;
 const COUNTDOWN_TICKS = 3 * TICK_HZ;
 const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
@@ -27,9 +27,18 @@ const SHRINK_START = 22 * TICK_HZ, SHRINK_EVERY = 2 * TICK_HZ;
 // traînée qui s'efface (mode "fade")
 const TRAIL_LIFE = 130;
 const TRDIFF = [{ look: 4, err: 0.14 }, { look: 8, err: 0.04 }, { look: 12, err: 0 }];   // IA : Facile / Normale / Difficile (profondeur de vision, taux d'inattention)
-const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
+const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2, '4v4': 2, '2v2v2v2': 4, '3v3v3': 3, '5v5': 2, '2v2v2v2v2': 5 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
-function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
+// modes d'équipe proposés selon le nombre EXACT de participants (humains + bots) ; 5 équipes au maximum
+function validModes(N) {
+  const v = ['ffa'];
+  if (N === 4) v.push('2v2');
+  if (N === 6) v.push('2v2v2', '3v3');
+  if (N === 8) v.push('4v4', '2v2v2v2');
+  if (N === 9) v.push('3v3v3');
+  if (N === 10) v.push('5v5', '2v2v2v2v2');
+  return v;
+}
 
 function corners(cells) {
   const n = cells.length; if (n === 0) return [];
@@ -67,7 +76,7 @@ export function createTron(room) {
     }
     const champ = winner >= 0 ? players.find(p => p.playing && p.team === winner) : null;
     pushHistory(GID, { when: Date.now(), mode, preset: 'tron',
-      winner: champ ? (nteams < nParts ? 'Équipe ' + 'ABC'[winner] : (champ.name || ('P' + (champ.seat + 1)))) : 'Égalité',
+      winner: champ ? (nteams < nParts ? 'Équipe ' + 'ABCDE'[winner] : (champ.name || ('P' + (champ.seat + 1)))) : 'Égalité',
       durationSec: Math.round(endTick / TICK_HZ), nParts });
     save(); markDirty(GID);
   }
@@ -328,4 +337,4 @@ export function createTron(room) {
   return { onJoin, onLeave, onRename, onMessage, tick: tick_, isIdle: editable };
 }
 
-export default { meta: { id: GID, name: 'Tron', min: 2, max: 6, tickHz: TICK_HZ, desc: 'Light Cycles — traînées, bonus, boost, équipes, arène qui se referme' }, create: createTron };
+export default { meta: { id: GID, name: 'Tron', min: 2, max: 10, tickHz: TICK_HZ, desc: 'Light Cycles — traînées, bonus, boost, équipes, arène qui se referme' }, create: createTron };
