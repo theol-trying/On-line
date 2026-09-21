@@ -1,5 +1,8 @@
 // Module client TANK v2 : arène destructible, power-ups, mines, collision, FFA/équipes, manches.
-import { ARENA, TANK_R, SHELL_R, BLK, G } from './shared.js';
+import { ARENA as ARENA0, TANK_R, SHELL_R, BLK, G as G0 } from './shared.js';
+// arène dimensionnée au nombre de participants : la taille des BLOCS ne bouge pas (BLK), c'est le NOMBRE
+// de blocs qui augmente (15 / 17 / 19). Le serveur envoie `ag` (côté de la grille) et le client se recale.
+let G = G0, ARENA = ARENA0;
 import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';
 
@@ -14,10 +17,14 @@ const MUSIC_THEME = { bpm: 96, bpmBoost: 12, vol: 0.55, root: 73.42, len: 32,
   { drums: '..H...H...H...H...H...H...H.HH..', gain: 0.7, min: 2 },
 ] };
 
-const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9'] };
-const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E69F00', '#009E73'] };
-const TEAM_LETTER = ['A', 'B', 'C'];
-const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3' };
+// Couleurs des sièges. Au-delà de 8 il n'existe plus de teintes toutes distinguables entre elles :
+// c'est le MOTIF par siège (patterns.js) qui porte l'identification, la couleur n'est qu'un renfort.
+const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0', '#25c9c0', '#9ec93a', '#d06ef0', '#f2f0e6'],
+              cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9', '#D55E00', '#F5F5F5', '#7B68EE', '#9A9A9A'] };
+const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7'] };
+const TEAM_LETTER = ['A', 'B', 'C', 'D', 'E'];
+const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3', '4v4': '4 v 4', '2v2v2v2': '2 v 2 v 2 v 2', '3v3v3': '3 v 3 v 3', '5v5': '5 v 5', '2v2v2v2v2': '2 v 2 v 2 v 2 v 2' };
+const MAX_SEATS = 8;            // Tanks plafonne à 8 sièges (aligné sur le serveur) : nombre de cartes du HUD
 const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
 const PU = { rapid: { i: '»', c: '#9fe6ff' }, triple: { i: '⋔', c: '#ffd76b' }, shield: { i: '⛉', c: '#7fd1ff' }, speed: { i: '👟', c: '#7ff0bd' }, pierce: { i: '➳', c: '#ff9be0' }, mine: { i: '◈', c: '#ff8e6e' }, repair: { i: '🔧', c: '#7ff0bd' }, emp: { i: '⚡', c: '#9fe6ff' }, homing: { i: '🚀', c: '#ff7a7a' }, camo: { i: '👁', c: '#b9a6ff' }, radar: { i: '📡', c: '#7ff0bd' } };
 // identité visuelle propre au jeu (fixe) : Désert / Champ de bataille
@@ -75,7 +82,7 @@ export default (function () {
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
-      const gly = `<span style="opacity:.7;font-size:.9em" title="motif du siège">${SEAT_GLYPH[i % 6]}</span>`;   // rappel du motif peint sur la caisse (constante : aucune donnée réseau injectée)
+      const gly = `<span style="opacity:.7;font-size:.9em" title="motif du siège">${SEAT_GLYPH[i % SEAT_GLYPH.length]}</span>`;   // rappel du motif peint sur la caisse (constante : aucune donnée réseau injectée)
       cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${p.name || ('P' + (i + 1))} ${gly} <span class="sc">🏆${p.score} · ${p.kills}⚡</span> ${tags.join('')}`;
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       const counts = [p.shield ? '⛉' + p.shield : '', p.mineN ? '◈' + p.mineN : ''].filter(Boolean).join(' ');
@@ -114,6 +121,7 @@ export default (function () {
   function onMessage(m) { if (m && m.t === 'welcome') mySeat = m.seat; }
   function onLb(d) { board = d.board || []; renderLB(); }
   function onState(m) {
+    if (m.ag && m.ag !== G) { G = m.ag; ARENA = G * BLK; }   // grille redimensionnée par le serveur : tout le rendu lit G / ARENA
     if (m.grid === undefined && snap) m.grid = snap.grid;   // delta réseau : grille absente = inchangée
     snap = m; teamMode = m.mode && m.mode !== 'ffa';
     if (m.round !== prevRound) { prevRound = m.round; craters.length = 0; tracks.length = 0; }   // nouvelle manche : terrain propre
@@ -140,7 +148,7 @@ export default (function () {
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
     if (botsBtn) { botsBtn.disabled = !idle; botsBtn.textContent = '🤖 Bots : ' + (m.botCount || 0); botsBtn.classList.toggle('on', (m.botCount || 0) > 0); }
     if (diffBtn) { diffBtn.disabled = !idle; diffBtn.textContent = '🎯 IA : ' + (DIFF_NAMES[m.botDiff] || 'Normale'); }
-    modeBtn.disabled = !(idle && (total === 4 || total === 6)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
+    modeBtn.disabled = !(idle && (total === 4 || total === 6 || total === 8)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     arenaBtn.disabled = !idle; arenaBtn.textContent = '🧱 ' + (GEN_NAMES[m.gen] || 'Arène');
     winBtn.disabled = !idle; winBtn.textContent = '🏁 ' + (m.winTarget === 1 ? '1 manche' : m.winTarget + ' manches');
     ffBtn.disabled = !(idle && teamMode); ffBtn.textContent = '🤝 Tir allié : ' + (m.ff ? 'ON' : 'OFF'); ffBtn.classList.toggle('on', !!m.ff);
@@ -181,7 +189,7 @@ export default (function () {
 
   let terrainCv = null, terrainKey = '';            // décor statique pré-rendu (sol, murs, bordure, boue) — redessiné seulement si grille/boue/taille change
   function ensureTerrain() {
-    const key = cv.width + '|' + snap.grid + '|' + (snap.mud || []).join(',');
+    const key = cv.width + '|' + G + '|' + snap.grid + '|' + (snap.mud || []).join(',');
     if (terrainCv && key === terrainKey) return;
     terrainKey = key;
     if (!terrainCv) terrainCv = document.createElement('canvas');
@@ -380,7 +388,7 @@ export default (function () {
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('tkc'); ctx = cv.getContext('2d'); hud = $('tkHud'); endEl = $('tkEnd');
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
-    cards = [0, 1, 2, 3, 4, 5].map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
+    cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('tkStart'); pauseBtn = $('tkPause'); modeBtn = $('tkMode'); botsBtn = $('tkBots'); arenaBtn = $('tkArena'); winBtn = $('tkWin'); ffBtn = $('tkFf'); pauseFloat = $('tkPauseFloat');
     lbBtn = $('tkLbBtn'); lbPanel = $('tkLbPanel'); lbBody = $('tkLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };

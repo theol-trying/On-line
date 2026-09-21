@@ -3,7 +3,7 @@ import { GW as GW0, GH as GH0, CELL as CELL0, ARENA } from './shared.js';
 // grille dynamique (nb de joueurs) : l'arène garde la MÊME taille logique, seule la taille des cases change
 let GW = GW0, GH = GH0, CELL = CELL0;
 import { createMusic } from '../../music.js';
-import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (daltonisme / 6 joueurs)
+import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (daltonisme / jusqu'à 10 joueurs)
 
 // musique : synthwave sombre — nappe en quintes, basse pulsée, arpège néon ; climax (duel final) = arp rapide + charley + tempo
 const MUSIC_THEME = { bpm: 122, bpmBoost: 14, vol: 0.5, root: 82.41, len: 32,
@@ -18,10 +18,15 @@ const MUSIC_THEME = { bpm: 122, bpmBoost: 14, vol: 0.5, root: 82.41, len: 32,
   { drums: '..H...H...H...H.', min: 2 },
 ] };
 
-const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9'] };
-const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a'], cb: ['#0072B2', '#E69F00', '#009E73'] };
-const TEAM_LETTER = ['A', 'B', 'C'];
-const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3' };
+// 10 sièges : au-delà de 8 il n'existe plus de teintes toutes distinguables entre elles,
+// c'est le MOTIF par siège (patterns.js) qui porte l'identification.
+const PAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0', '#25c9c0', '#9ec93a', '#d06ef0', '#f2f0e6'],
+              cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7', '#56B4E9', '#D55E00', '#F5F5F5', '#7B68EE', '#9A9A9A'] };
+const TEAMPAL = { normal: ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0'], cb: ['#0072B2', '#E69F00', '#009E73', '#F0E442', '#CC79A7'] };
+const TEAM_LETTER = ['A', 'B', 'C', 'D', 'E'];
+const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3', '4v4': '4 v 4', '2v2v2v2': '2 v 2 v 2 v 2', '3v3v3': '3 v 3 v 3', '5v5': '5 v 5', '2v2v2v2v2': '2 v 2 v 2 v 2 v 2' };
+const MAX_SEATS = 10;                                   // nombre de sièges max (aligné sur le serveur)
+const TEAM_TOTALS = [4, 6, 8, 9, 10];                   // effectifs exacts pour lesquels le serveur propose un mode par équipes
 const PU = { speed: { i: '»', c: '#9fe6ff' }, ghost: { i: '◌', c: '#cbb3ff' }, cut: { i: '✄', c: '#ffd76b' }, blink: { i: '➤', c: '#7fffd4' }, breaker: { i: '⊘', c: '#ffcf5a' }, invert: { i: '⇄', c: '#ff9be0' } };
 const THEMES = {
   neon: { bg: '#0a0a14', field: '#0d0e1c', grid: 'rgba(255,255,255,0.05)', wall: '#2a2f48' },
@@ -136,7 +141,7 @@ export default (function () {
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
     if (botsBtn) { botsBtn.disabled = !idle; botsBtn.textContent = '🤖 Bots : ' + (m.botCount || 0); botsBtn.classList.toggle('on', (m.botCount || 0) > 0); }
     if (diffBtn) { diffBtn.disabled = !idle; diffBtn.textContent = '🎯 IA : ' + (DIFF_NAMES[m.botDiff] || 'Normale'); }
-    modeBtn.disabled = !(idle && (total === 4 || total === 6));
+    modeBtn.disabled = !(idle && TEAM_TOTALS.indexOf(total) >= 0);
     modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     fadeBtn.disabled = !idle; fadeBtn.textContent = m.fade ? '〰 Traînée courte' : '➖ Traînée ∞'; fadeBtn.classList.toggle('on', !!m.fade);
   }
@@ -342,7 +347,7 @@ export default (function () {
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('trc'); ctx = cv.getContext('2d'); hud = $('trHud'); endEl = $('trEnd');
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
-    cards = [0, 1, 2, 3, 4, 5].map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
+    cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('trStart'); pauseBtn = $('trPause'); modeBtn = $('trMode'); fadeBtn = $('trFade'); botsBtn = $('trBots'); pauseFloat = $('trPauseFloat');
     lbBtn = $('trLbBtn'); lbPanel = $('trLbPanel'); lbBody = $('trLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };

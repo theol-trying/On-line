@@ -274,7 +274,43 @@ neutralisés, code jamais exécuté) → 0 erreur ; les deux nouveaux panneaux o
 (`stopPropagation` ; les jeux écoutent en phase de bouillonnement). Le type `{t:'daily'}` est réservé au sens **serveur→client**
 (le basculement client→serveur s'appelle `daytoggle`) pour ne jamais avoir le même nom de message dans les deux sens.
 
+## Lot « jusqu'à 10 joueurs » (septembre 2026)
+Plafonds **par jeu**, pas uniformes — chacun s'arrête là où il reste plaisant :
+
+| Jeu | Avant | Après | Comment l'arène suit |
+|---|---|---|---|
+| Pong | 6 | **10** | `setArena` : k = 1 + 0,13·(n−2) → ×2,04 à 10 j. Terrain **et** raquette suivent k |
+| Tron | 6 | **10** | `setGrid` : 50 → 76 à 6 j → **92** (plafond) à 8 j et + |
+| Snake | 6 | **10** | `setGrid` : 30 → 46 à 6 j → **58** (plafond) à 10 j |
+| Tanks | 6 | **8** | `setGridT` : grille **15 → 17 → 19**, bloc inchangé (BLK=40), ARENA = G×BLK |
+| Bomberman | 6 | **8** | `setGridB` : grille **13 → 15 → 17** (toujours impaire), ARENA = GW×CELL |
+
+**Pong reste confortable à 10** malgré des arêtes plus courtes : la longueur d'une arête vaut 2·R·sin(π/N)
+alors que la raquette suit k, donc chacun couvre **~59 %** de son bord à 10 joueurs contre **~36 %** à 6.
+Ce n'est pas la défense qui devient dure, c'est le trafic au centre.
+
+**Ce qui a dû suivre :**
+- **Tanks / Bomberman** : leurs départs étaient un **tableau de 6 positions en dur** sur une grille **fixe**.
+  Remplacés par `spawnsFor(n)` (4 coins → milieux haut/bas → milieux gauche/droite ; **l'ordre des 6 premiers
+  reproduit l'ancien tableau**, donc rien ne change à ≤ 6 joueurs) et par une grille dynamique façon Tron/Snake
+  (alias d'import mutable + champ de snapshot `ag` pour Tanks, `gw`/`gh` pour Bomberman).
+- **Bomberman, piège évité** : `SD_SPIRAL` (spirale de mort subite) et `RING` (anneau du mode revanche) étaient
+  des **tables précalculées au chargement** à partir de GW/GH. Devenues des fonctions, recalculées dans `setGridB`.
+  Sans ça, la mort subite aurait fait tomber des blocs hors de l'arène et les revenants auraient tourné dans le vide.
+- **Équipes jusqu'à 5** : nouveaux modes 4v4, 2v2v2v2 (8 j), 3v3v3 (9 j), 5v5, 2v2v2v2v2 (10 j).
+  `'ABC'[winner]` devenait `undefined` pour les équipes D et E → passé à `'ABCDE'`.
+- **Palette** : 6 → 10 teintes. Au-delà de 8 il n'existe plus de couleurs toutes distinguables
+  (la palette daltonien sûre plafonne à 8) : c'est le **motif par siège** qui porte l'identification,
+  d'où le passage de `patterns.js` de 6 à **10 motifs**.
+- **HUD** : cartes créées depuis `MAX_SEATS` au lieu d'un `[0,1,2,3,4,5]` en dur, et colonnes plus étroites
+  sous 600 px pour que 10 cartes ne repoussent pas le plateau hors de l'écran.
+
 ## Limites connues (assumées)
+- **Bande passante de Pong à 10 joueurs** : Pong diffuse à **60 Hz** et sérialise **tous** les sièges à chaque tick
+  (~280 o/joueur). À 10 joueurs cela fait ≈ **180 Ko/s par client** (contre ≈ 110 à 6). Les autres jeux ne sont pas
+  concernés (Tanks/Bomberman 30 Hz, Tron 15 Hz, Snake 12 Hz). Remède évident si ça coince sur Render ou en 4G :
+  tronquer le tableau `players` au dernier siège occupé (`slice(0, lastUsed+1)` — les index restent valides puisque
+  `players[i].seat === i`), à condition que les clients masquent les cartes au-delà de `snap.players.length`.
 - Identité par **pseudo** sans comptes (mêmes pseudos = stats fusionnées). Reconnexion best-effort.
 - Spectateurs restent spectateurs même si un siège se libère (bouton 🪑 « Prendre un siège » hors partie).
 - Pas de TLS/auth/rate-limit (LAN de confiance).

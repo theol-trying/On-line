@@ -13,8 +13,11 @@
 // de petits canvas sur toute la session.
 
 // Glyphe affiché dans les cartes HUD pour que chacun apprenne « son » motif.
-export const SEAT_GLYPH = ['●', '▨', '⁙', '⌃', '▦', '◆'];
-export const SEAT_MOTIF = ['uni', 'rayé', 'pointillé', 'chevrons', 'quadrillé', 'losanges'];
+// 10 motifs : au-delà de 8 joueurs il n'existe plus de teintes toutes distinguables entre elles
+// (la palette daltonien sûre plafonne à 8), donc c'est le MOTIF qui porte l'identification.
+export const SEAT_GLYPH = ['●', '▨', '⁙', '⌃', '▦', '◆', '▧', '▬', '✚', '◗'];
+export const SEAT_MOTIF = ['uni', 'rayé', 'pointillé', 'chevrons', 'quadrillé', 'losanges', 'rayé inverse', 'lignes', 'croix', 'écailles'];
+export const SEAT_COUNT = SEAT_GLYPH.length;
 
 const cache = new Map();
 let ctxSeq = 0;   // un CanvasPattern est théoriquement réutilisable d'un contexte à l'autre, mais on ne parie pas
@@ -30,7 +33,7 @@ let ctxSeq = 0;   // un CanvasPattern est théoriquement réutilisable d'un cont
  * @returns {CanvasPattern|null} null pour le siège 0 (uni)
  */
 export function seatPattern(ctx, seat, opts) {
-  const i = (((seat | 0) % 6) + 6) % 6;
+  const i = (((seat | 0) % SEAT_COUNT) + SEAT_COUNT) % SEAT_COUNT;
   if (i === 0 || !ctx) return null;
   const o = opts || {};
   const size = Math.max(4, Math.round(o.size || 10));
@@ -57,10 +60,20 @@ export function seatPattern(ctx, seat, opts) {
     c.beginPath(); c.moveTo(0, s * 0.22); c.lineTo(s / 2, -s * 0.22); c.lineTo(s, s * 0.22); c.stroke();
   } else if (i === 4) {                           // quadrillage : un trait sur chaque bord (l'autre moitié vient de la tuile voisine)
     c.beginPath(); c.moveTo(0, 0); c.lineTo(0, s); c.moveTo(0, 0); c.lineTo(s, 0); c.stroke();
-  } else {                                        // losanges
+  } else if (i === 5) {                           // losanges
     c.beginPath();
     c.moveTo(s / 2, s * 0.14); c.lineTo(s * 0.86, s / 2); c.lineTo(s / 2, s * 0.86); c.lineTo(s * 0.14, s / 2);
     c.closePath(); c.fill();
+  } else if (i === 6) {                           // rayures diagonales inverses (miroir du motif 1)
+    c.beginPath(); c.moveTo(0, s); c.lineTo(s, 0); c.stroke();
+  } else if (i === 7) {                           // lignes horizontales
+    c.beginPath(); c.moveTo(0, 0); c.lineTo(s, 0); c.stroke();
+  } else if (i === 8) {                           // croix
+    c.lineWidth = lw * 0.9;
+    c.beginPath(); c.moveTo(s / 2, s * 0.18); c.lineTo(s / 2, s * 0.82); c.moveTo(s * 0.18, s / 2); c.lineTo(s * 0.82, s / 2); c.stroke();
+  } else {                                        // écailles : un arc sur le bord bas, qui se recolle d'une rangée à l'autre
+    c.beginPath(); c.arc(s / 2, s, s * 0.42, Math.PI, 2 * Math.PI); c.stroke();
+    c.beginPath(); c.arc(0, s / 2, s * 0.42, -Math.PI / 2, Math.PI / 2); c.stroke();
   }
 
   let pat = null;

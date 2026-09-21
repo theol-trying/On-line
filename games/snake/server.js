@@ -1,16 +1,16 @@
-// Jeu SNAKE multijoueur (Slither-like). 1 à 6 joueurs. FFA ou équipes.
+// Jeu SNAKE multijoueur (Slither-like). 1 à 10 joueurs. FFA ou équipes.
 // On grandit en mangeant ; toucher un mur ou un serpent (soi ou autre) = mort ; dernier en vie gagne. Solo = entraînement (score).
 import { GW as GW0, GH as GH0 } from '../../public/games/snake/shared.js';
 // Grille À L'ÉCHELLE du nombre de participants (chaque serpent occupe un nombre fixe de cases).
 let GW = GW0, GH = GH0;
 function setGrid(n) {
-  const side = Math.min(46, Math.round(GW0 * (1 + 0.13 * (Math.max(2, n) - 2))));   // 2 j : 30 … 6 j : 46
+  const side = Math.min(58, Math.round(GW0 * (1 + 0.13 * (Math.max(2, n) - 2))));   // 2 j : 30 · 6 j : 46 · 10 j : 58 (plafond)
   GW = side; GH = side;
 }
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 
 const GID = 'snake';
-const MAX_SEATS = 6;
+const MAX_SEATS = 10;
 const TICK_HZ = 12;
 const COUNTDOWN_TICKS = 3 * TICK_HZ;
 const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
@@ -23,9 +23,18 @@ const RUSH_TARGET = 20;        // food-rush : premier à ce score gagne
 const GHOST_TICKS = 5 * TICK_HZ, SHRINK_AMT = 4, ROCK_COUNT = 16;
 const VARIANT_NAMES = ['Classique', 'Murs traversants', 'Obstacles'];   // 0 / 1 / 2
 const SNDIFF = [{ err: 0.15, look: false }, { err: 0.05, look: true }, { err: 0, look: true }];   // IA : Facile / Normale / Difficile (inattention, anticipation à 2 cases)
-const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
+const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2, '4v4': 2, '2v2v2v2': 4, '3v3v3': 3, '5v5': 2, '2v2v2v2v2': 5 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
-function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
+// modes d'équipe proposés selon le nombre EXACT de participants (humains + bots) ; 5 équipes au maximum
+function validModes(N) {
+  const v = ['ffa'];
+  if (N === 4) v.push('2v2');
+  if (N === 6) v.push('2v2v2', '3v3');
+  if (N === 8) v.push('4v4', '2v2v2v2');
+  if (N === 9) v.push('3v3v3');
+  if (N === 10) v.push('5v5', '2v2v2v2v2');
+  return v;
+}
 
 // compression d'un chemin de cellules en sommets (mêmes que Tron) : on ne garde que les points de virage
 function compressSeg(cells) {
@@ -77,7 +86,7 @@ export function createSnake(room) {
     }
     const champ = winner >= 0 ? players.find(p => p.playing && p.team === winner) : null;
     pushHistory(GID, { when: Date.now(), mode, preset: 'snake',
-      winner: champ ? (nteams < nParts ? 'Équipe ' + 'ABC'[winner] : (champ.name || ('P' + (champ.seat + 1)))) : 'Égalité',
+      winner: champ ? (nteams < nParts ? 'Équipe ' + 'ABCDE'[winner] : (champ.name || ('P' + (champ.seat + 1)))) : 'Égalité',
       durationSec: Math.round(endTick / TICK_HZ), nParts });
     save(); markDirty(GID);
   }
@@ -332,4 +341,4 @@ export function createSnake(room) {
   return { onJoin, onLeave, onRename, onMessage, tick: tick_, isIdle: editable };
 }
 
-export default { meta: { id: GID, name: 'Snake', min: 1, max: 6, tickHz: TICK_HZ, desc: 'Serpents multijoueur — mange, grandis, évite murs et serpents ; dernier en vie gagne' }, create: createSnake };
+export default { meta: { id: GID, name: 'Snake', min: 1, max: 10, tickHz: TICK_HZ, desc: 'Serpents multijoueur — mange, grandis, évite murs et serpents ; dernier en vie gagne' }, create: createSnake };

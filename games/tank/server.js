@@ -1,10 +1,17 @@
 // Jeu TANK COMBAT v2 — arènes à murs destructibles, power-ups, mines, collision tank-tank, FFA/équipes, mode manches.
-import { ARENA, TANK_R, SHELL_R, BLK, G } from '../../public/games/tank/shared.js';
+import { ARENA as ARENA0, TANK_R, SHELL_R, BLK, G as G0 } from '../../public/games/tank/shared.js';
+// Arène dimensionnée au nombre de participants : la taille des BLOCS ne change pas (les tanks gardent
+// leur taille relative), c'est le NOMBRE de blocs qui augmente. Le client reçoit `ag` et se recale.
+let G = G0, ARENA = ARENA0;
+function setGridT(n) {
+  G = G0 + 2 * Math.max(0, Math.min(2, Math.ceil((Math.min(8, n) - 4) / 2)));   // ≤4 j : 15 · 5-6 j : 17 · 7-8 j : 19 (impair = vrai centre)
+  ARENA = G * BLK;
+}
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { dailyRng } from '../../dayseed.js';
 
 const GID = 'tank';
-const MAX_SEATS = 6;
+const MAX_SEATS = 8;          // Tanks plafonne à 8 : au-delà l'arène devient illisible même agrandie
 const TICK_HZ = 30;
 const COUNTDOWN_TICKS = 3 * TICK_HZ;
 const TANK_SPD = 2.4, REV = 0.6, ROT = 0.085, SPEED_MUL = 1.5;
@@ -20,10 +27,23 @@ const MUD_COUNT = 10, MUD_MUL = 0.5;               // zones de boue : ralentisse
 const PU_TYPES = ['rapid', 'triple', 'shield', 'speed', 'pierce', 'mine', 'repair', 'emp', 'homing', 'camo', 'radar'];
 const TKDIFF = [{ skip: 0.45, fireA: 0.14, fireP: 0.5 }, { skip: 0.12, fireA: 0.22, fireP: 0.9 }, { skip: 0, fireA: 0.3, fireP: 1 }];   // IA : Facile / Normale / Difficile (réactivité, fenêtre et probabilité de tir)
 const WIN_TARGETS = [1, 3, 5];
-const SPAWNS = [[1, 1], [G - 2, G - 2], [G - 2, 1], [1, G - 2], [(G - 1) / 2 | 0, 1], [(G - 1) / 2 | 0, G - 2]];
-const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2 };
+// Positions de départ calculées : 4 coins, puis milieux haut/bas, puis milieux gauche/droite.
+// L'ordre des 6 premières reproduit exactement l'ancien tableau en dur (aucun changement à ≤ 6 joueurs).
+function spawnsFor(n) {
+  const a = 1, b = G - 2, mx = (G - 1) / 2 | 0, my = (G - 1) / 2 | 0;
+  return [[a, a], [b, b], [b, a], [a, b], [mx, a], [mx, b], [a, my], [b, my]].slice(0, Math.max(2, n));
+}
+let SPAWNS = spawnsFor(MAX_SEATS);
+const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2, '4v4': 2, '2v2v2v2': 4, '3v3v3': 3, '5v5': 2, '2v2v2v2v2': 5 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
-function validModes(N) { const v = ['ffa']; if (N === 4) v.push('2v2'); if (N === 6) v.push('2v2v2', '3v3'); return v; }
+// modes d'équipe proposés selon le nombre EXACT de participants (humains + bots) ; Tanks plafonne à 8
+function validModes(N) {
+  const v = ['ffa'];
+  if (N === 4) v.push('2v2');
+  if (N === 6) v.push('2v2v2', '3v3');
+  if (N === 8) v.push('4v4', '2v2v2v2');
+  return v;
+}
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const bidx = (gx, gy) => gy * G + gx;
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -75,7 +95,7 @@ export function createTank(room) {
     }
     const champ = winner >= 0 ? players.find(p => p.playing && p.team === winner) : null;
     pushHistory(GID, { when: Date.now(), mode, preset: 'tank',
-      winner: champ ? (nteams < nParts ? 'Équipe ' + 'ABC'[winner] : (champ.name || ('P' + (champ.seat + 1)))) : 'Égalité',
+      winner: champ ? (nteams < nParts ? 'Équipe ' + 'ABCDE'[winner] : (champ.name || ('P' + (champ.seat + 1)))) : 'Égalité',
       durationSec: Math.round(endTick / TICK_HZ), nParts });
     save(); markDirty(GID);
   }
@@ -142,6 +162,7 @@ export function createTank(room) {
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
     if (matchWon) { players.forEach(p => p.score = 0); matchWon = false; matchWinner = null; }
+    setGridT(N); SPAWNS = spawnsFor(N);          // arène + départs dimensionnés AVANT la génération (buildArena réalloue `blocks`)
     buildArena(parts);
     nParts = N; deaths = 0; endTick = 0; winner = null; fx = []; shells = []; mines = []; pickups = [];
     tick = 0;                       // remis à 0 AVANT placeAtSpawn : sinon l'invuln se calcule sur le tick (élevé) de la manche précédente -> joueurs invincibles au rematch
@@ -344,6 +365,7 @@ export function createTank(room) {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
       round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, winTarget, gen: arenaStyle, ff,
+      ag: G,                                                                       // côté de la grille : le client recale ARENA = ag × BLK
       grid: sendGrid ? g : undefined,
       shells: shells.map(s => ({ x: Math.round(s.x), y: Math.round(s.y), vx: Math.round(s.vx * 10) / 10, vy: Math.round(s.vy * 10) / 10, o: s.o, p: !!s.pierce, h: !!s.homing })),
       mines: mines.map(m => ({ x: m.x, y: m.y, o: m.owner, armed: tick >= m.arm })),
@@ -414,4 +436,4 @@ export function createTank(room) {
   return { onJoin, onLeave, onRename, onMessage, tick: tick_, isIdle: editable };
 }
 
-export default { meta: { id: GID, name: 'Tanks', min: 2, max: 6, tickHz: TICK_HZ, desc: 'Combat de tanks — murs destructibles, power-ups, mines, FFA/équipes, manches' }, create: createTank };
+export default { meta: { id: GID, name: 'Tanks', min: 2, max: 8, tickHz: TICK_HZ, desc: 'Combat de tanks — 2 à 8 · murs destructibles, power-ups, mines, FFA/équipes, manches' }, create: createTank };

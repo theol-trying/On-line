@@ -428,6 +428,19 @@ body.game-bomb:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.5),0 0 0 3p
    ============================================================================ */
 .gpad{ display:none; }                                  /* desktop : clavier, pas de pavé tactile */
 @media (max-width:600px){
+  /* HUD jusqu'à 10 joueurs : colonnes plus étroites et cartes compactes, sinon la liste
+     des joueurs mange la moitié de l'écran et repousse le plateau hors de vue. */
+  #hud, .hud{ grid-template-columns:repeat(auto-fit,minmax(108px,1fr)); gap:6px; }
+  .pc{ padding:7px 8px 7px 9px; gap:7px; }
+  .pn{ font-size:12px; gap:4px; }
+  .pn .sc{ font-size:11px; }
+  .lv{ font-size:12px; margin-top:2px; letter-spacing:0; }
+  .av{ width:13px; height:13px; }
+  .readybar{ padding:6px 9px; }
+  .readylist{ gap:4px 9px; }
+  .readylist .rdy{ font-size:12px; }                    /* 10 pseudos dans la barre « Prêt » sans faire 4 lignes */
+  body.playing .pc{ padding:5px 7px 5px 8px; }
+  body.playing .lv{ font-size:11px; margin-top:1px; }
   /* manette : croix directionnelle à gauche, actions à droite.
      Compat vieux iOS : PAS de clamp()/min() (tailles px fixes) ni de flex-gap (espacement par marges). */
   .gpad{ display:flex; align-items:flex-end; justify-content:space-between; width:100%; max-width:480px; margin:6px auto 0; }
