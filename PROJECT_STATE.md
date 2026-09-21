@@ -305,12 +305,59 @@ Ce n'est pas la défense qui devient dure, c'est le trafic au centre.
 - **HUD** : cartes créées depuis `MAX_SEATS` au lieu d'un `[0,1,2,3,4,5]` en dur, et colonnes plus étroites
   sous 600 px pour que 10 cartes ne repoussent pas le plateau hors de l'écran.
 
+## Lot « réseau & fluidité » (septembre 2026)
+Mesuré, pas estimé : instantané Pong réaliste à 10 joueurs reconstruit et pesé dans un navigateur.
+
+| | Avant | Après |
+|---|---|---|
+| Instantané complet | 2 966 o | — |
+| Message moyen après omission des clés inchangées | — | 2 460 o (**−17 %**) |
+| Débit par client (10 joueurs) | **174 Ko/s** | **72 Ko/s** (**−59 %**) |
+
+**Déjà en place avant ce lot** (donc pas à refaire) : `socket.setNoDelay(true)` dans `ws.js` (Nagle désactivé —
+l'erreur classique qui ajoute 40 ms), interpolation par tampon d'instantanés dans les **5** clients, entrées
+envoyées **au changement** seulement, delta sur `geo`/`grid`, diffusion à 4 Hz hors partie.
+
+**1. Une seule trame pour tout le monde** — `conn.send()` appelait `encodeFrame()` **par client** : à 10 joueurs
+× 60 Hz, 600 encodages de ~3 Ko par seconde. `wsFrame()` encode une fois, `conn.sendRaw()` écrit le même Buffer
+sur toutes les sockets. Gain CPU serveur → moins de gigue de tick → plus fluide pour tout le monde.
+
+**2. Omission des clés inchangées** — le hub compare chaque clé de premier niveau à la diffusion précédente et
+n'envoie que ce qui a bougé ; le client fusionne sur l'état précédent du jeu (`stateCache` dans `app.js`, **un seul
+point pour les 5 jeux**). Générique : aucun code de jeu modifié.
+- `fx` est **toujours** envoyé (`ALWAYS`) : c'est du ponctuel, le fusionner rejouerait les impacts en boucle.
+- Instantané **complet** forcé toutes les 2 s, à chaque arrivée et à chaque changement de jeu → un client ne peut
+  pas rester désynchronisé.
+- La fusion crée un **nouvel objet** à chaque fois : les instantanés déjà empilés dans les tampons d'interpolation
+  ne doivent jamais être modifiés après coup.
+
+**3. Pong à 30 Hz seulement quand c'est utile** — la simulation reste à 60 Hz (précision physique intacte), seule
+la diffusion tombe à 30 Hz **à partir de 7 participants**, là où le débit devient gênant. En dessous, rien ne change :
+**aucune latence ajoutée pour une partie normale**. Le hub annonce la cadence dans `shz` et le client Pong aligne son
+retard d'interpolation (33 ms à 60 Hz, 50 ms à 30 Hz) — sans ça le rendu saccaderait.
+- **Piège évité** : les 5 jeux font `fx = []` en tête de `update()`, donc sauter une diffusion **perdait** impacts,
+  explosions et morts. Le hub accumule désormais les `fx` des ticks non diffusés et les joint au message suivant.
+
+**Validation** (aucun runtime JS sur le poste) : la logique diff + fusion a été **rejouée dans un navigateur sur
+600 ticks** avec changement de jeu, arrivée d'un client en cours de partie, bascule 60→30 Hz, `geo` alternant
+objet/inchangé/null et `stats` ponctuel → **0 écart de reconstitution**, **46 fx émis / 46 reçus**, et un client
+démarrant en cours de flux se resynchronise à l'identique.
+
 ## Limites connues (assumées)
-- **Bande passante de Pong à 10 joueurs** : Pong diffuse à **60 Hz** et sérialise **tous** les sièges à chaque tick
-  (~280 o/joueur). À 10 joueurs cela fait ≈ **180 Ko/s par client** (contre ≈ 110 à 6). Les autres jeux ne sont pas
-  concernés (Tanks/Bomberman 30 Hz, Tron 15 Hz, Snake 12 Hz). Remède évident si ça coince sur Render ou en 4G :
-  tronquer le tableau `players` au dernier siège occupé (`slice(0, lastUsed+1)` — les index restent valides puisque
-  `players[i].seat === i`), à condition que les clients masquent les cartes au-delà de `snap.players.length`.
+- **Reste à gagner sur le réseau, non fait** (par ordre de rendement) :
+  1. **permessage-deflate** — mesuré à **−77 %** sur l'instantané Pong (2 957 → 666 o). Transparent pour le code de
+     jeu. En négociant `server_no_context_takeover`, on compresse **une fois par tick** et on diffuse la même trame.
+     Non fait : ça touche le WebSocket écrit à la main, une erreur d'un octet casse tout le site, et rien n'est
+     testable en réel depuis ce poste. À livrer avec un coupe-circuit par variable d'environnement.
+  2. **Alléger le tableau `players`** — il pèse **79 %** du paquet et réexpédie 60 fois par seconde des choses
+     statiques (pseudo, siège, équipe, `bot`, `connected`). N'envoyer ces champs qu'au changement.
+  3. **Prédiction locale** de sa propre raquette : le seul levier qui retire vraiment l'aller-retour réseau du
+     ressenti de contrôle.
+- Hébergement Render en **Europe (Frankfurt)** — confirmé par l'utilisateur, donc ~15-25 ms de ping : le ping
+  résiduel vient du code et du réseau local, pas de la région.
+- La boucle serveur utilise `setInterval(step, 1000/hz)` : à 60 Hz, 16,67 ms n'est pas entier → le jeu tourne en
+  réalité à ~62 Hz avec une légère dérive. Cosmétique (les durées en ticks sont 4 % courtes), pas un problème de
+  fluidité. Un pas fixe à accumulateur serait plus juste.
 - Identité par **pseudo** sans comptes (mêmes pseudos = stats fusionnées). Reconnexion best-effort.
 - Spectateurs restent spectateurs même si un siège se libère (bouton 🪑 « Prendre un siège » hors partie).
 - Pas de TLS/auth/rate-limit (LAN de confiance).

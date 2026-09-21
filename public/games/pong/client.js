@@ -32,7 +32,10 @@ const THEMES = {
   crt: { bg: '#04140b', field: '#06190e', grid: 'rgba(120,255,170,0.07)', ball: '#d8ffe4' },
   light: { bg: '#e4e8f3', field: '#d6dbe9', grid: 'rgba(0,0,0,0.06)', ball: '#1a1d2e' },
 };
-const INTERP_MS = 33;
+// Retard d'interpolation : il doit couvrir un peu plus d'un intervalle entre deux instantanés.
+// Le hub diffuse à 60 Hz, et à 30 Hz seulement quand il y a 7 participants ou plus ; il annonce
+// la cadence effective dans `shz` et on s'aligne dessus (sinon, à 30 Hz, le rendu saccade).
+let INTERP_MS = 33;
 
 // musique : arcade néon — nappe aérienne, basse ronde, blips lead ; climax (échanges rapides) = charley + tempo
 let _lastCount = -1, _prevSd = false;   // décompte musical + riser de mort subite
@@ -211,6 +214,7 @@ export default (function () {
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
+    if (m.shz) INTERP_MS = m.shz >= 50 ? 33 : 50;   // cadence de diffusion annoncée par le hub
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     (m.fx || []).forEach(f => {

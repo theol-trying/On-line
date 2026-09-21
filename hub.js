@@ -1,6 +1,6 @@
 // Hub multijeux : registre des jeux, identité/pseudo/token, UNE salle active, lobby, routage, boucle de tick.
 // Une seule partie active à la fois (les joueurs choisissent le jeu dans le lobby quand la salle est libre).
-import { attachWebSocket } from './ws.js';
+import { attachWebSocket, wsFrame } from './ws.js';
 import { lbMsg, dirtyGames, anyDirty, clearDirty, reset, getAvatar, setAvatar, dailyMsg, dailyChanged, resetDaily } from './leaderboard.js';
 import pong from './games/pong/server.js';
 import tron from './games/tron/server.js';
@@ -17,11 +17,23 @@ let game = null;                              // instance du jeu actif
 let members = [];                             // membres connectés { id, name, conn, token, role }
 const identities = new Map();                 // token -> { id, name }  (reprise après coupure)
 let idSeq = 1;
-let loop = null, curHz = 0, idleTick = 0, wasIdle = true;
+let loop = null, curHz = 0, wasIdle = true;
 let tour = null;                               // tournoi : { order:[ids mélangés], idx, scores:{nom:pts}, wait (ticks avant le jeu suivant) }
 let dailyOn = false;                           // « Défi du jour » : cartes déterministes (Tanks/Bomberman) — réglage de plateforme, game master only
 const chatLog = [];                            // 20 derniers messages du mini-chat (contexte pour un arrivant)
 const CHAT_MAX = 20;
+/* ---------- diffusion des instantanés : allègements réseau (transparents pour les jeux) ----------
+   1. Une trame WebSocket encodée UNE fois pour tout le monde (cf. wsFrame).
+   2. Les clés de l'instantané qui n'ont pas changé depuis la diffusion précédente sont OMISES ;
+      le client fusionne sur son état précédent (une clé absente = inchangée). Rafraîchissement
+      complet périodique et à chaque arrivée/changement de jeu : un client ne peut pas se désynchroniser.
+   3. Pong (60 Hz) passe à 30 Hz de diffusion à partir de 7 participants — là où le débit devient
+      gênant. En dessous, rien ne change : aucune latence ajoutée pour une partie normale. */
+let frameNo = 0;
+let pendingFx = [];                            // fx des ticks non diffusés (sinon impacts/explosions perdus : les jeux vident fx à chaque tick)
+let prevSent = {};                             // clé -> dernière valeur diffusée (sérialisée)
+let fullNext = true;                           // force un instantané complet au prochain envoi
+const ALWAYS = new Set(['t', 'g', 'fx']);      // jamais omis : routage, et fx est ponctuel (le fusionner le rejouerait en boucle)
 const RECONNECT_GRACE = 12000;                 // délai pour reprendre son siège après une coupure (F5) en pleine partie
 const pendingLeaves = new Map();               // token -> { member, timer } : joueurs déconnectés dont le siège est gardé
 const newToken = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -83,6 +95,7 @@ function pick(id) {
   if (game && game.dispose) game.dispose();
   activeId = id; game = null; ensureGame();
   for (const m of members) joinGame(m);          // tout le monde rejoint le nouveau jeu
+  fullNext = true; pendingFx = [];               // autre jeu = autres clés : on repart d'un instantané complet
   setLoop(); broadcastRoom();
 }
 
@@ -106,12 +119,27 @@ function step() {
   wasIdle = idleNow;
   if (tour && tour.wait > 0 && --tour.wait <= 0) { tour.wait = 0; pick(tour.order[tour.idx]); room.broadcast(tourMsg()); }   // au jeu suivant !
   if (snap) {
+    frameNo++;
+    if (snap.fx && snap.fx.length) pendingFx.push.apply(pendingFx, snap.fx);   // conservés même si ce tick n'est pas diffusé
     // plein régime en jeu ; en lobby/pause/fin on diffuse ~4×/s (économie CPU/réseau)
     const live = snap.gs === 'play' || snap.gs === 'countdown';
-    const stride = Math.max(1, Math.round(curHz / 4));
-    if (live || (idleTick++ % stride === 0)) {
-      const s = JSON.stringify({ t: 'state', g: activeId, ...snap });
-      for (const m of members) if (m.conn.readyState === 1) m.conn.send(s);
+    const parts = (snap.connected || 0) + (snap.botCount || 0);
+    const halve = live && curHz >= 60 && parts >= 7;      // Pong à 7 participants et + : 30 Hz (les clients interpolent)
+    const stride = live ? (halve ? 2 : 1) : Math.max(1, Math.round(curHz / 4));
+    if (frameNo % stride === 0) {
+      const full = { t: 'state', g: activeId, ...snap, fx: pendingFx, shz: Math.round(curHz / stride) };
+      pendingFx = [];
+      if (fullNext || frameNo % (curHz * 2) < stride) { prevSent = {}; fullNext = false; }   // filet : instantané complet toutes les ~2 s
+      const out = {};
+      for (const k in full) {
+        const v = full[k];
+        if (v === undefined) continue;                     // le jeu l'omet déjà (delta grid/geo) : on n'y touche pas
+        if (ALWAYS.has(k)) { out[k] = v; continue; }
+        const sv = JSON.stringify(v);
+        if (prevSent[k] !== sv) { out[k] = v; prevSent[k] = sv; }
+      }
+      const buf = wsFrame(JSON.stringify(out));            // encodée une seule fois pour tous les clients
+      for (const m of members) if (m.conn.readyState === 1) m.conn.sendRaw(buf);
     }
   }
   if (anyDirty()) { for (const gid of dirtyGames()) { const s = lbMsg(gid); for (const m of members) if (m.conn.readyState === 1) m.conn.send(s); } clearDirty(); }
@@ -220,6 +248,7 @@ function onConnection(conn, token) {
     if (tour) conn.send(JSON.stringify(tourMsg()));     // tournoi en cours : resynchronise le bandeau
     conn.send(dailyMsg());                              // classement du jour
     if (chatLog.length) conn.send(JSON.stringify({ t: 'chatlog', log: chatLog }));   // contexte du mini-chat
+    fullNext = true;                                    // l'arrivant n'a aucun état : prochain instantané complet
     broadcastRoom();
     wire(member);
     return;
