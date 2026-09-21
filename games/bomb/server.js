@@ -1,5 +1,5 @@
 // Jeu BOMBERMAN v2 — équipes, bonus avancés, malus, mort subite, chaînage. 1 à 8 joueurs.
-import { GW as GW0, GH as GH0 } from '../../public/games/bomb/shared.js';
+import { GW as GW0, GH as GH0, CELL } from '../../public/games/bomb/shared.js';   // CELL reste FIXE (la grille grandit en nombre de cases, pas en taille de case)
 // Grille dimensionnée au nombre de participants : la CELLULE garde sa taille (personnages et souffles
 // restent proportionnés), c'est le nombre de cases qui augmente. Dimensions IMPAIRES obligatoires :
 // le damier de piliers (x et y pairs) et les générateurs symétriques en dépendent.

@@ -5,8 +5,9 @@
 > **une seule partie active à la fois** (jeu choisi dans un lobby commun).
 > **Jeux : Pong · Tron · Tanks · Bomberman · Snake.** **Zéro dépendance** (WebSocket implémenté à la main). Un appareil par joueur.
 > **En production** : GitHub `theol-trying/On-line` → **Render** (HTTPS/`wss://`) + **Upstash Redis** (classement + avatars).
-> Consignes projet permanentes : **l'assistant n'exécute ni Node ni npm** (validation runtime côté utilisateur) ;
-> il gère en revanche **git** (commit + push) depuis septembre 2026.
+> Consignes projet permanentes : **zéro dépendance npm, zéro build, aucun fichier binaire** ; secrets via `process.env` uniquement.
+> L'assistant gère **git** (commit + push) depuis septembre 2026, et **Node est installé depuis le 21/09/2026** :
+> il lance donc lui-même le serveur et les tests d'intégration (voir « Tester » ci-dessous). `npm install` reste proscrit.
 
 ## Lancer
 ```
@@ -17,6 +18,18 @@ Ouvre l'URL **LAN** affichée (`http://<IP>:3000`) sur chaque appareil (même Wi
 Client en **modules ES** → passe **obligatoirement** par le serveur (pas en `file://`). Après modif : **Ctrl+F5**.
 Test solo (1 PC + 1 tél) : ouvrir **plusieurs onglets PC** = plusieurs joueurs (mettre un **pseudo différent** par onglet).
 Pages annexes : `/stats?game=<id>` (HTML lecture seule), `/leaderboard.json?game=<id>` (`<id>` = pong|tron|tank|bomb).
+
+## Tester (depuis l'installation de Node, 21/09/2026)
+```
+node --check <fichier>        # syntaxe (ne détecte PAS les identifiants manquants à l'exécution)
+node server.js                # serveur local sur :3000 ; .claude/launch.json permet aussi preview_start
+HUB_TRACE=1 node server.js    # journalise chaque diffusion : « f=<tick> stride=<n> full=<bool> membres=<n> »
+```
+**Sonde d'intégration** : Node ≥ 22 fournit un `WebSocket` natif, donc un simple script `.mjs` peut ouvrir 10 vrais
+clients, lancer une manche et vérifier arènes, protocole et débit — sans aucune dépendance. C'est ainsi qu'ont été
+attrapés le crash `CELL is not defined` et le delta envoyé aux arrivants (voir ci-dessous).
+> **Leçon** : `node --check` ne suffit pas. Le crash de Bomberman était un `ReferenceError` à l'exécution,
+> invisible pour un contrôle de syntaxe **et** pour un banc d'essai qui n'exécute pas le code.
 
 ## Architecture (modules ES)
 ```
@@ -342,6 +355,32 @@ retard d'interpolation (33 ms à 60 Hz, 50 ms à 30 Hz) — sans ça le rendu sa
 600 ticks** avec changement de jeu, arrivée d'un client en cours de partie, bascule 60→30 Hz, `geo` alternant
 objet/inchangé/null et `stats` ponctuel → **0 écart de reconstitution**, **46 fx émis / 46 reçus**, et un client
 démarrant en cours de flux se resynchronise à l'identique.
+
+## Deux bugs de production trouvés en exécutant (21/09/2026)
+Découverts dès la première sonde d'intégration, tous deux **déjà déployés** :
+- **`CELL is not defined` — Bomberman faisait planter le serveur entier** dès qu'on sélectionnait le jeu.
+  Cause : dans le lot « 10 joueurs », en retirant `ARENA` (inutilisé) de l'import de `games/bomb/server.js`,
+  `CELL` avait été retiré avec — or il servait partout (positions, collisions, portées). `node --check` ne peut
+  pas voir ça : c'est une erreur d'exécution, pas de syntaxe.
+- **Les arrivants recevaient un delta au lieu d'un instantané complet.** Le chemin de connexion *normal* n'avait
+  jamais reçu `conn.send(dailyMsg())`, l'historique du chat ni `fullNext = true` : un `replace_all` d'un lot
+  précédent n'avait modifié que le chemin de *reconnexion*. Symptôme : un joueur qui rejoint voyait un HUD vide
+  ou cassé jusqu'au rafraîchissement complet suivant (≤ 2 s), et n'avait ni classement du jour ni historique de chat.
+
+## Mesures réelles (sonde 10 clients, serveur local)
+| Jeu | Participants | Arène | Cadence | Débit/client |
+|---|---|---|---|---|
+| Pong | 10 | 1020×1020 | 30 Hz | **57,9 Ko/s** (contre 174 avant le lot réseau) |
+| Pong | 4 | 630×630 | 60 Hz | **113,6 Ko/s** |
+| Tron | 10 | grille 92 | 15 Hz | 5,5 Ko/s |
+| Snake | 10 | grille 58 | 12 Hz | 5,4 Ko/s |
+| Tanks | 8 | grille 19 | 30 Hz | 11,6 Ko/s |
+| Bomberman | 8 | grille 17 | 30 Hz | 10,3 Ko/s |
+
+> **Contre-intuitif et important** : une partie à **4** joueurs coûte **plus cher** qu'à 10 (113 contre 58 Ko/s).
+> Deux raisons cumulées : elle reste à 60 Hz, et le tableau `players` sérialise **tous les `MAX_SEATS` sièges**
+> même vides — passer de 6 à 10 sièges a donc renchéri le cas courant. C'est l'argument le plus fort pour
+> l'optimisation « tronquer `players` au dernier siège occupé », qui profiterait surtout aux petites parties.
 
 ## Limites connues (assumées)
 - **Reste à gagner sur le réseau, non fait** (par ordre de rendement) :

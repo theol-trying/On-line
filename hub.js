@@ -34,6 +34,7 @@ let pendingFx = [];                            // fx des ticks non diffusés (si
 let prevSent = {};                             // clé -> dernière valeur diffusée (sérialisée)
 let fullNext = true;                           // force un instantané complet au prochain envoi
 const ALWAYS = new Set(['t', 'g', 'fx']);      // jamais omis : routage, et fx est ponctuel (le fusionner le rejouerait en boucle)
+const TRACE = !!process.env.HUB_TRACE;         // HUB_TRACE=1 : journalise chaque diffusion (complète ou delta) — mis en const, process.env est lent
 const RECONNECT_GRACE = 12000;                 // délai pour reprendre son siège après une coupure (F5) en pleine partie
 const pendingLeaves = new Map();               // token -> { member, timer } : joueurs déconnectés dont le siège est gardé
 const newToken = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -129,7 +130,9 @@ function step() {
     if (frameNo % stride === 0) {
       const full = { t: 'state', g: activeId, ...snap, fx: pendingFx, shz: Math.round(curHz / stride) };
       pendingFx = [];
-      if (fullNext || frameNo % (curHz * 2) < stride) { prevSent = {}; fullNext = false; }   // filet : instantané complet toutes les ~2 s
+      const wasFull = fullNext || frameNo % (curHz * 2) < stride;
+      if (wasFull) { prevSent = {}; fullNext = false; }   // filet : instantané complet toutes les ~2 s
+      if (TRACE) console.log('[trace] f=' + frameNo + ' stride=' + stride + ' full=' + wasFull + ' membres=' + members.length);
       const out = {};
       for (const k in full) {
         const v = full[k];
@@ -264,6 +267,9 @@ function onConnection(conn, token) {
   sendAvatars(conn);
   for (const meta of META) conn.send(lbMsg(meta.id)); // tous les classements (sinon vides au changement de jeu sans recharger)
   if (tour) conn.send(JSON.stringify(tourMsg()));     // tournoi en cours : resynchronise le bandeau
+  conn.send(dailyMsg());                              // classement du jour
+  if (chatLog.length) conn.send(JSON.stringify({ t: 'chatlog', log: chatLog }));   // contexte du mini-chat
+  fullNext = true;                                    // l'arrivant n'a aucun état : prochain instantané COMPLET (sinon il reçoit un delta illisible)
   broadcastRoom();
   wire(member);
 }
