@@ -76,9 +76,13 @@ const server = http.createServer(async (req, res) => {
 attach(server);
 
 server.listen(PORT, () => {
+  console.log('\n🎮  Plateforme multijeux démarrée (zéro dépendance) — jeux : ' + GAME_META.map(g => g.name).join(', '));
+  if (process.env.RENDER) {                       // en ligne : l'IP du conteneur n'a aucun sens, Render affiche déjà l'URL publique
+    console.log(`   En ligne · port ${PORT} · Node ${process.version}\n`);
+    return;
+  }
   const nets = os.networkInterfaces();
   const lan = Object.values(nets).flat().find(n => n && n.family === 'IPv4' && !n.internal);
-  console.log('\n🎮  Plateforme LAN démarrée (zéro dépendance) — jeux : ' + GAME_META.map(g => g.name).join(', '));
   console.log(`   Local :  http://localhost:${PORT}`);
   if (lan) console.log(`   LAN   :  http://${lan.address}:${PORT}   (ouvrir sur les autres machines du réseau)\n`);
 });

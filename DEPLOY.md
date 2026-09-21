@@ -32,13 +32,24 @@ Le serveur (`server.js`) utilise **déjà** `process.env.PORT` → aucun changem
    - *New* → *Web Service* → connecte ton repo GitHub
    - Render lit `render.yaml` et remplit tout seul. Sinon, en manuel :
      - Runtime : **Node**
-     - Build Command : `npm install`
+     - Build Command : **laisser VIDE** ⚠️
      - Start Command : `npm start`
      - Plan : **Free**
    - *Create Web Service*
 
+   > ⚠️ **Build Command vide, c'est important.** Le projet n'a **aucune dépendance** : `npm install`
+   > (ou `yarn install`, que Render met parfois par défaut) ne sert à rien, régénère un lockfile à chaque
+   > build et ouvre une porte par laquelle une dépendance pourrait s'introduire sans qu'on le veuille.
+   > La version de Node est fixée par **`.node-version`** (24) et bornée par `engines` dans `package.json` :
+   > sans ça, Render prend la **dernière** version publiée et un déploiement peut basculer tout seul sur un
+   > Node majeur jamais testé.
+
 3. Au bout de ~1 min tu obtiens une URL publique :
-   `https://pong-line-xxxx.onrender.com` → partage-la, tout le monde peut jouer. 🎮
+   `https://on-line.onrender.com` → partage-la, tout le monde peut jouer. 🎮
+
+> **Une seule instance, toujours.** Le hub garde la salle et la partie **en mémoire** : avec deux instances,
+> les joueurs tomberaient sur des serveurs différents et ne se verraient jamais. Ne pas activer l'autoscaling.
+> (`WEB_CONCURRENCY` que Render positionne est sans effet ici : le serveur ne fait pas de clustering.)
 
 ## Méthode 2 — autres hébergeurs
 Le code marche aussi sur **Railway**, **Fly.io**, **Glitch** : même principe (Node + `npm start` + WebSocket supporté).

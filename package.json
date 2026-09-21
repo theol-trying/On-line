@@ -1,13 +1,16 @@
 {
   "name": "pong-line",
   "version": "1.0.0",
+  "private": true,
+  "license": "UNLICENSED",
   "description": "Plateforme multijeux en ligne — serveur Node.js autoritatif, ZERO dépendance (WebSocket natif + Upstash REST via fetch). Déployable sur Render.",
   "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
+  "comment": "Aucune dépendance, et il ne doit jamais y en avoir : le serveur WebSocket est écrit à la main et Upstash passe par le fetch natif. La borne haute de `engines` évite qu'un déploiement bascule tout seul sur un Node majeur non testé ; .node-version fixe la version exacte utilisée en ligne.",
   "engines": {
-    "node": ">=18"
+    "node": ">=20 <27"
   }
 }
