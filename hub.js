@@ -1,7 +1,7 @@
 // Hub multijeux : registre des jeux, identité/pseudo/token, UNE salle active, lobby, routage, boucle de tick.
 // Une seule partie active à la fois (les joueurs choisissent le jeu dans le lobby quand la salle est libre).
 import { attachWebSocket } from './ws.js';
-import { lbMsg, dirtyGames, anyDirty, clearDirty, reset, getAvatar, setAvatar } from './leaderboard.js';
+import { lbMsg, dirtyGames, anyDirty, clearDirty, reset, getAvatar, setAvatar, dailyMsg, dailyChanged, resetDaily } from './leaderboard.js';
 import pong from './games/pong/server.js';
 import tron from './games/tron/server.js';
 import tank from './games/tank/server.js';
@@ -19,6 +19,9 @@ const identities = new Map();                 // token -> { id, name }  (reprise
 let idSeq = 1;
 let loop = null, curHz = 0, idleTick = 0, wasIdle = true;
 let tour = null;                               // tournoi : { order:[ids mélangés], idx, scores:{nom:pts}, wait (ticks avant le jeu suivant) }
+let dailyOn = false;                           // « Défi du jour » : cartes déterministes (Tanks/Bomberman) — réglage de plateforme, game master only
+const chatLog = [];                            // 20 derniers messages du mini-chat (contexte pour un arrivant)
+const CHAT_MAX = 20;
 const RECONNECT_GRACE = 12000;                 // délai pour reprendre son siège après une coupure (F5) en pleine partie
 const pendingLeaves = new Map();               // token -> { member, timer } : joueurs déconnectés dont le siège est gardé
 const newToken = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
@@ -30,8 +33,10 @@ const room = {
   send(m, obj) { if (m && m.conn.readyState === 1) m.conn.send(JSON.stringify(obj)); },
 };
 
-function ensureGame() { if (!game) game = GAMES[activeId].create(room); }
-function roomMsg() { return { t: 'room', active: activeId, host: hostId(), players: members.map(m => ({ id: m.id, name: m.name, role: m.role, ready: !!m.ready })) }; }
+const SYS = {};                                // pseudo-membre pour les messages SYSTÈME poussés aux jeux (jamais égal à un vrai membre -> seatOf renvoie -1)
+function applyDaily() { if (game) game.onMessage(SYS, { t: 'daily', on: dailyOn }); }   // re-poussé à chaque création de jeu : le réglage survit aux changements de jeu
+function ensureGame() { if (!game) { game = GAMES[activeId].create(room); applyDaily(); } }
+function roomMsg() { return { t: 'room', active: activeId, host: hostId(), daily: dailyOn, players: members.map(m => ({ id: m.id, name: m.name, role: m.role, ready: !!m.ready })) }; }
 // Game master = détenteur de la clé ADMIN_KEY s'il est connecté, sinon le 1er joueur connecté (repli).
 function hostId() {
   const gm = members.find(m => m.gm);
@@ -41,6 +46,8 @@ function hostId() {
 }
 // Réglages de partie réservés au game master (messages routés vers les jeux via {t:'g',m}).
 const GM_ONLY = new Set(['mode', 'preset', 'opt', 'bots', 'botdiff', 'arena', 'wintarget', 'ff', 'gen', 'variant', 'rush', 'revenge', 'fade', 'lbreset']);
+// Commandes de partie réservées à ceux qui JOUENT : un spectateur ne lance pas, ne met pas en pause et n'abandonne pas pour les autres.
+const PLAYER_ONLY = new Set(['start', 'pause', 'abort']);
 // Avatar valide = court emoji SANS caractère HTML, ou data URL image en base64 strict.
 // Indispensable : les clients l'injectent en innerHTML dans les cartes HUD (sinon injection possible).
 const AV_OK = a => typeof a === 'string' && (
@@ -108,6 +115,7 @@ function step() {
     }
   }
   if (anyDirty()) { for (const gid of dirtyGames()) { const s = lbMsg(gid); for (const m of members) if (m.conn.readyState === 1) m.conn.send(s); } clearDirty(); }
+  if (dailyChanged()) { const s = dailyMsg(); for (const m of members) if (m.conn.readyState === 1) m.conn.send(s); }   // classement du jour (drapeau séparé : ne doit pas passer par lbMsg)
 }
 
 function wire(member) {                          // (re)branche les handlers d'une socket sur un membre donné
@@ -145,6 +153,7 @@ function wire(member) {                          // (re)branche les handlers d'u
     } else if (m.t === 'g') {
       ensureGame();
       if (m.m && GM_ONLY.has(m.m.t) && member.id !== hostId()) { room.send(member, { t: 'denied' }); return; } // réglages : game master seulement
+      if (m.m && PLAYER_ONLY.has(m.m.t) && member.role === 'spectator') { room.send(member, { t: 'denied', why: 'spec' }); return; } // lancer/pause/abandon : joueurs seulement
       if (m.m && m.m.t === 'start' && tour && tour.wait > 0) return;                        // transition de tournoi : pas de relance de l'ancien jeu
       if (m.m && m.m.t === 'start' && game.isIdle() && !allReady()) { room.send(member, { t: 'notready' }); return; } // gate « Prêt » : démarrage seulement si tous les joueurs sont prêts
       game.onMessage(member, m.m);
@@ -161,9 +170,24 @@ function wire(member) {                          // (re)branche les handlers d'u
       if (member.id === hostId()) { ensureGame(); if (game.isIdle()) game.onMessage(member, { t: 'start' }); } // l'hôte force le départ malgré des joueurs pas prêts
     } else if (m.t === 'adminreset') {
       const KEY = process.env.ADMIN_KEY;            // réinitialisation de TOUS les classements (réservée au détenteur de la clé admin)
-      if (KEY && typeof m.key === 'string' && m.key === KEY) { for (const meta of META) reset(meta.id); }  // reset marque dirty → step() rediffuse les classements vides à tous (le global se recalcule)
+      if (KEY && typeof m.key === 'string' && m.key === KEY) { for (const meta of META) reset(meta.id); resetDaily(); }  // reset marque dirty → step() rediffuse les classements vides à tous (le global et le défi du jour se recalculent)
     } else if (m.t === 'emote') {
       if (typeof m.e === 'string' && Date.now() - (member.lastEmote || 0) > 700) { member.lastEmote = Date.now(); room.broadcast({ t: 'emote', id: member.id, name: member.name, e: m.e.slice(0, 8) }); } // émote diffusée à tous (anti-spam 700 ms)
+    } else if (m.t === 'daytoggle') {
+      // (nom distinct de la diffusion serveur {t:'daily'} : jamais le même type dans les deux sens)
+      if (member.id !== hostId()) { room.send(member, { t: 'denied' }); return; }   // réglage de plateforme : game master seulement
+      dailyOn = !dailyOn; ensureGame(); applyDaily(); broadcastRoom();
+      room.broadcast({ t: 'note', m: dailyOn ? '🎲 Défi du jour activé — même carte pour tout le monde aujourd\'hui' : '🎲 Défi du jour désactivé' });
+    } else if (m.t === 'dayreq') {
+      if (member.conn.readyState === 1) member.conn.send(dailyMsg());               // rafraîchit le classement du jour à l'ouverture du panneau
+    } else if (m.t === 'chat') {
+      // mini-chat de salon : assaini À LA SOURCE (les clients l'affichent en texte, mais on ne prend aucun risque)
+      const txt = ('' + (m.m || '')).replace(/[<>&"'`\\]/g, '').replace(/\s+/g, ' ').trim().slice(0, 140);
+      if (!txt || Date.now() - (member.lastChat || 0) < 900) return;                // anti-spam 900 ms
+      member.lastChat = Date.now();
+      const rec = { t: 'chat', id: member.id, name: member.name || 'Joueur', m: txt };
+      chatLog.push(rec); if (chatLog.length > CHAT_MAX) chatLog.shift();
+      room.broadcast(rec);
     } else if (m.t === 'png') {
       if (member.conn.readyState === 1) member.conn.send(JSON.stringify({ t: 'png', ts: m.ts })); // echo pour mesurer le ping
     }
@@ -194,6 +218,8 @@ function onConnection(conn, token) {
     sendAvatars(conn);
     for (const meta of META) conn.send(lbMsg(meta.id)); // tous les classements (sinon vides au changement de jeu sans recharger)
     if (tour) conn.send(JSON.stringify(tourMsg()));     // tournoi en cours : resynchronise le bandeau
+    conn.send(dailyMsg());                              // classement du jour
+    if (chatLog.length) conn.send(JSON.stringify({ t: 'chatlog', log: chatLog }));   // contexte du mini-chat
     broadcastRoom();
     wire(member);
     return;

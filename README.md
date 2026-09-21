@@ -20,8 +20,11 @@ Le client utilise les **modules ES** : il faut passer par le serveur (pas d'ouve
 server.js            HTTP statique (public/) + pages /stats et /leaderboard.json
 ws.js                Mini-serveur WebSocket RFC 6455 écrit à la main (handshake SHA-1, frames, ping/pong)
 hub.js               Registre des jeux, identité/pseudo/token, reconnexion (grâce 12 s), une salle active,
-                     gate « Prêt », mode tournoi, game master, émotes, avatars, ping
+                     gate « Prêt », mode tournoi, game master, émotes, avatars, mini-chat, défi du jour, ping
 leaderboard.js       Persistance : Upstash Redis (REST + fetch natif) en ligne, fichier JSON en local
+                     (classements par jeu + classement du jour remis à zéro chaque jour)
+dayseed.js           Graine dérivée de la date (UTC) : même carte pour tout le monde pendant 24 h (« défi du jour »)
+public/patterns.js   Motifs par siège (rayures, pois, chevrons…) — accessibilité daltonien et lisibilité à 6 joueurs
 games/<id>/server.js       Logique autoritative d'un jeu
 public/games/<id>/client.js  Rendu canvas, HUD, sons, contrôles
 public/games/<id>/shared.js  Constantes partagées serveur ↔ client
@@ -54,3 +57,5 @@ Procédure complète : voir **`DEPLOY.md`**.
 ## Accessibilité
 
 Réglages persistés : thèmes, **réduction des effets**, palette **daltonien**, contraste renforcé, volume des effets et de la musique, plein écran. Chaque jeu possède une identité visuelle propre et des contrôles tactiles adaptés au mobile.
+
+En plus de la couleur, **chaque siège porte un motif** (rayures, pois, chevrons, quadrillage, losanges) repris dans la carte HUD : deux joueurs de teinte proche — ou d'une même équipe — restent distinguables au premier coup d'œil. « Réduire les effets » désactive les animations de fond, les halos et les célébrations.

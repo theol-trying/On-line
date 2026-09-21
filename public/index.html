@@ -38,6 +38,7 @@
   <div class="shellrow">
     <div id="gamemenu"></div>
     <button id="globalBtn" class="ghosttab" aria-label="classement global">🏅 Global</button>
+    <button id="dailyBtn" class="ghosttab" aria-label="défi du jour">🎲 Défi</button>
     <button id="tourBtn" class="ghosttab" aria-label="tournoi">🏆 Tournoi</button>
     <button id="setBtn" class="ghosttab" aria-label="réglages d'affichage">⚙️ Affichage</button>
   </div>
@@ -394,6 +395,31 @@
   <div id="emoteToasts"></div>
   <button id="emoteFloat" aria-label="émotes">😀</button>
   <div id="emoteBar" class="hidden"></div>
+
+  <!-- ===== mini-chat de salon (masqué en jeu : les contrôles tactiles priment) ===== -->
+  <button id="chatFloat" aria-label="chat du salon">💬<span id="chatDot" class="chatdot hidden"></span></button>
+  <div id="chatPanel" class="settings hidden" style="width:min(94vw,400px);">
+    <div class="shead"><h3>💬 Chat du salon</h3><button class="sclose" aria-label="fermer">✕</button></div>
+    <div class="sbody">
+      <div id="chatLog" class="chatlog"></div>
+      <div class="chatrow">
+        <input id="chatInput" maxlength="140" placeholder="Un mot pour le salon…" autocomplete="off">
+        <button id="chatSend" class="rbtn">Envoyer</button>
+      </div>
+      <div class="note">Les messages restent dans le salon (20 derniers) et s'affichent aussi en petite bulle, même pendant une partie.</div>
+    </div>
+  </div>
+
+  <!-- ===== défi du jour : carte commune 24 h + classement quotidien ===== -->
+  <div id="dailyPanel" class="settings hidden" style="width:min(94vw,460px);">
+    <div class="shead"><h3>🎲 Défi du jour</h3><button class="sclose" aria-label="fermer">✕</button></div>
+    <div class="sbody">
+      <div class="note">Activé, <b>Tanks</b> et <b>Bomberman</b> génèrent la <b>même carte pour tout le monde</b> pendant 24 h : les scores de la journée deviennent comparables. Le classement ci-dessous compte <b>tous les jeux</b> et repart à zéro chaque jour.</div>
+      <button id="dailyToggle" class="ghostbtn" style="display:none">🎲 Activer le défi du jour</button>
+      <h4>Classement du jour <span id="dailyDay" class="lbnote" style="font-weight:400"></span></h4>
+      <div id="dailyBody"></div>
+    </div>
+  </div>
 
   <!-- ===== classement global cross-jeux ===== -->
   <div id="globalPanel" class="settings hidden" style="width:min(94vw,460px);">

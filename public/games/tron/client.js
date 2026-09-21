@@ -3,6 +3,7 @@ import { GW as GW0, GH as GH0, CELL as CELL0, ARENA } from './shared.js';
 // grille dynamique (nb de joueurs) : l'arène garde la MÊME taille logique, seule la taille des cases change
 let GW = GW0, GH = GH0, CELL = CELL0;
 import { createMusic } from '../../music.js';
+import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (daltonisme / 6 joueurs)
 
 // musique : synthwave sombre — nappe en quintes, basse pulsée, arpège néon ; climax (duel final) = arp rapide + charley + tempo
 const MUSIC_THEME = { bpm: 122, bpmBoost: 14, vol: 0.5, root: 82.41, len: 32,
@@ -70,7 +71,8 @@ export default (function () {
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
-      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
+      const glyph = SEAT_GLYPH[i % SEAT_GLYPH.length];   // constante : rappel du motif porté par la moto
+      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}<span class="sg" style="opacity:.8">${glyph}</span> ${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
       cards[i].querySelector('.lv').textContent = p.playing ? (p.alive ? '● en vie' : '✖ crashé') : 'prêt';
       cards[i].querySelector('.lv').style.color = col;
     });
@@ -173,6 +175,45 @@ export default (function () {
     return heads;
   }
 
+  // ── Écran titre du lobby : « TRON » tracé comme une traînée de light-cycle sur une grille fuyante ──
+  const TITLE = 'TRON', titleFont = s => `800 ${s}px Orbitron, system-ui, sans-serif`;
+  function drawTitle(cx, cy, now) {
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    let fs = 48; ctx.font = titleFont(fs);
+    const maxW = ARENA * 0.72, w0 = ctx.measureText(TITLE).width;             // tient dans l'arène, même sur mobile
+    if (w0 > maxW) { fs = Math.max(18, Math.floor(fs * maxW / w0)); ctx.font = titleFont(fs); }
+    if (A.reduceFx) {                                                        // version sobre : texte + contour, sans halo
+      ctx.fillStyle = '#0d2c38'; ctx.fillText(TITLE, cx, cy);
+      ctx.lineJoin = 'round'; ctx.strokeStyle = '#1fe0ff'; ctx.lineWidth = 2; ctx.strokeText(TITLE, cx, cy);
+      ctx.restore(); return;
+    }
+    ctx.save();                                                              // grille en perspective qui fuit vers l'horizon
+    const bw = ARENA * 0.78;
+    ctx.beginPath(); ctx.rect(cx - bw / 2, cy - fs * 0.95, bw, fs * 1.55); ctx.clip();
+    const vy = cy - fs * 0.6, bh = fs * 1.2;
+    ctx.strokeStyle = '#1fe0ff'; ctx.lineWidth = 1; ctx.globalAlpha = 0.16;
+    for (let i = -6; i <= 6; i++) { ctx.beginPath(); ctx.moveTo(cx + i * fs * 0.18, vy); ctx.lineTo(cx + i * fs * 1.35, vy + bh); ctx.stroke(); }
+    const sp = (now / 2600) % 1;
+    for (let k = 0; k < 7; k++) { const u = (k + sp) / 7, y = vy + bh * u * u; ctx.globalAlpha = 0.05 + 0.26 * u; ctx.beginPath(); ctx.moveTo(cx - bw / 2, y); ctx.lineTo(cx + bw / 2, y); ctx.stroke(); }
+    ctx.restore();
+    const flick = 0.84 + 0.16 * Math.sin(now / 97) * Math.sin(now / 313);    // scintillement néon discret
+    ctx.fillStyle = 'rgba(8,30,42,0.88)'; ctx.fillText(TITLE, cx, cy);       // corps sombre des lettres
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.shadowColor = '#1fe0ff';
+    ctx.globalAlpha = 0.55 * flick; ctx.shadowBlur = 16; ctx.strokeStyle = '#1fe0ff'; ctx.lineWidth = 2; ctx.strokeText(TITLE, cx, cy);
+    const cyc = fs * 2.8, seg = cyc * 0.15, off = -(now / 9) % cyc;          // éclat qui parcourt le contour + rémanence
+    ctx.setLineDash([seg, cyc - seg]);
+    for (let k = 3; k >= 0; k--) {
+      ctx.lineDashOffset = off + k * seg * 0.85;
+      ctx.globalAlpha = (k ? 0.34 / k : 1) * flick;
+      ctx.lineWidth = k ? Math.max(1, 3.4 - k * 0.8) : 3.4;
+      ctx.shadowBlur = k ? 8 : 22;
+      ctx.strokeStyle = k ? '#1fe0ff' : '#eaffff';
+      ctx.strokeText(TITLE, cx, cy);
+    }
+    ctx.setLineDash([]); ctx.restore();
+  }
+
   function draw() {
     if (destroyed) return;
     const now = performance.now();
@@ -217,6 +258,8 @@ export default (function () {
         const path = p.path || [];
         if (path.length) {
           ctx.beginPath(); ctx.moveTo(px(path[0][0]), px(path[0][1])); for (let i = 1; i < path.length; i++) ctx.lineTo(px(path[i][0]), px(path[i][1])); ctx.lineTo(hx, hy); ctx.stroke();
+          const tpat = seatPattern(ctx, p.seat, { size: CELL * 1.6 });        // motif du siège sur la traînée
+          if (tpat) { ctx.save(); ctx.shadowBlur = 0; ctx.strokeStyle = tpat; ctx.stroke(); ctx.restore(); }
           if (!dead && !A.reduceFx) { ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = Math.max(2, (CELL - 2) * 0.32); ctx.shadowBlur = 6 * FX; ctx.stroke(); } // cœur lumineux
         }
         ctx.restore();
@@ -227,6 +270,8 @@ export default (function () {
           ctx.globalAlpha = p.ghost ? 0.7 : 1; ctx.shadowColor = col; ctx.shadowBlur = 14 * FX;
           ctx.strokeStyle = col; ctx.lineCap = 'round'; ctx.lineWidth = CELL - 3;             // corps : capsule allongée
           ctx.beginPath(); ctx.moveTo(-CELL * 0.45, 0); ctx.lineTo(CELL * 0.45, 0); ctx.stroke();
+          const hpat = seatPattern(ctx, p.seat, { size: CELL * 1.1 });                        // même motif sur la tête de moto
+          if (hpat) { ctx.save(); ctx.shadowBlur = 0; ctx.strokeStyle = hpat; ctx.stroke(); ctx.restore(); }
           ctx.shadowBlur = 0; ctx.fillStyle = p.ghost ? col : '#fff';                         // verrière avant
           ctx.beginPath(); ctx.ellipse(CELL * 0.2, 0, CELL * 0.2, CELL * 0.24, 0, 0, Math.PI * 2); ctx.fill();
           ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(-CELL * 0.42, -1.2, CELL * 0.28, 2.4);   // fente roue arrière
@@ -270,7 +315,7 @@ export default (function () {
       ctx.fillStyle = 'rgba(4,5,12,0.66)'; ctx.fillRect(0, 0, ARENA, ARENA); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if (snap.gs === 'paused') { ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', ARENA / 2, ARENA / 2 + 28); }
       else {
-        ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(120,200,255,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 30px system-ui,sans-serif'; ctx.fillText('TRON', ARENA / 2, ARENA / 2 - 36); ctx.restore();
+        drawTitle(ARENA / 2, ARENA / 2 - 46, now);
         const n = snap.connected, nb = snap.botCount || 0, tot = n + nb;
         ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''}`, ARENA / 2, ARENA / 2 - 6);
         ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText(tot >= 2 ? '▶ Espace / clic pour lancer' : 'En attente d\'un 2ᵉ pilote… (ou ajoute un bot 🤖)', ARENA / 2, ARENA / 2 + 24);

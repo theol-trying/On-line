@@ -230,15 +230,61 @@ Refactor plateforme : tampon de messages shell (welcome/1er state non perdus) ; 
 - **note() shell** — suppression du toast à 2,2 s avant la fin de l'animation de sortie (2,6 s) → durée alignée.
 - **Snake food-rush + déconnexion** — `onLeave` terminait la manche avec la règle Survie ; aligne sur « meilleur score » (`bestScoreTeam`).
 
+## Lot « améliorations vertes » (septembre 2026)
+Sept chantiers à faible risque, livrés ensemble. **Aucun runtime JS sur le poste** (ni Node, ni Python, ni WSL) :
+validation faite en **parsant les 15 fichiers modifiés dans le moteur JS du navigateur** (harnais jetable, imports/exports
+neutralisés, code jamais exécuté) → 0 erreur ; les deux nouveaux panneaux ont en plus été rendus avec la vraie CSS.
+
+**Features**
+- 🎲 **Défi du jour** — `dayseed.js` (nouveau) : `dayKey()` (date UTC) → FNV-1a → **mulberry32**. Activé (bouton 🎲 du bandeau,
+  **game master seulement**), Tanks et Bomberman génèrent leur carte avec ce générateur déterministe au lieu de `Math.random` :
+  **même arène pour tout le monde pendant 24 h**. Le rng est passé en paramètre à `genSolidSet`/`genSolidSetB` (pas de variable
+  globale mutable), et couvre aussi murs cassables, mélange des cases libres, barils, boue et téléporteurs.
+  Réglage porté par le **hub** (pas par jeu) et re-poussé aux jeux via `game.onMessage(SYS, {t:'daily',on})` à chaque création
+  d'instance → il survit aux changements de jeu. `SYS = {}` est un pseudo-membre : `seatOf(SYS)` renvoie −1, aucun siège touché.
+- 🏅 **Classement du jour** — `leaderboard.js` : nœud réservé `store['#daily']`, remis à zéro au changement de date UTC,
+  alimenté par `bumpDaily()` appelé depuis les 5 `recordRound()` (1 pt de participation + 3 pts de victoire ; bots exclus).
+  Il vit **dans `store`** (donc sauvegardé par le `save()` existant, sans écriture Upstash supplémentaire) mais possède son
+  **propre drapeau « sale »** : le faire passer par `dirty`/`lbMsg` polluerait `boards[g]` côté client (indexé par id de jeu).
+- 💬 **Mini-chat de salon** — hub : `{t:'chat'}` assaini à la source, anti-spam 900 ms, historique des 20 derniers envoyé
+  à la connexion (`{t:'chatlog'}`). Client : bouton flottant 💬 (à côté des émotes, **masqué en partie** comme elles),
+  pastille de non-lu, journal + champ de saisie. Les messages s'affichent aussi en **bulle**, même pendant une manche.
+  Le rendu est construit en `createElement`/`textContent` — **aucun innerHTML** sur du texte réseau.
+- 🔒 **pick/start/pause réservés** — `PLAYER_ONLY = {start, pause, abort}` : un spectateur reçoit `{t:'denied', why:'spec'}`
+  (`pick` et les réglages étaient déjà gatés par `GM_ONLY`). Toast dédié côté client.
+
+**Graphismes**
+- 🪧 **Écrans titre par jeu** — chaque client remplace son `fillText('NOM')` de lobby par un `drawTitle()` animé dans son identité :
+  Pong néon avec balle qui rebondit entre deux raquettes · Tron tracé par une traînée de light-cycle sur grille en perspective ·
+  Tanks plaque blindée rivetée + chenille et poussière · Bomberman lettres cartoon qui rebondissent avec mèche allumée ·
+  Snake tige végétale qui ondule avec feuilles et tête de serpent. Tous : `measureText` → réduction si débordement (mobile),
+  et **version statique sobre** si « réduire les effets ».
+- 🔷 **Motifs par siège** — `public/patterns.js` (nouveau) : 6 motifs (uni/rayé/pointillé/chevrons/quadrillé/losanges) en
+  `CanvasPattern` mis en cache (clé = contexte + motif + taille + encre ; siège 0 = `null`, zéro surcoût). Chaque client repasse
+  le tracé de sa pièce avec le motif, et affiche `SEAT_GLYPH[i]` dans la carte HUD. **Gain réel en mode équipe**, où plusieurs
+  joueurs partagent une couleur, et en palette daltonien.
+- 🎆 **Célébrations par identité** — `fireConfetti(gameId)` : table `CELEB` (trajectoire chute/envol/gerbe × forme
+  rect/point/traînée/étincelle/pétale × palette). Désert en gerbe pour Tanks, papillons qui montent pour Snake,
+  pluie de pixels néon pour Tron, gros confettis cartoon pour Bomberman. Moitié moins de particules sous 520 px.
+- 🎬 **Transition thématique** — `#xfade` devient un **balayage** aux couleurs du jeu (`::before` en dégradé sur `--accent`),
+  déclenché au changement de jeu **et à chaque nouvelle manche** (`gs → countdown`, variante `.quick` qui laisse le plateau
+  visible). L'animation est `animation-play-state:paused` hors transition (classe `.on`) — rien ne tourne en fond sur mobile.
+
+**Corrigé au passage** : taper dans le champ pseudo ou le chat n'envoie plus Espace/flèches aux raccourcis du jeu
+(`stopPropagation` ; les jeux écoutent en phase de bouillonnement). Le type `{t:'daily'}` est réservé au sens **serveur→client**
+(le basculement client→serveur s'appelle `daytoggle`) pour ne jamais avoir le même nom de message dans les deux sens.
+
 ## Limites connues (assumées)
 - Identité par **pseudo** sans comptes (mêmes pseudos = stats fusionnées). Reconnexion best-effort.
-- Spectateurs restent spectateurs même si un siège se libère (recharger pour jouer).
-- Pas de TLS/auth/rate-limit (LAN de confiance). Un membre (même spectateur) peut `pick`/`start`/`pause`.
+- Spectateurs restent spectateurs même si un siège se libère (bouton 🪑 « Prendre un siège » hors partie).
+- Pas de TLS/auth/rate-limit (LAN de confiance).
+- Les boutons de réglages restent **visibles** pour les non-game-masters (refus + toast au clic, pas de grisage visuel).
 - ~~Optimisation différée~~ **FAIT — delta réseau** : `grid` (Tank/Bomb) et `geo` (Pong) ne sont émis **que s'ils changent** (+ refresh 2×/s : arrivants/auto-réparation ; toujours émis hors play). Champ `undefined` → omis du JSON → le client **réutilise le précédent** (fusion en tête de `onState` ; `geo:null` = vraiment vide). Gain ≈ 40 Ko/s/client (Pong) + 7 (Tank) + 5 (Bomb). Les chemins Tron/Snake changent chaque tick (pas de delta possible).
 - `identities` (hub) non purgé → légère croissance mémoire sur très longue durée.
 - Multi-onglets de test : localStorage partagé → même token/pseudo par défaut (mettre un pseudo distinct par onglet).
 - **Rien exécuté par l'assistant** (consigne) : tests runtime à faire côté utilisateur (voir checklist fournie en conversation).
 
 ## Pistes non faites (idées futures)
-Mobs IA solo Bomberman ; salles multiples (codes de room) ; tournois/replays ; envoi incrémental de la géométrie (optim réseau) ;
-restreindre pick/start/pause aux joueurs ; nouveaux jeux via le contrat (le plus simple à brancher).
+Mobs IA solo Bomberman ; salles multiples (codes de room) ; replay de fin de manche ; avatars dessinés sur les pièces en jeu ;
+arène évolutive (jour → crépuscule) ; éclairage dynamique ; envoi incrémental de la géométrie (optim réseau) ;
+purge de `identities` dans le hub ; nouveaux jeux via le contrat (le plus simple à brancher).

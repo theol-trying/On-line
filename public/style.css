@@ -312,8 +312,42 @@ body.flat .fxon{ animation:none; }
 .av-e{ margin-right:3px; }
 /* podium de tournoi */
 .champ{ text-align:center; font-size:16px; font-weight:800; color:#ffd76b; padding:10px 4px 14px; }
-/* calque de fondu lors d'un changement de jeu */
-#xfade{ position:fixed; inset:0; z-index:8; background:var(--bg0); opacity:0; pointer-events:none; transition:opacity .25s ease; }
+/* mini-chat de salon : lanceur flottant (à côté des émotes) + journal + saisie */
+#chatFloat{ position:fixed; left:62px; bottom:12px; z-index:11; width:44px; height:44px; padding:0; font-size:20px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; }
+.chatdot{ position:absolute; top:4px; right:4px; width:9px; height:9px; border-radius:50%; background:#ff5a4e; box-shadow:0 0 6px rgba(255,90,78,.9); }
+.chatdot.hidden{ display:none; }
+.chatlog{ max-height:230px; overflow-y:auto; display:flex; flex-direction:column; gap:5px; padding:2px 0 6px;
+  -webkit-overflow-scrolling:touch; }
+.chatlog .cmsg{ font-size:13px; line-height:1.35; color:var(--txt); background:var(--panel2); border-radius:10px; padding:5px 9px; word-break:break-word; }
+.chatlog .cmsg b{ color:var(--accent); margin-right:5px; }
+.chatlog .cmsg.mine{ border:1px solid var(--border2); }
+.chatrow{ display:flex; align-items:center; margin-top:4px; }
+.chatrow input{ flex:1 1 auto; min-width:0; background:var(--panel2); border:1px solid var(--border2); color:var(--txt);
+  border-radius:999px; padding:8px 13px; font:inherit; font-size:13px; outline:none; margin-right:6px; }
+.chatrow input:focus{ border-color:var(--accent); }
+.chatrow .rbtn{ flex:0 0 auto; padding:8px 13px; border-radius:999px; border:1px solid var(--border2); background:var(--panel2);
+  color:var(--txt); cursor:pointer; font-weight:600; font-size:13px; }
+.chatrow .rbtn:hover{ border-color:var(--accent); }
+.etoast .ec{ font-size:13px; opacity:.92; }
+/* défi du jour */
+.dayrow{ display:flex; align-items:center; gap:8px; font-size:13px; padding:5px 8px; border-radius:9px; background:var(--panel2); margin-bottom:4px; }
+.dayrow .dn{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dayrow .dp{ font-weight:800; color:var(--okTxt); }
+#dailyBtn.on{ border-color:var(--ok); color:var(--okTxt); }
+/* calque de transition entre jeux / entre manches : balayage aux couleurs du jeu actif */
+#xfade{ position:fixed; inset:0; z-index:8; background:var(--bg0); opacity:0; pointer-events:none; transition:opacity .28s ease;
+  display:flex; align-items:center; justify-content:center; overflow:hidden;
+  font-family:var(--display-font,'Segoe UI',sans-serif); font-weight:800; font-size:34px; letter-spacing:var(--display-ls,.04em);
+  color:var(--accent); text-shadow:0 0 22px currentColor; }
+#xfade::before{ content:''; position:absolute; top:-30%; left:-65%; width:55%; height:160%;
+  background:linear-gradient(90deg, transparent, var(--accent), transparent); opacity:.3; transform:skewX(-18deg);
+  animation:xsweep 1.05s linear infinite; animation-play-state:paused; }   /* en pause hors transition : rien ne tourne en fond sur mobile */
+#xfade.on::before{ animation-play-state:running; }
+@keyframes xsweep{ from{ left:-65%; } to{ left:125%; } }
+#xfade.quick{ background:transparent; transition:opacity .16s ease; }    /* transition de manche : le plateau reste visible, seule la bande passe */
+#xfade.quick::before{ animation-duration:.5s; opacity:.42; }
+body.flat #xfade::before{ display:none; }                                 /* « réduire les effets » : simple fondu */
 /* calque confettis (au-dessus de tout, ne bloque pas les clics) */
 #confetti{ position:fixed; inset:0; width:100%; height:100%; z-index:12; pointer-events:none; display:none; }
 /* slider volume des effets */
@@ -422,7 +456,9 @@ body.game-bomb:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.5),0 0 0 3p
   #quitFloat::before{ content:'✕'; font-size:17px; }
   #pauseFloat:active, .pauseFloat:active, #quitFloat:active, #setFloat:active{ opacity:1; }
   #emoteFloat{ width:40px; height:40px; font-size:18px; opacity:.55; }
-  body.playing #emoteFloat, body.playing #emoteBar{ display:none; }   /* en partie : libère le coin bas-gauche du pavé directionnel */
+  #chatFloat{ left:58px; width:40px; height:40px; font-size:18px; opacity:.55; }
+  body.playing #emoteFloat, body.playing #emoteBar, body.playing #chatFloat{ display:none; }   /* en partie : libère le coin bas-gauche du pavé directionnel */
+  #xfade{ font-size:26px; }
 }
 @media (max-width:370px){                               /* très petits écrans (ancien iPhone) : on réduit pour tout faire tenir sans chevauchement */
   .gpad .touch{ width:54px; height:54px; font-size:22px; }

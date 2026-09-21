@@ -4,6 +4,7 @@
 import { W as W0, H as H0, BALL_R, PAD_W, PAD_OFF, PU_R } from './shared.js';
 let W = W0, H = H0;        // espace logique : agrandi par le serveur selon le nombre de joueurs (snapshot aw/ah)
 import { createMusic } from '../../music.js';
+import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège : lisibles même à 6 ou en mode équipe
 
 const SHAPE = { 2: 'Face à face', 3: 'Triangle', 4: 'Carré', 5: 'Pentagone', 6: 'Hexagone' };
 const PU_GLYPH = { multi: '+1', grow: 'XL', shield: '⛉', ghost: '◌', invert: '⇄', shrinkT: '▭', slow: '≈', mini: '▽', flip: '✕', speed: '»', blocker: '🧱', magnet: '🧲', invis: '∅' };
@@ -98,7 +99,8 @@ export default (function () {
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
-      document.getElementById('pn' + i).innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${p.name || ('P' + (i + 1))} <span class="sc">${p.score} pt</span> ${tags.join('')}`;
+      const gl = `<span style="opacity:.75;margin-right:3px" title="motif de la raquette">${SEAT_GLYPH[i % 6]}</span>`;   // glyphe = motif du siège (constante, jamais du réseau)
+      document.getElementById('pn' + i).innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${gl}${p.name || ('P' + (i + 1))} <span class="sc">${p.score} pt</span> ${tags.join('')}`;
       cards[i].classList.toggle('dead', p.playing && !p.alive);
       cards[i].classList.toggle('me', i === mySeat);
     });
@@ -352,6 +354,44 @@ export default (function () {
   }
   const pt = (e, s, d) => [e.ax + e.tx * s + e.nx * d, e.ay + e.ty * s + e.ny * d];
 
+  // Logo animé du lobby : « PONG » en néon magenta, une balle qui traverse le mot en rebondissant
+  // et deux raquettes cyan qui l'encadrent en la suivant. Tout est dérivé de `now` : aucun état gardé.
+  const TRI = t => { const u = ((t % 2) + 2) % 2; return u < 1 ? u : 2 - u; };   // onde triangulaire 0→1→0
+  function drawTitle(cx, cy, now) {
+    const PINK = '#ff5db4', CYAN = '#6ff0ff';
+    const fnt = s => `800 ${s}px Orbitron,'Segoe UI',system-ui,sans-serif`;
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    let fs = Math.max(24, Math.min(50, Math.round(W * 0.085)));
+    ctx.font = fnt(fs);
+    const maxW = W * 0.58;                                     // on réserve la place des raquettes de part et d'autre
+    let tw = ctx.measureText('PONG').width;
+    if (tw > maxW) { fs = Math.max(15, Math.floor(fs * maxW / tw)); ctx.font = fnt(fs); tw = ctx.measureText('PONG').width; }   // jamais de débordement sur mobile
+    const half = tw / 2 + fs * 0.32, px = half + fs * 0.3;
+    const pw = Math.max(3, fs * 0.11), ph = fs * 0.5, amp = fs * 0.26, r = Math.max(2.5, fs * 0.085);
+    const bx = t => cx - half + 2 * half * TRI(t / 1700);       // aller-retour ≈ 3,4 s
+    const by = t => cy + (TRI(t / 1150) * 2 - 1) * amp;
+    const pdy = t => cy + (by(t) - cy) * 0.6;                   // course réduite : les raquettes ne mordent pas la ligne du dessous
+    if (A.reduceFx) {                                          // sobre : texte + contour, sans halo, sans mouvement
+      ctx.strokeStyle = PINK; ctx.lineWidth = Math.max(2, fs * 0.055); ctx.strokeText('PONG', cx, cy);
+      ctx.fillStyle = '#fff'; ctx.fillText('PONG', cx, cy);
+      ctx.fillStyle = CYAN;
+      ctx.fillRect(cx - px - pw / 2, cy - ph / 2, pw, ph); ctx.fillRect(cx + px - pw / 2, cy - ph / 2, pw, ph);
+      ctx.restore(); return;
+    }
+    const glow = 15 + 8 * Math.sin(now / 900);                 // halo qui respire lentement
+    ctx.shadowColor = CYAN; ctx.shadowBlur = 13; ctx.fillStyle = CYAN;   // raquettes : elles suivent la balle avec un peu de retard
+    ctx.fillRect(cx - px - pw / 2, pdy(now - 210) - ph / 2, pw, ph);
+    ctx.fillRect(cx + px - pw / 2, pdy(now - 330) - ph / 2, pw, ph);
+    ctx.shadowColor = '#fff'; ctx.shadowBlur = 11; ctx.fillStyle = '#fff';
+    for (let k = 4; k >= 1; k--) { const t = now - k * 42; ctx.globalAlpha = 0.08 * (5 - k); ctx.beginPath(); ctx.arc(bx(t), by(t), r * (1 - k * 0.12), 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(bx(now), by(now), r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowColor = PINK; ctx.shadowBlur = glow; ctx.strokeStyle = PINK; ctx.lineWidth = Math.max(2, fs * 0.085);
+    ctx.strokeText('PONG', cx, cy); ctx.strokeText('PONG', cx, cy);   // 2 passes : néon plus dense
+    ctx.shadowColor = CYAN; ctx.shadowBlur = glow * 0.5; ctx.fillStyle = '#fff'; ctx.fillText('PONG', cx, cy);
+    ctx.restore();
+  }
+
   function draw() {
     if (destroyed) return;
     const now = performance.now();
@@ -433,6 +473,12 @@ export default (function () {
         if (p.immune) ctx.globalAlpha = 0.35 + 0.35 * Math.sin(now / 70);
         ctx.shadowColor = col; ctx.shadowBlur = (p.grow ? 24 : 16) * FX; ctx.fillStyle = col;
         ctx.beginPath(); ctx.moveTo(...c1); ctx.lineTo(...c2); ctx.lineTo(...c3); ctx.lineTo(...c4); ctx.closePath(); ctx.fill();
+        const pat = seatPattern(ctx, p.seat, { size: Math.round(PAD_W * 1.4) });   // surimpression : motif du siège dans le repère de la raquette
+        if (pat) {
+          const [mx, my] = pt(e, pos, PAD_OFF + PAD_W / 2);
+          ctx.save(); ctx.translate(mx, my); ctx.rotate(Math.atan2(e.ty, e.tx));
+          ctx.shadowBlur = 0; ctx.fillStyle = pat; ctx.fillRect(-L / 2, -PAD_W / 2, L, PAD_W); ctx.restore();
+        }
         if (A.contrast) { ctx.shadowBlur = 0; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
         if (p.shield) {
           const s1 = pt(e, pos - L / 2 - 3, PAD_OFF - 3), s2 = pt(e, pos + L / 2 + 3, PAD_OFF - 3),
@@ -524,8 +570,7 @@ export default (function () {
         ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', W / 2, H / 2 - 6);
         ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', W / 2, H / 2 + 28);
       } else {
-        ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(120,140,255,.6)'; ctx.shadowBlur = 22; }
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PONG', W / 2, H / 2 - 62); ctx.restore();
+        drawTitle(W / 2, H / 2 - 62, now);
         ctx.fillStyle = 'rgba(255,255,255,.72)'; ctx.font = '15px system-ui,sans-serif';
         ctx.fillText(`${SHAPE[n] || (n + ' joueurs')} · ${snap.connected} humain${snap.connected > 1 ? 's' : ''}${snap.botCount ? ' + ' + snap.botCount + ' bot' + (snap.botCount > 1 ? 's' : '') : ''}`, W / 2, H / 2 - 32);
         ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.55)'; ctx.font = 'bold 14px system-ui,sans-serif';

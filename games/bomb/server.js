@@ -1,6 +1,7 @@
 // Jeu BOMBERMAN v2 — équipes, bonus avancés, malus, mort subite, chaînage. 1 à 6 joueurs.
 import { GW, GH, CELL, ARENA } from '../../public/games/bomb/shared.js';
-import { board, pushHistory, save, markDirty, reset } from '../../leaderboard.js';
+import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
+import { dailyRng } from '../../dayseed.js';
 
 const GID = 'bomb';
 const MAX_SEATS = 6;
@@ -30,14 +31,14 @@ const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
 const RING = (() => { const r = []; for (let x = 0; x < GW - 1; x++) r.push([x, 0]); for (let y = 0; y < GH - 1; y++) r.push([GW - 1, y]); for (let x = GW - 1; x > 0; x--) r.push([x, GH - 1]); for (let y = GH - 1; y > 0; y--) r.push([0, y]); return r; })();
 const RING_LEN = RING.length, REV_MOVE_EVERY = 5;
 // génération procédurale des murs solides (sym180 / aléatoire / 4 coins) avec connectivité garantie
-function genSolidSetB(style, density, safe) {
+function genSolidSetB(style, density, safe, rnd) {
   const cache = new Map();
   const canon = (x, y) => {
     if (style === 1) return x + ',' + y;
     if (style === 0) { const bx = GW - 1 - x, by = GH - 1 - y; return (y < by || (y === by && x <= bx)) ? (x + ',' + y) : (bx + ',' + by); }
     return Math.min(x, GW - 1 - x) + ',' + Math.min(y, GH - 1 - y);
   };
-  const want = (x, y) => { const k = canon(x, y); if (!cache.has(k)) cache.set(k, Math.random() < density); return cache.get(k); };
+  const want = (x, y) => { const k = canon(x, y); if (!cache.has(k)) cache.set(k, rnd() < density); return cache.get(k); };
   const s = new Set();
   for (let y = 1; y < GH - 1; y++) for (let x = 1; x < GW - 1; x++) { const k = idx(x, y); if (safe.has(k)) continue; if (want(x, y)) s.add(k); }
   return s;
@@ -55,6 +56,7 @@ export function createBomb(room) {
   let players, cells, bombs, blasts, pickups, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, sdIndex, sd, genStyle, ff, warpOf, revenge, botCount, botDiff;
   let lastGrid = '';                                 // dernière grille émise (delta : on n'émet que si changement)
   let seatByMid = {};
+  let daily = false;                                 // « Défi du jour » : piloté par le hub (réglage de plateforme)
 
   function lbEntry(name) {
     const b = board(GID);
@@ -66,6 +68,7 @@ export function createBomb(room) {
       if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
       const e = lbEntry(p.name); e.games++;
       if (winner >= 0 && p.team === winner) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });   // classement du jour (tous jeux)
       e.kills += p.kills; e.dmg += p.kills;
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / TICK_HZ; e.survSum += surv;
       if (surv > e.bestSurvivalSec) e.bestSurvivalSec = surv;
@@ -107,20 +110,22 @@ export function createBomb(room) {
     const safe = new Set();
     parts.forEach((p, i) => { const [sx, sy] = SPAWNS[i]; [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => safe.add(idx(sx + dx, sy + dy))); });
     const spawns = parts.map((p, i) => SPAWNS[i]);
+    // « Défi du jour » : générateur déterministe dérivé de la date -> même carte pour tout le monde pendant 24 h
+    const rnd = daily ? dailyRng('bomb|' + genStyle + '|' + parts.length) : Math.random;
     let solid = null;
-    for (let a = 0; a < 24; a++) { const s = genSolidSetB(genStyle, 0.18, safe); if (bombConnected(s, spawns)) { solid = s; break; } } // murs procéduraux + connectivité garantie
+    for (let a = 0; a < 24; a++) { const s = genSolidSetB(genStyle, 0.18, safe, rnd); if (bombConnected(s, spawns)) { solid = s; break; } } // murs procéduraux + connectivité garantie
     if (!solid) { solid = new Set(); for (let y = 1; y < GH - 1; y++) for (let x = 1; x < GW - 1; x++) if (x % 2 === 0 && y % 2 === 0 && !safe.has(idx(x, y))) solid.add(idx(x, y)); } // repli : piliers classiques
     cells = new Array(GW * GH).fill(0);
     for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) if (gx === 0 || gy === 0 || gx === GW - 1 || gy === GH - 1) cells[idx(gx, gy)] = 1; // cadre
     for (const k of solid) cells[k] = 1;
-    for (let i = 0; i < cells.length; i++) { const gx = i % GW, gy = (i / GW) | 0; if (gx > 0 && gy > 0 && gx < GW - 1 && gy < GH - 1 && cells[i] === 0 && !safe.has(i) && Math.random() < SOFT_PROB) cells[i] = 2; }
+    for (let i = 0; i < cells.length; i++) { const gx = i % GW, gy = (i / GW) | 0; if (gx > 0 && gy > 0 && gx < GW - 1 && gy < GH - 1 && cells[i] === 0 && !safe.has(i) && rnd() < SOFT_PROB) cells[i] = 2; }
     // téléporteurs (tuile 3) : 1 paire sur deux cases vides éloignées — sol traversable, connectivité préservée
     warpOf = {};
     const empties = [];
     for (let i = 0; i < cells.length; i++) { const gx = i % GW, gy = (i / GW) | 0; if (cells[i] === 0 && !safe.has(i) && gx > 1 && gy > 1 && gx < GW - 2 && gy < GH - 2) empties.push(i); }
     if (empties.length >= 2) {
-      const a = empties[Math.floor(Math.random() * empties.length)];
-      let b = a; for (let t = 0; t < 24 && (b === a || Math.abs((b % GW) - (a % GW)) + Math.abs(((b / GW) | 0) - ((a / GW) | 0)) < 6); t++) b = empties[Math.floor(Math.random() * empties.length)];
+      const a = empties[Math.floor(rnd() * empties.length)];
+      let b = a; for (let t = 0; t < 24 && (b === a || Math.abs((b % GW) - (a % GW)) + Math.abs(((b / GW) | 0) - ((a / GW) | 0)) < 6); t++) b = empties[Math.floor(rnd() * empties.length)];
       if (b !== a) { cells[a] = 3; cells[b] = 3; warpOf[a] = b; warpOf[b] = a; }
     }
   }
@@ -544,6 +549,7 @@ export function createBomb(room) {
     else if (m.t === 'abort') backToLobby();
     else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; } }
     else if (m.t === 'gen') { if (editable()) genStyle = (genStyle + 1) % 3; }
+    else if (m.t === 'daily') daily = !!m.on;          // poussé par le hub (réglage de plateforme)
     else if (m.t === 'ff') { if (editable()) ff = !ff; }
     else if (m.t === 'revenge') { if (editable()) revenge = !revenge; }
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }

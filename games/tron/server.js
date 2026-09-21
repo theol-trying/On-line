@@ -7,7 +7,7 @@ function setGrid(n) {
   const side = Math.min(76, Math.round(GW0 * (1 + 0.14 * (Math.max(2, n) - 2))));   // 2 j : 50 … 6 j : 76
   GW = side; GH = side;
 }
-import { board, pushHistory, save, markDirty, reset } from '../../leaderboard.js';
+import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 
 const GID = 'tron';
 const MAX_SEATS = 6;
@@ -58,6 +58,7 @@ export function createTron(room) {
       const e = lbEntry(p.name);
       e.games++;
       if (winner >= 0 && p.team === winner) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });   // classement du jour (tous jeux)
       e.kills += p.kills; e.dmg += p.kills;
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / TICK_HZ;
       e.survSum += surv;

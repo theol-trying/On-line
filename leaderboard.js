@@ -113,6 +113,46 @@ export function reset(gameId) { store[gameId] = { board: {}, history: [] }; mark
 
 export function lbMsg(gameId) { const g = node(gameId); return JSON.stringify({ t: 'lb', g: gameId, board: Object.values(g.board), history: g.history }); }
 
+/* ---------- Classement du jour (« Défi du jour ») ----------
+   Agrégé TOUS JEUX CONFONDUS et remis à zéro au changement de date (UTC).
+   Vit dans `store` sous une clé réservée (aucun jeu ne peut s'appeler ainsi) : il profite
+   ainsi du même save() que les classements permanents, sans écriture supplémentaire.
+   Il a son propre drapeau « sale » : le passer par dirty/lbMsg polluerait les classements
+   par jeu côté client (boards[g] est indexé par identifiant de jeu). */
+const DAY_SLOT = '#daily';
+const DAY_MAX = 60;                 // nb max de joueurs suivis dans la journée
+let dailyDirty = false;
+const todayKey = () => new Date().toISOString().slice(0, 10);
+function dailyNode() {
+  const n = store[DAY_SLOT] || (store[DAY_SLOT] = { day: '', board: {} });
+  if (!n.board || typeof n.board !== 'object') n.board = {};
+  const t = todayKey();
+  if (n.day !== t) { n.day = t; n.board = {}; dailyDirty = true; }   // nouveau jour : tout le monde repart à zéro
+  return n;
+}
+// Crédite une manche pour un joueur. 1 pt de participation + 3 pts de victoire.
+export function bumpDaily(name, o) {
+  if (!name) return;
+  const n = dailyNode();
+  const e = n.board[name] || (n.board[name] = { name, games: 0, wins: 0, kills: 0, pts: 0, jeux: [] });
+  const win = !!(o && o.win);
+  e.games++; if (win) e.wins++;
+  e.kills += (o && o.kills) || 0;
+  e.pts += 1 + (win ? 3 : 0);
+  const g = o && o.game;
+  if (g && e.jeux.indexOf(g) < 0) e.jeux.push(g);
+  const keys = Object.keys(n.board);
+  if (keys.length > DAY_MAX) delete n.board[keys[0]];               // ordre d'insertion => le plus ancien saute
+  dailyDirty = true;
+}
+export function dailyMsg() {
+  const n = dailyNode();
+  const list = Object.values(n.board).sort((a, b) => b.pts - a.pts || b.wins - a.wins || b.kills - a.kills).slice(0, 20);
+  return JSON.stringify({ t: 'daily', day: n.day, board: list });
+}
+export function dailyChanged() { const d = dailyDirty; dailyDirty = false; return d; }   // consomme le drapeau
+export function resetDaily() { store[DAY_SLOT] = { day: todayKey(), board: {} }; dailyDirty = true; save(); }
+
 export function markDirty(gameId) { dirty.add(gameId); }
 export function dirtyGames() { return [...dirty]; }
 export function anyDirty() { return dirty.size > 0; }

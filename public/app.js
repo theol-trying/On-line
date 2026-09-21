@@ -180,6 +180,67 @@ if (tourBtn) tourBtn.onclick = () => {
   send({ t: 'tour' });
 };
 
+/* ---------- mini-chat de salon (texte court, diffusé à tous, historique côté hub) ---------- */
+const chatFloat = document.getElementById('chatFloat'), chatPanel = document.getElementById('chatPanel');
+const chatLogEl = document.getElementById('chatLog'), chatInput = document.getElementById('chatInput');
+const chatSend = document.getElementById('chatSend'), chatDot = document.getElementById('chatDot');
+function chatToast(name, txt) {                 // bulle visible même en partie — construite sans innerHTML
+  if (!emoteToasts) return;
+  const el = document.createElement('div'); el.className = 'etoast';
+  const b = document.createElement('span'); b.className = 'en'; b.textContent = name;
+  const s = document.createElement('span'); s.className = 'ec'; s.textContent = ' ' + txt;
+  el.appendChild(b); el.appendChild(s); emoteToasts.appendChild(el);
+  while (emoteToasts.children.length > 6) emoteToasts.removeChild(emoteToasts.firstChild);
+  setTimeout(() => el.remove(), 2600);
+}
+function pushChat(rec, silent) {
+  if (!chatLogEl || !rec || typeof rec.m !== 'string') return;
+  const el = document.createElement('div');
+  el.className = 'cmsg' + (rec.id === you.id ? ' mine' : '');
+  const b = document.createElement('b'); b.textContent = rec.name || 'Joueur';
+  const s = document.createElement('span'); s.textContent = rec.m;
+  el.appendChild(b); el.appendChild(s); chatLogEl.appendChild(el);
+  while (chatLogEl.children.length > 40) chatLogEl.removeChild(chatLogEl.firstChild);
+  chatLogEl.scrollTop = chatLogEl.scrollHeight;
+  if (!silent && rec.id !== you.id) {
+    chatToast(rec.name || 'Joueur', rec.m);
+    if (chatDot && chatPanel && chatPanel.classList.contains('hidden')) chatDot.classList.remove('hidden');
+  }
+}
+function sendChat() {
+  if (!chatInput) return;
+  const v = chatInput.value.trim().slice(0, 140);
+  if (!v) return;
+  send({ t: 'chat', m: v }); chatInput.value = '';
+}
+if (chatFloat) chatFloat.onclick = () => {
+  togglePanel(chatPanel);
+  if (chatDot) chatDot.classList.add('hidden');
+  if (chatPanel && !chatPanel.classList.contains('hidden')) { if (chatLogEl) chatLogEl.scrollTop = chatLogEl.scrollHeight; if (chatInput) setTimeout(() => chatInput.focus(), 40); }
+};
+if (chatSend) chatSend.onclick = sendChat;
+// stopPropagation : sans ça, Espace/flèches tapés dans le champ atteindraient les raccourcis du jeu (lancer, se déplacer…)
+if (chatInput) chatInput.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); sendChat(); } };
+
+/* ---------- défi du jour (carte commune 24 h sur Tanks/Bomberman + classement quotidien) ---------- */
+let dailyOn = false, dailyBoard = [], dailyDate = '';
+const dailyBtn = document.getElementById('dailyBtn'), dailyPanel = document.getElementById('dailyPanel');
+const dailyBody = document.getElementById('dailyBody'), dailyDayEl = document.getElementById('dailyDay'), dailyToggle = document.getElementById('dailyToggle');
+function renderDaily() {
+  if (dailyBtn) { dailyBtn.classList.toggle('on', dailyOn); dailyBtn.textContent = dailyOn ? '🎲 Défi ON' : '🎲 Défi'; }
+  if (dailyToggle) {
+    dailyToggle.style.display = (you.id && you.id === roomHost) ? '' : 'none';   // réglage de plateforme : game master seulement
+    dailyToggle.textContent = dailyOn ? '🎲 Désactiver le défi du jour' : '🎲 Activer le défi du jour';
+  }
+  if (dailyDayEl) dailyDayEl.textContent = dailyDate ? '· ' + dailyDate : '';
+  if (!dailyBody) return;
+  if (!dailyBoard.length) { dailyBody.innerHTML = '<div class="lbnote">Aucune manche jouée aujourd\'hui — à toi de commencer !</div>'; return; }
+  const medal = ['🥇', '🥈', '🥉'];
+  dailyBody.innerHTML = dailyBoard.map((e, i) => `<div class="dayrow"><span class="dn">${medal[i] || ('#' + (i + 1))} ${avatarHtml(e.name)}${esc(e.name)}</span><span title="manches">🎮${e.games | 0}</span><span title="victoires">🏆${e.wins | 0}</span><span title="éliminations">⚡${e.kills | 0}</span><span class="dp" title="points du jour">${e.pts | 0} pts</span></div>`).join('');
+}
+if (dailyBtn) dailyBtn.onclick = () => { togglePanel(dailyPanel); send({ t: 'dayreq' }); renderDaily(); };
+if (dailyToggle) dailyToggle.onclick = () => send({ t: 'daytoggle' });
+
 /* ---------- avatars de profil (emoji ou image, liés au pseudo) ---------- */
 const AV_EMOJIS = ['🦊', '🐸', '🤖', '🐙', '🦄', '🐼', '🐝', '🦁', '🐧', '🐢', '🦖', '👻', '🐳', '🦉', '🐯', '🍄', '⚡', '🌟', '💀', '🎃'];
 const AV_IMG_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/;
@@ -238,6 +299,7 @@ if (avClear) avClear.onclick = () => setMyAvatar('');
 /* ---------- pseudo ---------- */
 nameInput.value = myName;
 nameInput.onchange = () => { myName = nameInput.value.trim().slice(0, 12); localStorage.setItem('pong-lan-name', myName); send({ t: 'name', name: myName }); };
+nameInput.onkeydown = e => e.stopPropagation();   // saisie du pseudo : Espace/flèches ne doivent pas déclencher les raccourcis du jeu
 
 /* ---------- menu de jeux ---------- */
 function renderMenu() {
@@ -260,7 +322,7 @@ function setGameSkin(id) {
 async function loadModule(id) {
   if (modId === id || loadingId === id) return;
   loadingId = id; setGameSkin(id);
-  const xf = document.getElementById('xfade'); if (xf) { xf.textContent = GAME_TITLE[id] || ''; xf.style.opacity = '1'; }   // fondu de transition + flash du nom du jeu
+  xfadeShow(GAME_TITLE[id] || '', false);          // fondu plein écran + balayage aux couleurs du nouveau jeu
   if (mod && mod.teardown) { try { mod.teardown(); } catch {} }
   mod = null; modId = null; modReady = false;
   document.querySelectorAll('.game-root').forEach(r => r.classList.add('hidden'));
@@ -275,39 +337,91 @@ async function loadModule(id) {
     if (mod.onA11y) mod.onA11y();
     const p = pend[id];                           // vider le tampon de ce jeu
     if (p) { p.msgs.forEach(x => mod.onMessage && mod.onMessage(x)); if (p.lb && mod.onLb) mod.onLb(p.lb); if (p.state && mod.onState) mod.onState(p.state); delete pend[id]; }
-    if (xf) xf.style.opacity = '0';               // révèle le nouveau jeu
-  } catch (e) { loadingId = null; if (xf) xf.style.opacity = '0'; msgTxt.textContent = 'Jeu « ' + id + ' » indisponible'; }
+    xfadeHide();                                  // révèle le nouveau jeu
+  } catch (e) { loadingId = null; xfadeHide(); msgTxt.textContent = 'Jeu « ' + id + ' » indisponible'; }
 }
 
-/* ---------- confettis de victoire (overlay global, zéro dépendance) ---------- */
+/* ---------- transitions thématiques (changement de jeu ET changement de manche) ---------- */
+const xfadeEl = document.getElementById('xfade');
+let sweepT = 0;
+// La classe `on` pilote l'animation du balayage : hors transition elle reste en pause (perf mobile).
+function xfadeShow(label, quick) {
+  if (!xfadeEl) return;
+  clearTimeout(sweepT);
+  xfadeEl.textContent = label || '';
+  if (quick) xfadeEl.classList.add('quick'); else xfadeEl.classList.remove('quick');
+  xfadeEl.classList.add('on');
+  xfadeEl.style.opacity = '1';
+}
+function xfadeHide() {
+  if (!xfadeEl) return;
+  xfadeEl.style.opacity = '0';
+  clearTimeout(sweepT);
+  sweepT = setTimeout(() => { xfadeEl.classList.remove('on'); xfadeEl.classList.remove('quick'); xfadeEl.textContent = ''; }, 320);
+}
+// Balayage court par-dessus le plateau (nouvelle manche) : le fond reste transparent, seule la bande passe.
+function themedSweep(label) {
+  if (!xfadeEl || a11y.reduceFx) return;
+  xfadeShow(label, true);
+  sweepT = setTimeout(xfadeHide, 340);
+}
+
+/* ---------- célébrations de victoire : une identité par jeu (overlay global, zéro dépendance) ---------- */
 const confettiCv = document.getElementById('confetti');
 let confettiRaf = 0;
 const lastGs = {};                 // g -> dernier gameState vu (pour ne déclencher qu'une fois)
-function fireConfetti() {
+// mode = trajectoire (chute / envol / explosion) · shape = forme dessinée · cols = palette du jeu
+const CELEB = {
+  pong:  { n: 150, mode: 'fall',  shape: 'rect',   glow: 1, cols: ['#ff5db4', '#5db4ff', '#ffffff', '#ffd36e'] },              // néon arcade
+  tron:  { n: 170, mode: 'fall',  shape: 'streak', glow: 1, cols: ['#1fe0ff', '#ff9b2f', '#ffffff', '#7ce8ff'] },              // pluie de pixels néon
+  tank:  { n: 130, mode: 'burst', shape: 'spark',  glow: 0, cols: ['#e0a92e', '#fff1c4', '#d6b878', '#ff8a3d'] },              // feu d'artifice dans le désert
+  snake: { n: 96,  mode: 'rise',  shape: 'petal',  glow: 0, cols: ['#8fe06a', '#e268b0', '#ffd36e', '#ffffff'] },              // envolée de papillons et de pétales
+  bomb:  { n: 150, mode: 'fall',  shape: 'dot',    glow: 0, cols: ['#ff5a4e', '#ffd24a', '#4ad6ff', '#7bff7b', '#ff9be0'] },   // gros confettis cartoon
+};
+function fireConfetti(gid) {
   if (!confettiCv || a11y.reduceFx) return;                       // respecte « réduire les effets »
+  const cfg = CELEB[gid || activeId] || CELEB.pong;
   const dpr = window.devicePixelRatio || 1, W = innerWidth, H = innerHeight;
   confettiCv.width = Math.round(W * dpr); confettiCv.height = Math.round(H * dpr);
   confettiCv.style.width = W + 'px'; confettiCv.style.height = H + 'px'; confettiCv.style.display = 'block';
   const cx = confettiCv.getContext('2d');
-  const cols = ['#4a9ee0', '#e06240', '#2aaf7a', '#cc9010', '#9b6cf0', '#e268b0', '#ffd36e'];
-  const parts = [];
-  for (let i = 0; i < 140; i++) parts.push({ x: W * (0.15 + Math.random() * 0.7), y: -20 - Math.random() * H * 0.4, vx: (Math.random() * 2 - 1) * 3, vy: 2 + Math.random() * 4, r: 3 + Math.random() * 4, rot: Math.random() * 6.28, vr: (Math.random() * 2 - 1) * 0.3, c: cols[(Math.random() * cols.length) | 0], life: 1 });
+  const parts = [], N = Math.round(cfg.n * (W < 520 ? 0.6 : 1));  // mobile : moins de particules
+  for (let i = 0; i < N; i++) {
+    const c = cfg.cols[(Math.random() * cfg.cols.length) | 0], ph = Math.random() * 6.28;
+    if (cfg.mode === 'burst') {                                   // gerbe depuis le centre
+      const a = Math.random() * 6.2832, sp = 2 + Math.random() * 7;
+      parts.push({ x: W / 2, y: H * 0.42, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1.5, g: 0.11, r: 2 + Math.random() * 3, rot: a, vr: 0, c, life: 1, ph });
+    } else if (cfg.mode === 'rise') {                             // envol depuis le bas
+      parts.push({ x: W * Math.random(), y: H + 20 + Math.random() * H * 0.5, vx: (Math.random() * 2 - 1) * 0.5, vy: -(0.8 + Math.random() * 1.6), g: 0, r: 3 + Math.random() * 4, rot: ph, vr: (Math.random() * 2 - 1) * 0.06, c, life: 1, ph });
+    } else {                                                      // chute classique
+      parts.push({ x: W * (0.1 + Math.random() * 0.8), y: -20 - Math.random() * H * 0.45, vx: (Math.random() * 2 - 1) * 3, vy: 2 + Math.random() * 4, g: 0.08, r: 3 + Math.random() * 4, rot: ph, vr: (Math.random() * 2 - 1) * 0.3, c, life: 1, ph });
+    }
+  }
   const t0 = performance.now();
   cancelAnimationFrame(confettiRaf);
   const step = () => {
     const age = performance.now() - t0;
     cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.clearRect(0, 0, W, H);
+    cx.shadowBlur = 0;
+    if (cfg.glow) { cx.shadowColor = 'rgba(255,255,255,.55)'; cx.shadowBlur = 8; }
     let alive = 0;
     for (const p of parts) {
-      p.vy += 0.08; p.x += p.vx; p.y += p.vy; p.rot += p.vr; p.vx *= 0.995;
-      if (age > 2200) p.life -= 0.04;
-      if (p.life <= 0 || p.y > H + 30) continue;
+      p.vy += p.g; p.vx *= 0.995;
+      if (cfg.mode === 'rise') p.x += Math.sin(age / 520 + p.ph) * 0.9;        // dérive sinusoïdale : vol de papillon
+      p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+      if (age > (cfg.mode === 'rise' ? 1600 : 2200)) p.life -= 0.035;
+      if (p.life <= 0 || p.y > H + 40 || p.y < -H * 0.6) continue;
       alive++;
-      cx.save(); cx.globalAlpha = Math.max(0, p.life); cx.translate(p.x, p.y); cx.rotate(p.rot);
-      cx.fillStyle = p.c; cx.fillRect(-p.r, -p.r * 0.5, p.r * 2, p.r); cx.restore();
+      cx.save(); cx.globalAlpha = Math.max(0, p.life); cx.translate(p.x, p.y); cx.rotate(p.rot); cx.fillStyle = p.c;
+      if (cfg.shape === 'dot') { cx.beginPath(); cx.arc(0, 0, p.r, 0, 6.2832); cx.fill(); }
+      else if (cfg.shape === 'streak') cx.fillRect(-p.r * 0.28, -p.r * 2.2, p.r * 0.56, p.r * 4.4);
+      else if (cfg.shape === 'spark') { cx.fillRect(-p.r * 0.35, -p.r * 1.6, p.r * 0.7, p.r * 3.2); cx.globalAlpha = Math.max(0, p.life) * 0.45; cx.beginPath(); cx.arc(0, 0, p.r * 1.5, 0, 6.2832); cx.fill(); }
+      else if (cfg.shape === 'petal') { cx.scale(1.4, 0.7); cx.beginPath(); cx.arc(0, 0, p.r, 0, 6.2832); cx.fill(); }   // scale plutôt que ellipse() : compatible vieux Safari
+      else cx.fillRect(-p.r, -p.r * 0.5, p.r * 2, p.r);
+      cx.restore();
     }
     if (alive > 0 && age < 4500) confettiRaf = requestAnimationFrame(step);
-    else { cx.clearRect(0, 0, W, H); confettiCv.style.display = 'none'; }
+    else { cx.shadowBlur = 0; cx.clearRect(0, 0, W, H); confettiCv.style.display = 'none'; }
   };
   confettiRaf = requestAnimationFrame(step);
 }
@@ -333,6 +447,7 @@ function connect() {
       activeId = m.active; renderMenu(); loadModule(activeId);
       const ps = m.players || [];
       roomPlayers = ps; roomHost = m.host || null;
+      dailyOn = !!m.daily; renderDaily();
       const me = ps.find(p => p.id === you.id);
       const human = ps.filter(p => p.role !== 'spectator').length;
       const specs = ps.filter(p => p.role === 'spectator').length;
@@ -353,7 +468,16 @@ function connect() {
       else if (m.on) { const was = tourState && tourState.on; tourState = m; renderTour(); if (!was) note('🏆 Tournoi lancé — que le meilleur gagne !'); }
       else { if (tourState) note('🏆 Tournoi annulé'); tourState = null; renderTour(); }
     } else if (m.t === 'denied') {
-      if (!window.__lastDN || performance.now() - window.__lastDN > 1500) { window.__lastDN = performance.now(); note('👑 Réservé au game master'); }
+      if (!window.__lastDN || performance.now() - window.__lastDN > 1500) { window.__lastDN = performance.now(); note(m.why === 'spec' ? '👁 Réservé aux joueurs — tu es spectateur' : '👑 Réservé au game master'); }
+    } else if (m.t === 'note') {
+      if (typeof m.m === 'string') note(m.m.slice(0, 160));          // message d'information émis par le hub
+    } else if (m.t === 'daily') {
+      dailyBoard = m.board || []; dailyDate = m.day || ''; renderDaily();
+    } else if (m.t === 'chat') {
+      pushChat(m);
+    } else if (m.t === 'chatlog') {
+      if (chatLogEl) chatLogEl.innerHTML = '';                       // (re)connexion : on repart de l'historique du hub, sans doublon
+      (m.log || []).forEach(r => pushChat(r, true));
     } else if (m.t === 'av') {
       if (m.name) {
         if (m.a) avatars[m.name] = m.a; else delete avatars[m.name];
@@ -365,9 +489,12 @@ function connect() {
     } else if (m.t === 'state') {
       const g = m.g; const s = { ...m }; delete s.t; delete s.g;
       const prevGs = lastGs[g];
-      if (s.gs === 'over' && typeof s.winner === 'number' && s.winner >= 0 && lastGs[g] !== 'over') fireConfetti();  // 🎉 victoire (pas une égalité)
+      if (s.gs === 'over' && typeof s.winner === 'number' && s.winner >= 0 && lastGs[g] !== 'over') fireConfetti(g);  // 🎉 victoire (pas une égalité), célébration à l'identité du jeu
       lastGs[g] = s.gs;
-      if (g === activeId && prevGs !== s.gs) renderReady();   // gs du jeu actif changé : montre/cache la barre « Prêt »
+      if (g === activeId && prevGs !== s.gs) {
+        renderReady();                                       // gs du jeu actif changé : montre/cache la barre « Prêt »
+        if (s.gs === 'countdown') themedSweep(GAME_TITLE[g] || '');   // nouvelle manche : balayage aux couleurs du jeu
+      }
       if (modId !== g) loadModule(g);
       if (modReady && modId === g) { if (mod.onState) mod.onState(s); } else pfor(g).state = s;
     }
@@ -377,4 +504,5 @@ function connect() {
 
 applyA11y();
 renderAvatarUI();
+renderDaily();
 connect();
