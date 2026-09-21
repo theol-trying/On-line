@@ -5,10 +5,11 @@ services:
     name: pong-line
     runtime: node
     plan: free
-    # Build VIDE et c'est voulu : le projet n'a aucune dépendance. Un `npm install` / `yarn install`
+    # Pas de build, et c'est voulu : le projet n'a AUCUNE dépendance. Un `npm install` / `yarn install`
     # ne fait rien d'utile, régénère un lockfile à chaque build, et ouvre une porte par laquelle une
-    # dépendance pourrait s'introduire. La version de Node vient de `.node-version` (24).
-    buildCommand: ""
+    # dépendance pourrait s'introduire. Render exigeant une commande non vide, on met un no-op qui
+    # affiche au passage la version de Node réellement installée (vérifie que `.node-version` est pris).
+    buildCommand: node --version
     startCommand: npm start
     autoDeploy: true
     # Une seule instance : la salle et la partie vivent EN MÉMOIRE dans le hub.
