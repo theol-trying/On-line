@@ -1,15 +1,28 @@
 // Jeu PONG (autoritatif) encapsulé en module de jeu. Toute la logique vit dans createPong(room).
 // Le hub gère : connexion, identité/pseudo, token de reprise, spectateurs. Ici : uniquement le jeu.
-import { W, H, BALL_R, PAD_W, PAD_OFF, PU_R } from '../../public/games/pong/shared.js';
+import { W as W0, H as H0, BALL_R, PAD_W, PAD_OFF, PU_R } from '../../public/games/pong/shared.js';
 import { board, pushHistory, save, markDirty, reset } from '../../leaderboard.js';
 
 const GID = 'pong';
 const r1 = x => Math.round(x * 10) / 10;
 
 /* ---- constantes de jeu ---- */
-const CX = W / 2, CY = H / 2, R = 232;
+// Arène À L'ÉCHELLE du nombre de participants (humains + bots) : `setArena()` agrandit le terrain
+// ET la raquette (longueur + vitesse) dans la MÊME proportion. Agrandir seul ne servirait à rien
+// (simple zoom : la raquette aurait plus de distance à couvrir). Ici la défense reste identique
+// tandis que la balle, dont la vitesse ne change pas, met plus de temps à traverser → plus de temps de réaction.
+const R0 = 232, PAD_LEN0 = 84, PAD_SPD0 = 5.5;
+let W = W0, H = H0;
+let CX = W / 2, CY = H / 2, R = R0;
+let PAD_LEN = PAD_LEN0, PAD_SPD = PAD_SPD0;
 const MAX_SEATS = 6;
-const PAD_LEN = 84, PAD_SPD = 5.5, MIN_SPD = 2.6, TICK_HZ = 60;
+const MIN_SPD = 2.6, TICK_HZ = 60;
+function setArena(n) {
+  const k = 1 + 0.13 * (Math.max(2, Math.min(MAX_SEATS, n)) - 2);   // 2 j : ×1.00 … 6 j : ×1.52
+  W = Math.round(W0 * k); H = Math.round(H0 * k);
+  CX = W / 2; CY = H / 2; R = R0 * k;
+  PAD_LEN = PAD_LEN0 * k; PAD_SPD = PAD_SPD0 * k;
+}
 const PADDLE_MAX_ANGLE = 1.05; // ~60° max p/r à la normale (impact en bout de raquette)
 const HIT_SPEEDUP = 1.05;      // léger gain de vitesse à chaque renvoi raquette
 
@@ -23,7 +36,9 @@ const BOTDIFF = { easy: { spd: 0.52, dz: 34, lead: 0 }, normal: { spd: 0.84, dz:
 const BOTDIFF_ORDER = ['easy', 'normal', 'hard', 'insane'];
 const COUNTDOWN_TICKS = 3 * 60;
 
-const SPEED = { lente: { init: 3.6, max: 10 }, normale: { init: 4.6, max: 14 }, rapide: { init: 6.2, max: 20 } };
+// Vitesses recalibrées (retours de test : « la balle est beaucoup trop rapide »).
+// Le preset par défaut utilise le niveau « rapide » : il valait 6.2/20 = la balle traversait en ~0,4 s.
+const SPEED = { lente: { init: 3.0, max: 8 }, normale: { init: 3.8, max: 11 }, rapide: { init: 4.6, max: 14 } };
 const SPEED_ORDER = ['lente', 'normale', 'rapide'];
 const ACCEL_EVERY = 75, ACCEL_MUL = 1.03;
 function mkCfg(o) {
@@ -158,6 +173,7 @@ export function createPong(room) {
     if (parts.length < 1) { geo = null; return; }
     const N = Math.min(parts.length, MAX_SEATS);
     if (!validModes(N).includes(mode)) mode = 'ffa';
+    setArena(N);                                       // terrain + raquettes à l'échelle AVANT de bâtir la géométrie
     const G = N <= 2 ? 4 : N;                          // solo : carré, 1 raquette + 3 murs (entraînement)
     geo = buildGeometry(G); geoVer++;
     let owners;
@@ -448,7 +464,7 @@ export function createPong(room) {
     const sdAccel = sdActive && rules.sudden === 'accel';
     if (cfg.accelEvery && tick % cfg.accelEvery === 0) for (const b of balls) { b.vx *= cfg.accelMul; b.vy *= cfg.accelMul; }
     if (sdAccel && tick % 30 === 0) for (const b of balls) { b.vx *= 1.04; b.vy *= 1.04; }
-    let curMax = cfg.max * (cfg.accelEvery ? (1 + tick / 3600) : 1);
+    let curMax = cfg.max * (cfg.accelEvery ? (1 + tick / 7200) : 1);   // montée du plafond adoucie (×2 en 2 min au lieu d'1)
     if (sdAccel) curMax = Math.max(curMax, cfg.max * 1.6);
     // aimant : oriente les balles vers la raquette du porteur (vitesse conservée, pas d'emballement)
     for (const p of players) if (inPlay(p) && p.magnetUntil > tick) {
@@ -473,7 +489,7 @@ export function createPong(room) {
     }
     return {
       gs: gameState, winner, fx, botCount, connected: connectedCount(), maxBots: maxBots(),
-      mode, nteams, preset, maxLives: cfg.lives,
+      mode, nteams, preset, maxLives: cfg.lives, aw: W, ah: H,
       count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / 60)) : 0,
       sd: sdActive, slow: slowUntil > tick,
       opts: {

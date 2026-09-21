@@ -1,6 +1,12 @@
 // Jeu SNAKE multijoueur (Slither-like). 1 à 6 joueurs. FFA ou équipes.
 // On grandit en mangeant ; toucher un mur ou un serpent (soi ou autre) = mort ; dernier en vie gagne. Solo = entraînement (score).
-import { GW, GH } from '../../public/games/snake/shared.js';
+import { GW as GW0, GH as GH0 } from '../../public/games/snake/shared.js';
+// Grille À L'ÉCHELLE du nombre de participants (chaque serpent occupe un nombre fixe de cases).
+let GW = GW0, GH = GH0;
+function setGrid(n) {
+  const side = Math.min(46, Math.round(GW0 * (1 + 0.13 * (Math.max(2, n) - 2))));   // 2 j : 30 … 6 j : 46
+  GW = side; GH = side;
+}
 import { board, pushHistory, save, markDirty, reset } from '../../leaderboard.js';
 
 const GID = 'snake';
@@ -105,7 +111,8 @@ export function createSnake(room) {
   const cellFree = (x, y) => !occupiedBySnake(x, y) && !foodAt(x, y) && !rocks.has(key(x, y));
   function pickFoodType() { const r = Math.random(); return r < 0.08 ? 'gold' : r < 0.13 ? 'shrink' : r < 0.18 ? 'ghost' : 'apple'; }
   function replenishFood() {
-    const target = rush ? RUSH_FOOD : FOOD_COUNT;
+    const base = rush ? RUSH_FOOD : FOOD_COUNT;
+    const target = base + Math.max(0, (nParts || 2) - 2) * (rush ? 2 : 1);   // plus de joueurs = plus de pastilles
     let guard = 0;
     while (food.length < target && guard++ < target) {
       let placed = false;
@@ -137,8 +144,9 @@ export function createSnake(room) {
   function placeRocks() {                            // variante Obstacles : rochers loin des têtes
     rocks = new Set();
     const heads = players.filter(p => p.playing).map(p => head(p));
+    const target = Math.round(ROCK_COUNT * (GW * GH) / (GW0 * GH0));   // densité de rochers constante
     let placed = 0, guard = 0;
-    while (placed < ROCK_COUNT && guard++ < 400) {
+    while (placed < target && guard++ < 900) {
       const x = 1 + Math.floor(Math.random() * (GW - 2)), y = 1 + Math.floor(Math.random() * (GH - 2)), k = key(x, y);
       if (rocks.has(k) || occupiedBySnake(x, y)) continue;
       let near = false; for (const h of heads) if (Math.abs(h.x - x) + Math.abs(h.y - y) < 4) { near = true; break; }
@@ -160,6 +168,7 @@ export function createSnake(room) {
     nteams = numTeamsFor(mode, N);
     parts.forEach((p, i) => { p.playing = true; p.team = i % nteams; });
     nParts = N; deaths = 0; endTick = 0; winner = null; fx = [];
+    setGrid(N);                                        // grille dimensionnée AVANT le placement
     spawnPlayers(parts); rocks = new Set(); if (variant === 2) placeRocks(); replenishFood();
     round++; tick = 0; countdownUntil = COUNTDOWN_TICKS; gameState = 'countdown';
   }
@@ -269,7 +278,7 @@ export function createSnake(room) {
   function snapshot() {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, variant, rush, rushTarget: RUSH_TARGET, rocks: [...rocks],
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, variant, rush, rushTarget: RUSH_TARGET, gw: GW, gh: GH, rocks: [...rocks],
       food: food.map(f => ({ x: f.x, y: f.y, t: f.t || 'apple' })),
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, solo: nParts < 2 } : null,
       players: players.map(p => ({

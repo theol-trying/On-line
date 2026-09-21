@@ -92,15 +92,16 @@ function renderGlobal() {
   const list = Object.values(agg).sort((x, y) => y.wins - x.wins || y.kills - x.kills || y.games - x.games);
   if (!list.length) { globalBody.innerHTML = '<div class="lbnote">Aucune partie enregistrée pour l\'instant.</div>'; return; }
   const medal = ['🥇', '🥈', '🥉'];
-  globalBody.innerHTML = list.map((e, i) => `<div class="lbrow"><span class="lbn">${medal[i] || ('#' + (i + 1))} ${esc(e.name)}</span><span title="parties">🎮${e.games}</span><span title="victoires">🏆${e.wins}</span><span title="éliminations">⚡${e.kills}</span><span title="jeux différents joués">🎲${e.jeux}</span></div>`).join('');
+  globalBody.innerHTML = list.map((e, i) => `<div class="lbrow"><span class="lbn">${medal[i] || ('#' + (i + 1))} ${avatarHtml(e.name)}${esc(e.name)}</span><span title="parties">🎮${e.games}</span><span title="victoires">🏆${e.wins}</span><span title="éliminations">⚡${e.kills}</span><span title="jeux différents joués">🎲${e.jeux}</span></div>`).join('');
 }
 const esc = s => ('' + s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 /* ---------- admin : réinitialisation des classements (réservé au détenteur de la clé) ---------- */
+let adminKey = '';                       // clé admin = marqueur « game master » (présentée au hub à la connexion)
 (function initAdmin() {
   const urlKey = new URLSearchParams(location.search).get('admin');
   if (urlKey) { localStorage.setItem('pong-lan-admin', urlKey); try { history.replaceState(null, '', location.pathname); } catch {} } // mémorise la clé puis nettoie l'URL
-  const adminKey = localStorage.getItem('pong-lan-admin') || '';
+  adminKey = localStorage.getItem('pong-lan-admin') || '';
   const adminBox = document.getElementById('adminBox'), adminResetBtn = document.getElementById('adminResetBtn');
   if (adminKey && adminBox) adminBox.style.display = '';
   if (adminResetBtn) adminResetBtn.onclick = () => {
@@ -135,7 +136,7 @@ function renderReady() {
   if (!idle || !me || (!isSpec && players.length < 2)) { readyBar.classList.add('hidden'); return; }   // seul : pas de barre « Prêt » (le hub ne gate pas non plus) ; toujours visible pour un spectateur (bouton siège)
   readyBar.classList.remove('hidden');
   const nready = players.filter(p => p.ready).length;
-  readyList.innerHTML = players.map(p => `<span class="rdy ${p.ready ? 'on' : ''}">${p.ready ? '✅' : '⚪'} ${esc(p.name || 'Joueur')}${p.id === roomHost ? ' 👑' : ''}</span>`).join('');
+  readyList.innerHTML = players.map(p => `<span class="rdy ${p.ready ? 'on' : ''}">${p.ready ? '✅' : '⚪'} ${avatarHtml(p.name)}${esc(p.name || 'Joueur')}${p.id === roomHost ? ' 👑' : ''}</span>`).join('');
   if (readyCount) readyCount.textContent = `Prêts : ${nready}/${players.length}`;
   const meReady = !!me.ready;
   readyBtn.style.display = me.role === 'player' ? '' : 'none';
@@ -178,6 +179,61 @@ if (tourBtn) tourBtn.onclick = () => {
   if (tourState && tourState.on && !confirm('Annuler le tournoi en cours ?')) return;
   send({ t: 'tour' });
 };
+
+/* ---------- avatars de profil (emoji ou image, liés au pseudo) ---------- */
+const AV_EMOJIS = ['🦊', '🐸', '🤖', '🐙', '🦄', '🐼', '🐝', '🦁', '🐧', '🐢', '🦖', '👻', '🐳', '🦉', '🐯', '🍄', '⚡', '🌟', '💀', '🎃'];
+const AV_IMG_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/;
+const avatars = {};                       // pseudo -> emoji | data URL
+let myAvatar = localStorage.getItem('pong-lan-avatar') || '';
+const avBtn = document.getElementById('avBtn'), avPanel = document.getElementById('avPanel');
+const avPrev = document.getElementById('avPrev'), avGrid = document.getElementById('avGrid');
+const avFile = document.getElementById('avFile'), avClear = document.getElementById('avClear');
+
+function avatarHtml(name, cls) {          // HTML sûr : l'image n'est acceptée qu'en base64 strict
+  const a = name && avatars[name];
+  if (!a) return '';
+  if (a.slice(0, 11) === 'data:image/') return AV_IMG_RE.test(a) ? `<img class="${cls || 'av'}" src="${a}" alt="">` : '';
+  return `<span class="${cls || 'av'} av-e">${esc(a)}</span>`;
+}
+window.__AV = n => avatarHtml(n);         // utilisé par les cartes HUD des 5 jeux
+function avBig(a) { return a ? (a.slice(0, 11) === 'data:image/' ? (AV_IMG_RE.test(a) ? `<img src="${a}" alt="">` : '🙂') : esc(a)) : '🙂'; }
+function renderAvatarUI() {
+  if (avBtn) avBtn.innerHTML = avBig(myAvatar);
+  if (avPrev) avPrev.innerHTML = avBig(myAvatar);
+}
+function setMyAvatar(a) {
+  myAvatar = a || '';
+  try { localStorage.setItem('pong-lan-avatar', myAvatar); } catch {}
+  if (myName) { if (myAvatar) avatars[myName] = myAvatar; else delete avatars[myName]; }
+  send({ t: 'avatar', a: myAvatar });
+  renderAvatarUI(); renderReady();
+}
+function avFromFile(file) {               // réduction 64×64 recadrée au centre → data URL légère
+  const fr = new FileReader();
+  fr.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const S = 64, cv = document.createElement('canvas'); cv.width = cv.height = S;
+      const cx = cv.getContext('2d'), s = Math.min(img.width, img.height);
+      cx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, S, S);
+      let out = cv.toDataURL('image/webp', 0.75);
+      if (out.slice(0, 15) !== 'data:image/webp') out = cv.toDataURL('image/jpeg', 0.75);   // vieux Safari
+      if (out.length > 14000) out = cv.toDataURL('image/jpeg', 0.5);
+      if (out.length > 19000) { note('Image trop lourde, essaie une photo plus simple'); return; }
+      setMyAvatar(out);
+      note('Avatar mis à jour');
+    };
+    img.onerror = () => note('Image illisible');
+    img.src = fr.result;
+  };
+  fr.onerror = () => note('Lecture du fichier impossible');
+  fr.readAsDataURL(file);
+}
+if (avGrid) avGrid.innerHTML = AV_EMOJIS.map(e => `<button data-a="${e}">${e}</button>`).join('');
+if (avGrid) avGrid.querySelectorAll('button').forEach(b => b.onclick = () => setMyAvatar(b.dataset.a));
+if (avBtn) avBtn.onclick = () => { renderAvatarUI(); togglePanel(avPanel); };
+if (avFile) avFile.onchange = () => { const f = avFile.files && avFile.files[0]; if (f) avFromFile(f); avFile.value = ''; };
+if (avClear) avClear.onclick = () => setMyAvatar('');
 
 /* ---------- pseudo ---------- */
 nameInput.value = myName;
@@ -265,7 +321,7 @@ function connect() {
   setStatus('Connexion…', '');
   const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';   // wss en ligne (HTTPS Render), ws en LAN local
   ws = new WebSocket(`${wsProto}//${location.host}${you.token ? '/?t=' + encodeURIComponent(you.token) : ''}`);
-  ws.onopen = () => { if (myName) send({ t: 'name', name: myName }); startPing(); };
+  ws.onopen = () => { if (adminKey) send({ t: 'auth', key: adminKey }); if (myName) send({ t: 'name', name: myName }); if (myAvatar) send({ t: 'avatar', a: myAvatar }); startPing(); };
   ws.onmessage = e => {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.t === 'hello') {
@@ -296,6 +352,14 @@ function connect() {
       if (m.done) { tourState = null; renderTour(); showPodium(m.scores); }
       else if (m.on) { const was = tourState && tourState.on; tourState = m; renderTour(); if (!was) note('🏆 Tournoi lancé — que le meilleur gagne !'); }
       else { if (tourState) note('🏆 Tournoi annulé'); tourState = null; renderTour(); }
+    } else if (m.t === 'denied') {
+      if (!window.__lastDN || performance.now() - window.__lastDN > 1500) { window.__lastDN = performance.now(); note('👑 Réservé au game master'); }
+    } else if (m.t === 'av') {
+      if (m.name) {
+        if (m.a) avatars[m.name] = m.a; else delete avatars[m.name];
+        renderReady();
+        if (globalPanel && !globalPanel.classList.contains('hidden')) renderGlobal();
+      }
     } else if (m.t === 'notready') {
       if (!window.__lastNR || performance.now() - window.__lastNR > 1500) { window.__lastNR = performance.now(); note('⏳ En attente que tous les joueurs soient prêts'); } // anti-spam (Espace en auto-répétition)
     } else if (m.t === 'state') {
@@ -312,4 +376,5 @@ function connect() {
 }
 
 applyA11y();
+renderAvatarUI();
 connect();

@@ -18,6 +18,14 @@ const REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const REDIS_KEY = process.env.LEADERBOARD_KEY || 'pong-line:store';
 const useRedis = !!(REST_URL && REST_TOKEN);
 
+// --- Avatars (profils) : clé SÉPARÉE du classement ---
+// Pourquoi séparée : le classement est sauvegardé à chaque fin de manche ; on ne veut pas
+// ré-uploader toutes les images à ce rythme. Ici on n'écrit que lors d'un changement d'avatar.
+const AV_KEY = process.env.AVATAR_KEY || 'pong-line:avatars';
+const AV_MAX = 60;                 // nb max d'avatars conservés (purge du plus ancien au-delà)
+let avatars = {};                  // pseudo -> emoji | data URL (image réduite 64×64)
+let AV_PATH = null;
+
 // Envoie une commande Redis via l'API REST Upstash. cmd = ['SET', key, value] / ['GET', key] ...
 async function redisCmd(cmd) {
   const res = await fetch(REST_URL, {
@@ -36,8 +44,33 @@ function hydrate(d) {
   else store = d;                                                                                  // déjà namespacé
 }
 
+function loadAvatars() {
+  if (useRedis) {
+    redisCmd(['GET', AV_KEY])
+      .then(r => { if (r && typeof r.result === 'string') avatars = JSON.parse(r.result) || {}; })
+      .catch(e => console.error('[avatars] Chargement Upstash échoué :', e.message));
+    return;
+  }
+  if (AV_PATH) readFile(AV_PATH, 'utf8').then(s => { avatars = JSON.parse(s) || {}; }).catch(() => {});
+}
+function saveAvatars() {
+  const d = JSON.stringify(avatars);
+  if (useRedis) { redisCmd(['SET', AV_KEY, d]).catch(e => console.error('[avatars] Sauvegarde Upstash échouée :', e.message)); return; }
+  if (AV_PATH) writeFile(AV_PATH, d).catch(() => {});
+}
+export function getAvatar(name) { return (name && avatars[name]) || null; }
+export function setAvatar(name, data) {          // data falsy => retrait de l'avatar
+  if (!name) return;
+  if (data) avatars[name] = data; else delete avatars[name];
+  const keys = Object.keys(avatars);
+  if (keys.length > AV_MAX) delete avatars[keys[0]];   // ordre d'insertion => le plus ancien saute
+  saveAvatars();
+}
+
 export function initLeaderboard(path) {
   PATH = path;
+  AV_PATH = path.replace(/leaderboard\.json$/, 'avatars.json');
+  loadAvatars();
   if (useRedis) {
     console.log('[leaderboard] Stockage : Upstash Redis (en ligne).');
     redisCmd(['GET', REDIS_KEY])
