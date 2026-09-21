@@ -32,11 +32,17 @@ function decodeFrame(buf) {
   return { opcode, payload: payload.toString('utf8'), rest: buf.subarray(off + len) };
 }
 
+/** Trame prête à l'emploi, à écrire telle quelle sur PLUSIEURS sockets.
+ *  Le hub diffuse le même instantané à tout le monde : on l'encode UNE fois au lieu d'une fois
+ *  par client (à 10 joueurs × 60 Hz, ça évitait 600 encodages de ~3 Ko par seconde). */
+export function wsFrame(str) { return encodeFrame(str); }
+
 function makeConn(socket) {
-  socket.setNoDelay(true);
+  socket.setNoDelay(true);                 // Nagle désactivé : les petites trames partent tout de suite (ping)
   const conn = {
     socket, readyState: 1, _msg: null, _close: null,
     send(str) { if (this.readyState === 1) { try { socket.write(encodeFrame(str)); } catch {} } },
+    sendRaw(buf) { if (this.readyState === 1) { try { socket.write(buf); } catch {} } },   // trame déjà encodée (cf. wsFrame)
     onMessage(fn) { this._msg = fn; },
     onClose(fn) { this._close = fn; },
   };

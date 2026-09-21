@@ -370,6 +370,7 @@ function themedSweep(label) {
 const confettiCv = document.getElementById('confetti');
 let confettiRaf = 0;
 const lastGs = {};                 // g -> dernier gameState vu (pour ne déclencher qu'une fois)
+const stateCache = {};             // g -> dernier état COMPLET reconstitué (le hub n'envoie que les clés modifiées)
 // mode = trajectoire (chute / envol / explosion) · shape = forme dessinée · cols = palette du jeu
 const CELEB = {
   pong:  { n: 150, mode: 'fall',  shape: 'rect',   glow: 1, cols: ['#ff5db4', '#5db4ff', '#ffffff', '#ffd36e'] },              // néon arcade
@@ -487,7 +488,12 @@ function connect() {
     } else if (m.t === 'notready') {
       if (!window.__lastNR || performance.now() - window.__lastNR > 1500) { window.__lastNR = performance.now(); note('⏳ En attente que tous les joueurs soient prêts'); } // anti-spam (Espace en auto-répétition)
     } else if (m.t === 'state') {
-      const g = m.g; const s = { ...m }; delete s.t; delete s.g;
+      // Le hub omet les clés inchangées depuis la diffusion précédente : on les reprend de l'état
+      // précédent de CE jeu. Nouvel objet à chaque fois — les instantanés déjà empilés dans le
+      // tampon d'interpolation des jeux ne doivent jamais être modifiés après coup.
+      const g = m.g; const part = { ...m }; delete part.t; delete part.g;
+      const s = stateCache[g] ? Object.assign({}, stateCache[g], part) : part;
+      stateCache[g] = s;
       const prevGs = lastGs[g];
       if (s.gs === 'over' && typeof s.winner === 'number' && s.winner >= 0 && lastGs[g] !== 'over') fireConfetti(g);  // 🎉 victoire (pas une égalité), célébration à l'identité du jeu
       lastGs[g] = s.gs;
