@@ -12,6 +12,13 @@ const r1 = x => Math.round(x * 10) / 10;
 // (simple zoom : la raquette aurait plus de distance à couvrir). Ici la défense reste identique
 // tandis que la balle, dont la vitesse ne change pas, met plus de temps à traverser → plus de temps de réaction.
 const R0 = 232, PAD_LEN0 = 84, PAD_SPD0 = 5.5;
+// La raquette occupe une FRACTION CONSTANTE du bord qu'elle défend, au lieu d'une longueur absolue.
+// Avant, elle suivait l'agrandissement du terrain alors que les arêtes du polygone RACCOURCISSENT
+// quand on ajoute des joueurs (longueur d'arête = 2·R·sin(π/G)) : on couvrait 26 % de son bord en
+// duel mais 59 % à 10 joueurs — la défense devenait triviale et la raquette mangeait le terrain.
+// 0,25 est précisément la valeur historique du duel (26 %) et du carré (26 %) : rien ne change
+// pour les deux configurations les plus jouées, tout rentre dans l'ordre au-dessus.
+const PAD_RATIO = 0.25;
 let W = W0, H = H0;
 let CX = W / 2, CY = H / 2, R = R0;
 let PAD_LEN = PAD_LEN0, PAD_SPD = PAD_SPD0;
@@ -23,7 +30,8 @@ function setArena(n) {
   // chacun couvre ~59 % de son bord contre ~36 % à 6 → la défense individuelle reste confortable.
   W = Math.round(W0 * k); H = Math.round(H0 * k);
   CX = W / 2; CY = H / 2; R = R0 * k;
-  PAD_LEN = PAD_LEN0 * k; PAD_SPD = PAD_SPD0 * k;
+  PAD_SPD = PAD_SPD0 * k;
+  PAD_LEN = PAD_LEN0 * k;      // valeur provisoire : recalculée sur la vraie longueur d'arête dans configure()
 }
 const PADDLE_MAX_ANGLE = 1.05; // ~60° max p/r à la normale (impact en bout de raquette)
 const HIT_SPEEDUP = 1.05;      // léger gain de vitesse à chaque renvoi raquette
@@ -188,6 +196,7 @@ export function createPong(room) {
     setArena(N);                                       // terrain + raquettes à l'échelle AVANT de bâtir la géométrie
     const G = N <= 2 ? 4 : N;                          // solo : carré, 1 raquette + 3 murs (entraînement)
     geo = buildGeometry(G); geoVer++;
+    PAD_LEN = geo.edges[0].len * PAD_RATIO;            // polygone régulier : toutes les arêtes ont la même longueur
     let owners;
     if (N >= 3) owners = Array.from({ length: N }, (_, i) => i);
     else owners = [0, 1, 2, 3].sort((a, b) => Math.abs(geo.edges[b].nx) - Math.abs(geo.edges[a].nx)).slice(0, N);
@@ -223,7 +232,11 @@ export function createPong(room) {
     gameState = 'lobby'; configure(); balls = [makeBall()];
   }
 
-  const padLenOf = p => (p.growUntil > tick ? PAD_LEN * GROW_MULT : PAD_LEN) * (p.isLeader ? 0.82 : 1) * (p.shrinkUntil > tick ? SHRINK_MULT : 1);
+  // Dérivée du bord COURANT : la raquette suit donc aussi le rétrécissement de la mort subite.
+  // Avant, l'arène se resserrait mais pas la raquette — la défense devenait plus facile à mesure
+  // que la mort subite avançait, exactement l'inverse de l'effet recherché.
+  const padBase = p => (geo && p.edge >= 0) ? geo.edges[p.edge].len * PAD_RATIO : PAD_LEN;
+  const padLenOf = p => { const b = padBase(p); return (p.growUntil > tick ? b * GROW_MULT : b) * (p.isLeader ? 0.82 : 1) * (p.shrinkUntil > tick ? SHRINK_MULT : 1); };
   function clampSpeed(b, max) {
     let spd = Math.hypot(b.vx, b.vy);
     if (spd > max) { b.vx *= max / spd; b.vy *= max / spd; spd = max; }

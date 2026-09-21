@@ -298,9 +298,10 @@ Plafonds **par jeu**, pas uniformes — chacun s'arrête là où il reste plaisa
 | Tanks | 6 | **8** | `setGridT` : grille **15 → 17 → 19**, bloc inchangé (BLK=40), ARENA = G×BLK |
 | Bomberman | 6 | **8** | `setGridB` : grille **13 → 15 → 17** (toujours impaire), ARENA = GW×CELL |
 
-**Pong reste confortable à 10** malgré des arêtes plus courtes : la longueur d'une arête vaut 2·R·sin(π/N)
-alors que la raquette suit k, donc chacun couvre **~59 %** de son bord à 10 joueurs contre **~36 %** à 6.
-Ce n'est pas la défense qui devient dure, c'est le trafic au centre.
+**Effet de bord sur Pong, corrigé depuis** (voir « Raquettes proportionnelles » plus bas) : les arêtes du
+polygone RACCOURCISSENT quand on ajoute des joueurs (2·R·sin(π/G)) alors que la raquette suivait k —
+elle finissait par couvrir 59 % de son bord à 10 joueurs. J'avais présenté ça comme un confort ; c'était
+un déséquilibre, signalé par l'utilisateur en test.
 
 **Ce qui a dû suivre :**
 - **Tanks / Bomberman** : leurs départs étaient un **tableau de 6 positions en dur** sur une grille **fixe**.
@@ -418,6 +419,29 @@ glyphes de motif par siège, hexagone de Pong, 0 erreur console.
 delta), il ferait passer de 6,6 à 3,3 Ko/s : une économie sans conséquence pratique, qui ne justifie pas de toucher
 au WebSocket écrit à la main (rayon de souffle total) ni de dépendre du comportement du proxy Render, non testable
 depuis ce poste.
+
+## Raquettes proportionnelles (Pong, septembre 2026)
+La raquette occupait une **longueur absolue** qui suivait l'agrandissement du terrain, alors que les arêtes
+du polygone **raccourcissent** avec le nombre de joueurs. Part du bord réellement couverte, mesurée dans les
+instantanés du serveur (`players[].len` ÷ `geo.edges[].len`) :
+
+| Joueurs | 2 | 3 | 4 | 5 | 6 | 8 | 10 |
+|---|---|---|---|---|---|---|---|
+| Avant | 26 % | 21 % | 26 % | 31 % | 36 % | 47 % | **59 %** |
+| Après | 25 % | 25 % | 25 % | 25 % | 25 % | 25 % | **25 %** |
+
+`PAD_RATIO = 0.25`, appliqué à la **longueur d'arête réelle** (`geo.edges[0].len`, polygone régulier) au lieu
+d'une longueur absolue mise à l'échelle. Le choix de 1/4 n'est pas arbitraire : c'est **exactement la valeur
+historique du duel et du carré** (26 %), les deux configurations les plus jouées — elles ne bougent donc pas,
+et tout rentre dans l'ordre au-dessus. À 10 joueurs la raquette passe de 171 à **73 px**.
+
+- `padLenOf()` dérive du bord **courant**, pas d'une valeur figée au départ : la raquette suit donc aussi le
+  **rétrécissement de la mort subite**. Avant, l'arène se resserrait sans la raquette, donc la défense devenait
+  *plus facile* à mesure que la mort subite avançait — l'inverse de l'effet recherché.
+- Les modificateurs existants (👐 grow ×1,7, ▽ shrink ×0,6, malus de leader ×0,82) s'appliquent par-dessus,
+  inchangés. Même cumulés, la raquette reste largement plus courte que son bord.
+- `PAD_SPD` n'a pas bougé : il suit toujours k, si bien qu'à 10 joueurs on traverse son bord en ~26 ticks
+  contre ~60 en duel — ce qui compense la raquette plus courte.
 
 ## Limites connues (assumées)
 - **Reste à gagner, non fait** : **prédiction locale** de sa propre raquette — le seul levier qui retire vraiment
