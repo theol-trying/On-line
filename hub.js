@@ -32,6 +32,7 @@ const CHAT_MAX = 20;
 let frameNo = 0;
 let pendingFx = [];                            // fx des ticks non diffusés (sinon impacts/explosions perdus : les jeux vident fx à chaque tick)
 let prevSent = {};                             // clé -> dernière valeur diffusée (sérialisée)
+let prevPlayers = null;                        // dernier tableau `players` diffusé (base du delta par joueur)
 let fullNext = true;                           // force un instantané complet au prochain envoi
 const ALWAYS = new Set(['t', 'g', 'fx']);      // jamais omis : routage, et fx est ponctuel (le fusionner le rejouerait en boucle)
 const TRACE = !!process.env.HUB_TRACE;         // HUB_TRACE=1 : journalise chaque diffusion (complète ou delta) — mis en const, process.env est lent
@@ -96,7 +97,7 @@ function pick(id) {
   if (game && game.dispose) game.dispose();
   activeId = id; game = null; ensureGame();
   for (const m of members) joinGame(m);          // tout le monde rejoint le nouveau jeu
-  fullNext = true; pendingFx = [];               // autre jeu = autres clés : on repart d'un instantané complet
+  fullNext = true; pendingFx = []; prevPlayers = null;   // autre jeu = autres clés et autres sièges : on repart d'un instantané complet
   setLoop(); broadcastRoom();
 }
 
@@ -136,10 +137,34 @@ function step() {
       const out = {};
       for (const k in full) {
         const v = full[k];
-        if (v === undefined) continue;                     // le jeu l'omet déjà (delta grid/geo) : on n'y touche pas
+        if (v === undefined || k === 'players') continue;   // undefined : le jeu l'omet déjà (delta grid/geo) ; players : delta dédié ci-dessous
         if (ALWAYS.has(k)) { out[k] = v; continue; }
         const sv = JSON.stringify(v);
         if (prevSent[k] !== sv) { out[k] = v; prevSent[k] = sv; }
+      }
+      // `players` pèse ~79 % du paquet alors que presque tout y est statique (pseudo, siège, équipe, bot…).
+      // On n'envoie donc que les joueurs — et les champs — réellement modifiés, sous forme [index, {champs}].
+      // Les instantanés COMPLETS (arrivée, changement de jeu, filet des 2 s) portent le tableau entier :
+      // le client a donc toujours une base saine sur laquelle appliquer les deltas suivants.
+      const ps = full.players;
+      if (Array.isArray(ps)) {
+        if (wasFull || !prevPlayers || prevPlayers.length !== ps.length) out.players = ps;
+        else {
+          const pd = [];
+          for (let i = 0; i < ps.length; i++) {
+            const p = ps[i], old = prevPlayers[i], d = {};
+            let any = false;
+            for (const f in p) {
+              const a = p[f], b = old[f];
+              if (a === b) continue;                                                                 // primitifs : comparaison directe
+              if (a && typeof a === 'object' && JSON.stringify(a) === JSON.stringify(b)) continue;   // tableaux/objets (buffs…)
+              d[f] = a; any = true;
+            }
+            if (any) pd.push([i, d]);
+          }
+          if (pd.length) out.pd = pd;
+        }
+        prevPlayers = ps;     // les jeux reconstruisent leurs objets joueur à chaque tick : garder la référence est sûr
       }
       const buf = wsFrame(JSON.stringify(out));            // encodée une seule fois pour tous les clients
       for (const m of members) if (m.conn.readyState === 1) m.conn.sendRaw(buf);

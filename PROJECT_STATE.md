@@ -382,16 +382,46 @@ Découverts dès la première sonde d'intégration, tous deux **déjà déployé
 > même vides — passer de 6 à 10 sièges a donc renchéri le cas courant. C'est l'argument le plus fort pour
 > l'optimisation « tronquer `players` au dernier siège occupé », qui profiterait surtout aux petites parties.
 
+## Delta par joueur (septembre 2026) — le gros morceau réseau
+`players` pesait **79 %** du paquet en réexpédiant 60 fois par seconde des champs statiques (pseudo, siège, équipe,
+`bot`, `connected`). Le hub n'envoie plus que les joueurs — et les champs — **réellement modifiés**, sous forme
+`pd: [[index, {champs}], …]` ; `app.js` reconstruit un tableau `players` **complet** avant de le passer au jeu.
+
+**Fait entièrement dans `hub.js` + `app.js` : aucune ligne modifiée dans les 5 jeux.** (Mon estimation initiale
+« ça touche les 5 jeux des deux côtés » était fausse — c'est ce qui a rendu l'option bien moins risquée.)
+- Les instantanés **complets** (arrivée, changement de jeu, filet des 2 s) portent le tableau entier : le client a
+  toujours une base saine, et toute dérive se corrige d'elle-même en moins de 2 s.
+- Reconstruction **immuable** : nouveaux objets pour les joueurs modifiés, sinon les instantanés déjà empilés dans
+  les tampons d'interpolation seraient réécrits après coup.
+- Comparaison par champ : `===` pour les primitifs, `JSON.stringify` seulement pour les objets/tableaux (`buffs`).
+
+**Validation** — échafaudage temporaire (`HUB_VERIFY=1` joignait une copie de vérité du tableau à chaque message),
+sonde comparant champ par champ sa reconstitution : **0 écart** sur les 5 jeux, à 4, 8 et 10 participants.
+Échafaudage retiré avant livraison. Vérifié ensuite dans un **vrai navigateur** : 6 cartes HUD correctes,
+glyphes de motif par siège, hexagone de Pong, 0 erreur console.
+
+### Débits mesurés (sonde 10 clients, serveur local)
+| Jeu | Avant tout | Après lot réseau | **Après delta joueurs** |
+|---|---|---|---|
+| Pong 10 j | 174 Ko/s | 57,9 | **4,4** |
+| Pong 4 j | ~174 | 113,6 | **4,4** |
+| Tanks 8 j | — | 11,6 | **4,1** |
+| Bomberman 8 j | — | 10,3 | **3,0** |
+| Tron 10 j | — | 5,5 | **2,2** |
+| Snake 10 j | — | 5,4 | **2,4** |
+
+> Soit **−97 %** sur Pong à 10 joueurs. Ces chiffres sont des moyennes de session (lobby compris) ; en pleine action
+> le régime permanent mesuré est de ~226 o/message, soit ≈ **6,6 Ko/s** à 30 Hz. Dans les deux cas, le problème de
+> bande passante n'existe plus.
+
+**permessage-deflate est donc abandonné.** Mesuré à −88 % séparément et complémentaire (−51 % de plus après le
+delta), il ferait passer de 6,6 à 3,3 Ko/s : une économie sans conséquence pratique, qui ne justifie pas de toucher
+au WebSocket écrit à la main (rayon de souffle total) ni de dépendre du comportement du proxy Render, non testable
+depuis ce poste.
+
 ## Limites connues (assumées)
-- **Reste à gagner sur le réseau, non fait** (par ordre de rendement) :
-  1. **permessage-deflate** — mesuré à **−77 %** sur l'instantané Pong (2 957 → 666 o). Transparent pour le code de
-     jeu. En négociant `server_no_context_takeover`, on compresse **une fois par tick** et on diffuse la même trame.
-     Non fait : ça touche le WebSocket écrit à la main, une erreur d'un octet casse tout le site, et rien n'est
-     testable en réel depuis ce poste. À livrer avec un coupe-circuit par variable d'environnement.
-  2. **Alléger le tableau `players`** — il pèse **79 %** du paquet et réexpédie 60 fois par seconde des choses
-     statiques (pseudo, siège, équipe, `bot`, `connected`). N'envoyer ces champs qu'au changement.
-  3. **Prédiction locale** de sa propre raquette : le seul levier qui retire vraiment l'aller-retour réseau du
-     ressenti de contrôle.
+- **Reste à gagner, non fait** : **prédiction locale** de sa propre raquette — le seul levier qui retire vraiment
+  l'aller-retour réseau du *ressenti* de contrôle (le débit, lui, n'est plus un sujet).
 - Hébergement Render en **Europe (Frankfurt)** — confirmé par l'utilisateur, donc ~15-25 ms de ping : le ping
   résiduel vient du code et du réseau local, pas de la région.
 - La boucle serveur utilise `setInterval(step, 1000/hz)` : à 60 Hz, 16,67 ms n'est pas entier → le jeu tourne en

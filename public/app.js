@@ -492,7 +492,17 @@ function connect() {
       // précédent de CE jeu. Nouvel objet à chaque fois — les instantanés déjà empilés dans le
       // tampon d'interpolation des jeux ne doivent jamais être modifiés après coup.
       const g = m.g; const part = { ...m }; delete part.t; delete part.g;
-      const s = stateCache[g] ? Object.assign({}, stateCache[g], part) : part;
+      const prevS = stateCache[g];
+      const s = prevS ? Object.assign({}, prevS, part) : part;
+      // `pd` = delta par joueur : [index, {champs modifiés}]. On reconstruit un tableau players COMPLET,
+      // en créant de NOUVEAUX objets pour les joueurs modifiés — les instantanés déjà empilés dans les
+      // tampons d'interpolation des jeux gardent ainsi leurs valeurs d'origine.
+      if (part.pd && prevS && Array.isArray(prevS.players)) {
+        const arr = prevS.players.slice();
+        for (const d of part.pd) { const i = d[0]; if (i >= 0 && i < arr.length) arr[i] = Object.assign({}, arr[i], d[1]); }
+        s.players = arr;
+      }
+      delete s.pd;                                            // les modules de jeu ne voient jamais le delta
       stateCache[g] = s;
       const prevGs = lastGs[g];
       if (s.gs === 'over' && typeof s.winner === 'number' && s.winner >= 0 && lastGs[g] !== 'over') fireConfetti(g);  // 🎉 victoire (pas une égalité), célébration à l'identité du jeu
