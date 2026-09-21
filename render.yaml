@@ -5,6 +5,12 @@ services:
     name: pong-line
     runtime: node
     plan: free
-    buildCommand: npm install   # aucune dépendance, mais Render attend une commande de build
+    # Build VIDE et c'est voulu : le projet n'a aucune dépendance. Un `npm install` / `yarn install`
+    # ne fait rien d'utile, régénère un lockfile à chaque build, et ouvre une porte par laquelle une
+    # dépendance pourrait s'introduire. La version de Node vient de `.node-version` (24).
+    buildCommand: ""
     startCommand: npm start
     autoDeploy: true
+    # Une seule instance : la salle et la partie vivent EN MÉMOIRE dans le hub.
+    # Avec deux instances, les joueurs tomberaient sur des serveurs différents sans jamais se voir.
+    numInstances: 1
