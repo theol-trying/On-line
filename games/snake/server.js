@@ -7,7 +7,7 @@ function setGrid(n) {
   const side = Math.min(46, Math.round(GW0 * (1 + 0.13 * (Math.max(2, n) - 2))));   // 2 j : 30 … 6 j : 46
   GW = side; GH = side;
 }
-import { board, pushHistory, save, markDirty, reset } from '../../leaderboard.js';
+import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 
 const GID = 'snake';
 const MAX_SEATS = 6;
@@ -68,6 +68,7 @@ export function createSnake(room) {
       if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
       const e = lbEntry(p.name); e.games++;
       if (winner >= 0 && p.team === winner) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });   // classement du jour (tous jeux)
       e.kills += p.kills;
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / TICK_HZ;
       e.survSum += surv; if (surv > e.bestSurvivalSec) e.bestSurvivalSec = surv;

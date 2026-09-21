@@ -1,7 +1,7 @@
 // Jeu PONG (autoritatif) encapsulé en module de jeu. Toute la logique vit dans createPong(room).
 // Le hub gère : connexion, identité/pseudo, token de reprise, spectateurs. Ici : uniquement le jeu.
 import { W as W0, H as H0, BALL_R, PAD_W, PAD_OFF, PU_R } from '../../public/games/pong/shared.js';
-import { board, pushHistory, save, markDirty, reset } from '../../leaderboard.js';
+import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 
 const GID = 'pong';
 const r1 = x => Math.round(x * 10) / 10;
@@ -83,6 +83,7 @@ export function createPong(room) {
       const e = lbEntry(p.name);
       e.games++;
       if (winner >= 0 && p.team === winner) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });   // classement du jour (tous jeux)
       e.kills += p.kills; e.dmg += p.dmg; e.bounces += p.hits; e.pu += p.pu;
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / 60;
       e.survSum += surv;

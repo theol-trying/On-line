@@ -1,6 +1,7 @@
 // Jeu TANK COMBAT v2 — arènes à murs destructibles, power-ups, mines, collision tank-tank, FFA/équipes, mode manches.
 import { ARENA, TANK_R, SHELL_R, BLK, G } from '../../public/games/tank/shared.js';
-import { board, pushHistory, save, markDirty, reset } from '../../leaderboard.js';
+import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
+import { dailyRng } from '../../dayseed.js';
 
 const GID = 'tank';
 const MAX_SEATS = 6;
@@ -28,14 +29,14 @@ const bidx = (gx, gy) => gy * G + gx;
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
 // génération procédurale des murs solides (sym180 / aléatoire / 4 coins) avec connectivité garantie
-function genSolidSet(style, density, safe) {
+function genSolidSet(style, density, safe, rnd) {
   const cache = new Map();
   const canon = (x, y) => {
     if (style === 1) return x + ',' + y;                                  // aléatoire : chaque case décidée seule
     if (style === 0) { const bx = G - 1 - x, by = G - 1 - y; return (y < by || (y === by && x <= bx)) ? (x + ',' + y) : (bx + ',' + by); } // 180°
     return Math.min(x, G - 1 - x) + ',' + Math.min(y, G - 1 - y);         // 4 coins
   };
-  const want = (x, y) => { const k = canon(x, y); if (!cache.has(k)) cache.set(k, Math.random() < density); return cache.get(k); };
+  const want = (x, y) => { const k = canon(x, y); if (!cache.has(k)) cache.set(k, rnd() < density); return cache.get(k); };
   const s = new Set();
   for (let y = 1; y < G - 1; y++) for (let x = 1; x < G - 1; x++) { const k = bidx(x, y); if (safe.has(k)) continue; if (want(x, y)) s.add(k); }
   return s;
@@ -54,6 +55,7 @@ export function createTank(room) {
   let lastGrid = '';                                                // dernière grille émise (delta : on n'émet que si changement)
   let barrels, mudSet;                                              // barils explosifs ; ensemble d'indices de cases boueuses
   let seatByMid = {};
+  let daily = false;                                                // « Défi du jour » : piloté par le hub (hors fullReset, c'est un réglage de plateforme)
 
   function lbEntry(name) {
     const b = board(GID);
@@ -65,6 +67,7 @@ export function createTank(room) {
       const e = lbEntry(p.name);
       e.games++;
       if (winner >= 0 && p.team === winner) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });   // classement du jour (tous jeux)
       e.kills += p.kills; e.dmg += p.dmg;
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / TICK_HZ;
       e.survSum += surv; if (surv > e.bestSurvivalSec) e.bestSurvivalSec = surv;
@@ -106,17 +109,19 @@ export function createTank(room) {
     const safe = new Set();
     parts.forEach((p, i) => { const [sx, sy] = SPAWNS[i]; [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => safe.add(bidx(sx + dx, sy + dy))); });
     const spawns = parts.map((p, i) => SPAWNS[i]);
+    // « Défi du jour » : générateur déterministe dérivé de la date -> même carte pour tout le monde pendant 24 h
+    const rnd = daily ? dailyRng('tank|' + arenaStyle + '|' + parts.length) : Math.random;
     let solid = null;
-    for (let a = 0; a < 24; a++) { const s = genSolidSet(arenaStyle, 0.14, safe); if (tankConnected(s, spawns)) { solid = s; break; } } // murs procéduraux + connectivité garantie
+    for (let a = 0; a < 24; a++) { const s = genSolidSet(arenaStyle, 0.14, safe, rnd); if (tankConnected(s, spawns)) { solid = s; break; } } // murs procéduraux + connectivité garantie
     if (!solid) { solid = new Set(); for (let y = 1; y < G - 1; y++) for (let x = 1; x < G - 1; x++) if (x % 2 === 0 && y % 2 === 0 && !safe.has(bidx(x, y))) solid.add(bidx(x, y)); } // repli : piliers (toujours connecté)
     blocks = new Array(G * G).fill(0);
     for (const k of solid) blocks[k] = 1;
-    for (let i = 0; i < blocks.length; i++) { const gx = i % G, gy = (i / G) | 0; if (gx > 0 && gy > 0 && gx < G - 1 && gy < G - 1 && blocks[i] === 0 && !safe.has(i) && Math.random() < 0.42) blocks[i] = 2; }
+    for (let i = 0; i < blocks.length; i++) { const gx = i % G, gy = (i / G) | 0; if (gx > 0 && gy > 0 && gx < G - 1 && gy < G - 1 && blocks[i] === 0 && !safe.has(i) && rnd() < 0.42) blocks[i] = 2; }
     // barils explosifs + zones de boue : posés sur des cases libres, hors zones de spawn (n'affectent pas la connectivité : traversables)
     barrels = []; mudSet = new Set();
     const free = [];
     for (let i = 0; i < blocks.length; i++) { const gx = i % G, gy = (i / G) | 0; if (gx > 0 && gy > 0 && gx < G - 1 && gy < G - 1 && blocks[i] === 0 && !safe.has(i)) free.push(i); }
-    for (let n = free.length - 1; n > 0; n--) { const j = Math.floor(Math.random() * (n + 1)); const t = free[n]; free[n] = free[j]; free[j] = t; } // mélange
+    for (let n = free.length - 1; n > 0; n--) { const j = Math.floor(rnd() * (n + 1)); const t = free[n]; free[n] = free[j]; free[j] = t; } // mélange
     let fi = 0;
     for (let b = 0; b < BARREL_COUNT && fi < free.length; b++, fi++) { const k = free[fi], gx = k % G, gy = (k / G) | 0; barrels.push({ x: (gx + 0.5) * BLK, y: (gy + 0.5) * BLK, dead: false }); }
     for (let mn = 0; mn < MUD_COUNT && fi < free.length; mn++, fi++) mudSet.add(free[fi]);
@@ -400,6 +405,7 @@ export function createTank(room) {
     else if (m.t === 'arena') { if (editable()) arenaStyle = (arenaStyle + 1) % 3; }
     else if (m.t === 'wintarget') { if (editable()) winTarget = WIN_TARGETS[(WIN_TARGETS.indexOf(winTarget) + 1) % WIN_TARGETS.length]; }
     else if (m.t === 'ff') { if (editable()) ff = !ff; }
+    else if (m.t === 'daily') daily = !!m.on;                       // poussé par le hub (réglage de plateforme, pas de gate `editable`)
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

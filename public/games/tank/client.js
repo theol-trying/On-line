@@ -1,6 +1,7 @@
 // Module client TANK v2 : arène destructible, power-ups, mines, collision, FFA/équipes, manches.
 import { ARENA, TANK_R, SHELL_R, BLK, G } from './shared.js';
 import { createMusic } from '../../music.js';
+import { seatPattern, SEAT_GLYPH } from '../../patterns.js';
 
 // musique : guerre/désert — drone grave en quintes, tambours martiaux ; climax (1 vie / duel final) = cor de tension + roulement
 const MUSIC_THEME = { bpm: 96, bpmBoost: 12, vol: 0.55, root: 73.42, len: 32,
@@ -74,7 +75,8 @@ export default (function () {
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
-      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${p.name || ('P' + (i + 1))} <span class="sc">🏆${p.score} · ${p.kills}⚡</span> ${tags.join('')}`;
+      const gly = `<span style="opacity:.7;font-size:.9em" title="motif du siège">${SEAT_GLYPH[i % 6]}</span>`;   // rappel du motif peint sur la caisse (constante : aucune donnée réseau injectée)
+      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${p.name || ('P' + (i + 1))} ${gly} <span class="sc">🏆${p.score} · ${p.kills}⚡</span> ${tags.join('')}`;
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       const counts = [p.shield ? '⛉' + p.shield : '', p.mineN ? '◈' + p.mineN : ''].filter(Boolean).join(' ');
       const bars = (p.buffs || []).map(([k, fr]) => { const d = PU[k] || { i: '?', c: '#fff' }, pct = Math.max(0, Math.min(100, Math.round(fr * 100))); return `<span class="buff" style="background:linear-gradient(90deg,${d.c} ${pct}%,rgba(255,255,255,.12) ${pct}%);border-color:${d.c}66">${d.i}</span>`; }).join('');
@@ -202,6 +204,76 @@ export default (function () {
     (snap.mud || []).forEach(i2 => { const gx = i2 % G, gy = (i2 / G) | 0, x = gx * BLK, y = gy * BLK; ctx.fillStyle = 'rgba(86,60,28,0.6)'; ctx.fillRect(x, y, BLK, BLK); ctx.fillStyle = 'rgba(54,38,16,0.7)'; ctx.beginPath(); ctx.arc(x + BLK * 0.32, y + BLK * 0.4, 4, 0, Math.PI * 2); ctx.arc(x + BLK * 0.68, y + BLK * 0.62, 5, 0, Math.PI * 2); ctx.arc(x + BLK * 0.5, y + BLK * 0.8, 3, 0, Math.PI * 2); ctx.fill(); });   // boue cuite dans le décor
     ctx = old;
   }
+
+  // ——— Écran titre du lobby : logo « TANKS » en plaque de blindage rivetée ———
+  const TITLE_FONT = '"Black Ops One",Impact,sans-serif';   // police Google déjà chargée par la page (repli système)
+  function rrectPath(x, y, w, h, r) {                        // coin arrondi maison (pas de ctx.roundRect : vieux Safari)
+    ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+  }
+  // Lettres pochoir sable + contour sombre, rivets aux angles, chenille qui défile sous le mot, voile de poussière devant.
+  function drawTitle(cx, cy, now) {
+    const TXT = 'TANKS', anim = !A.reduceFx;
+    ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    let fs = 52; ctx.font = fs + 'px ' + TITLE_FONT;
+    const maxW = ARENA * 0.70; let w = ctx.measureText(TXT).width;
+    if (w > maxW) { fs = Math.max(20, Math.floor(fs * maxW / w)); ctx.font = fs + 'px ' + TITLE_FONT; w = ctx.measureText(TXT).width; }   // tient toujours dans l'arène (mobile)
+    const bandH = Math.max(7, fs * 0.22), ph = fs * 1.16 + bandH, pw = w + fs * 0.9;
+    const px = cx - pw / 2, py = cy - ph / 2, ty = py + (ph - bandH) / 2, rr = Math.min(10, fs * 0.22);
+
+    // plaque d'acier (dégradé métal + liseré sable)
+    const mg = ctx.createLinearGradient(0, py, 0, py + ph);
+    mg.addColorStop(0, '#4a422c'); mg.addColorStop(0.5, '#2e2a1a'); mg.addColorStop(1, '#201c11');
+    ctx.beginPath(); rrectPath(px, py, pw, ph, rr); ctx.fillStyle = mg; ctx.fill();
+    ctx.strokeStyle = 'rgba(224,169,46,0.55)'; ctx.lineWidth = 2; ctx.stroke();
+
+    // bande de chenille sous le mot (défile, figée en reduceFx)
+    const by = py + ph - bandH - 3, bx = px + rr * 0.6, bw = pw - rr * 1.2, step = Math.max(6, bandH * 0.9);
+    const off = anim ? (now / 24) % step : 0;
+    ctx.save(); ctx.beginPath(); rrectPath(bx, by, bw, bandH, bandH * 0.35); ctx.clip();
+    ctx.fillStyle = '#15120a'; ctx.fillRect(bx, by, bw, bandH);
+    for (let x = bx - step; x < bx + bw + step; x += step) {
+      ctx.fillStyle = '#5d5132'; ctx.fillRect(x + off + 1, by + 1.5, step - 2.5, bandH - 3);
+      ctx.fillStyle = 'rgba(255,225,170,0.16)'; ctx.fillRect(x + off + 1, by + 1.5, step - 2.5, 1.5);
+    }
+    ctx.restore();
+
+    // rivets aux quatre angles
+    const ri = Math.max(2, fs * 0.055), ins = rr + ri + 1;
+    for (const rx of [px + ins, px + pw - ins]) for (const ry of [py + ins, py + ph - ins]) {
+      ctx.beginPath(); ctx.arc(rx, ry, ri, 0, Math.PI * 2); ctx.fillStyle = '#17130a'; ctx.fill();
+      ctx.beginPath(); ctx.arc(rx - ri * 0.3, ry - ri * 0.3, ri * 0.45, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,228,170,0.5)'; ctx.fill();
+    }
+
+    // le mot : contour sombre puis remplissage sable
+    if (anim) { ctx.shadowColor = 'rgba(224,169,46,0.55)'; ctx.shadowBlur = 16 + 5 * Math.sin(now / 620); }
+    ctx.lineWidth = Math.max(2, fs * 0.1); ctx.strokeStyle = '#17130a'; ctx.strokeText(TXT, cx, ty);
+    ctx.shadowBlur = 0;
+    const tg = ctx.createLinearGradient(0, ty - fs * 0.5, 0, ty + fs * 0.5);
+    tg.addColorStop(0, '#f6de9d'); tg.addColorStop(0.5, '#e0a92e'); tg.addColorStop(1, '#a87218');
+    ctx.fillStyle = tg; ctx.fillText(TXT, cx, ty);
+
+    if (anim) {
+      const g0 = (now / 2600) % 1, ga = Math.max(0, g0 - 0.12), gb = Math.min(1, g0 + 0.12);   // reflet qui balaie les lettres
+      const gl = ctx.createLinearGradient(px, 0, px + pw, 0);
+      gl.addColorStop(0, 'rgba(255,255,255,0)'); gl.addColorStop(ga, 'rgba(255,255,255,0)');
+      gl.addColorStop(Math.min(gb, Math.max(ga, g0)), 'rgba(255,255,255,0.34)');
+      gl.addColorStop(gb, 'rgba(255,255,255,0)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = gl; ctx.fillText(TXT, cx, ty);
+      // voile de poussière qui dérive devant la plaque
+      ctx.save(); ctx.beginPath(); rrectPath(px, py, pw, ph, rr); ctx.clip(); ctx.fillStyle = 'rgb(222,203,158)';
+      for (let k = 0; k < 6; k++) {
+        const dx = (now / 1000 * (14 + k * 5) + k * 97) % (pw + 90) - 45 + px, dy = py + ph * (0.18 + 0.13 * k) + Math.sin(now / 1100 + k) * 5;
+        ctx.globalAlpha = 0.05 + 0.035 * Math.sin(now / 900 + k * 1.7);
+        ctx.beginPath(); ctx.ellipse(dx, dy, 22 + k * 5, 6 + k, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
   function draw() {
     if (destroyed) return;
     const now = performance.now(); const sc = cv.width / ARENA;
@@ -242,6 +314,8 @@ export default (function () {
         if (p.invuln) ctx.globalAlpha *= 0.35 + 0.35 * Math.sin(now / 60);
         ctx.shadowColor = col; ctx.shadowBlur = 10 * FX; ctx.fillStyle = col;
         ctx.fillRect(-TANK_R, -TANK_R * 0.8, TANK_R * 2, TANK_R * 1.6);
+        const pat = seatPattern(ctx, p.seat, { size: TANK_R });   // motif de siège sur la caisse (repère local : il tourne avec le tank)
+        if (pat) { ctx.save(); ctx.shadowBlur = 0; ctx.fillStyle = pat; ctx.fillRect(-TANK_R, -TANK_R * 0.8, TANK_R * 2, TANK_R * 1.6); ctx.restore(); }
         ctx.fillStyle = '#fff'; ctx.globalAlpha *= 0.9; ctx.fillRect(TANK_R * 0.2, -2.5, TANK_R + 6, 5);
         ctx.restore();
         if (p.shield && alpha > 0.2) { ctx.save(); ctx.strokeStyle = '#7fd1ff'; ctx.shadowColor = '#7fd1ff'; ctx.shadowBlur = 12 * FX; ctx.globalAlpha = 0.6 + 0.3 * Math.sin(now / 200); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(t.x, t.y, TANK_R + 5, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
@@ -280,7 +354,7 @@ export default (function () {
     if (snap && (snap.gs === 'lobby' || snap.gs === 'paused')) {
       ctx.fillStyle = 'rgba(4,5,12,0.66)'; ctx.fillRect(0, 0, ARENA, ARENA); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if (snap.gs === 'paused') { ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', ARENA / 2, ARENA / 2 + 28); }
-      else { ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,180,120,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 30px system-ui,sans-serif'; ctx.fillText('TANKS', ARENA / 2, ARENA / 2 - 36); ctx.restore(); const n = snap.connected, nb = snap.botCount || 0, tot = n + nb; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''} · ${snap.winTarget === 1 ? '1 manche' : snap.winTarget + ' manches'}`, ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText(tot >= 2 ? '▶ Espace / clic pour lancer' : 'En attente d\'un 2ᵉ pilote… (ou ajoute un bot 🤖)', ARENA / 2, ARENA / 2 + 24); }
+      else { drawTitle(ARENA / 2, ARENA / 2 - 60, now); const n = snap.connected, nb = snap.botCount || 0, tot = n + nb; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''} · ${snap.winTarget === 1 ? '1 manche' : snap.winTarget + ' manches'}`, ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText(tot >= 2 ? '▶ Espace / clic pour lancer' : 'En attente d\'un 2ᵉ pilote… (ou ajoute un bot 🤖)', ARENA / 2, ARENA / 2 + 24); }
     }
   }
   function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }   // filet : une erreur de rendu ne fige plus le jeu

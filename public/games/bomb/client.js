@@ -1,6 +1,7 @@
 // Module client BOMBERMAN v2 : équipes, bonus/malus, portée + compte à rebours visibles, mort subite.
 import { GW, GH, CELL, ARENA } from './shared.js';
 import { createMusic } from '../../music.js';
+import { seatPattern, SEAT_GLYPH } from '../../patterns.js';
 
 // musique : cartoon enjoué — basse bondissante, mélodie espiègle, woodblock ; climax (mort subite) = motif chromatique + grosse caisse + tempo
 const MUSIC_THEME = { bpm: 134, bpmBoost: 16, vol: 0.48, root: 130.81, len: 32,
@@ -66,7 +67,8 @@ export default (function () {
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
-      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
+      const gly = `<span class="sc" style="color:${col}" title="motif du siège">${SEAT_GLYPH[i]}</span>`;   // glyphe = motif porté par le personnage
+      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${p.name || ('P' + (i + 1))} ${gly} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       const ab = [p.kick ? '🦵' : '', p.remote ? '📡' : '', p.ghost ? '👻' : '', p.throw ? '🧤' : '', p.line ? '📏' : '', p.shield ? '🛡' : '', p.rev ? '🔀' : '', p.slow ? '🐌' : '', p.auto ? '⏱' : '', p.skull ? '💀' : ''].filter(Boolean).join('');
       lv.innerHTML = p.playing ? (p.alive ? `💣${p.bombs} 🔥${p.power} 👟${p.speed}${ab ? ' · ' + ab : ''}` : (p.rvn ? '☠ revanche (bord)' : '✖ éliminé')) : 'prêt';
@@ -210,6 +212,47 @@ export default (function () {
     }
     ctx = old;
   }
+  // Écran titre du lobby : logo cartoon, lettres qui rebondissent en vague, contour BD épais, mèche allumée au bout du mot.
+  const TITLE = 'BOMBERMAN', TITLE_FONT = "'Baloo 2','Fredoka',system-ui,sans-serif";
+  function drawTitle(cx, cy, now) {
+    ctx.save();
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    let fs = 44, ws = [], total = 0;                                   // mesure lettre par lettre (positionnement de la vague)
+    const measure = () => { ctx.font = `800 ${fs}px ${TITLE_FONT}`; ws = []; total = 0; for (let i = 0; i < TITLE.length; i++) { const w = ctx.measureText(TITLE.charAt(i)).width; ws.push(w); total += w; } };
+    measure();
+    const maxW = ARENA - 64;                                           // ne jamais déborder de l'arène (police de repli plus large)
+    if (total + fs * 0.85 > maxW) { fs = Math.max(16, fs * maxW / (total + fs * 0.85)); measure(); }
+    const fuse = fs * 0.85, amp = A.reduceFx ? 0 : fs * 0.17;
+    let x = cx - (total + fuse) / 2;
+    const grad = ctx.createLinearGradient(0, cy - fs * 0.62, 0, cy + fs * 0.5);
+    grad.addColorStop(0, '#ffe9a6'); grad.addColorStop(0.5, '#ffb43b'); grad.addColorStop(1, '#ff6f3c');
+    ctx.lineWidth = Math.max(3, fs * 0.2); ctx.strokeStyle = '#231326';
+    for (let i = 0; i < TITLE.length; i++) {                           // rebond décalé : la vague parcourt le mot
+      const yy = cy - (amp ? Math.abs(Math.sin(now / 430 - i * 0.38)) * amp : 0), ch = TITLE.charAt(i);
+      if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,150,60,.55)'; ctx.shadowBlur = 16; }
+      ctx.strokeText(ch, x, yy); ctx.shadowBlur = 0;
+      ctx.fillStyle = grad; ctx.fillText(ch, x, yy);
+      x += ws[i];
+    }
+    const fx0 = x + fs * 0.05, fy0 = cy - fs * 0.24;                   // mèche : cordon sombre + âme dorée
+    const tipx = fx0 + fuse * 0.6, tipy = fy0 - fs * (0.45 + (A.reduceFx ? 0 : 0.05 * Math.sin(now / 260)));
+    for (const [c2, lw] of [['#231326', Math.max(3, fs * 0.16)], ['#caa64a', Math.max(1.5, fs * 0.08)]]) {
+      ctx.strokeStyle = c2; ctx.lineWidth = lw;
+      ctx.beginPath(); ctx.moveTo(fx0, fy0); ctx.quadraticCurveTo(fx0 + fuse * 0.5, fy0 - fs * 0.08, tipx, tipy); ctx.stroke();
+    }
+    const sp = A.reduceFx ? 1 : 0.75 + 0.25 * Math.sin(now / 55) + 0.12 * Math.sin(now / 23);   // étincelle qui grésille
+    if (!A.reduceFx) { ctx.shadowColor = '#ffb43b'; ctx.shadowBlur = 14; }
+    ctx.fillStyle = '#ffd36e'; ctx.beginPath(); ctx.arc(tipx, tipy, fs * 0.11 * sp, 0, 6.29); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(tipx, tipy, fs * 0.055 * sp, 0, 6.29); ctx.fill();
+    if (!A.reduceFx) {                                                 // 3 brindilles qui crépitent autour de la flamme
+      ctx.strokeStyle = 'rgba(255,211,110,.85)'; ctx.lineWidth = Math.max(1, fs * 0.035);
+      for (let k = 0; k < 3; k++) {
+        const a = now / 90 + k * 2.1, r = fs * (0.16 + 0.1 * (0.5 + 0.5 * Math.sin(now / 70 + k * 1.7)));
+        ctx.beginPath(); ctx.moveTo(tipx + Math.cos(a) * fs * 0.1, tipy + Math.sin(a) * fs * 0.1); ctx.lineTo(tipx + Math.cos(a) * r * 1.9, tipy + Math.sin(a) * r * 1.9); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
   function draw() {
     if (destroyed) return;
     const now = performance.now(); const sc = cv.width / ARENA;
@@ -272,6 +315,8 @@ export default (function () {
           if (p.seat === mySeat) { ctx.save(); ctx.strokeStyle = col; ctx.globalAlpha = 0.5 + 0.3 * Math.sin(now / 160); ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.strokeRect(ix * CELL + 3, iy * CELL + 3, CELL - 6, CELL - 6); ctx.restore(); }
           ctx.save(); ctx.globalAlpha = 0.55 + 0.2 * Math.sin(now / 180); ctx.shadowColor = col; ctx.shadowBlur = 8 * FX; ctx.fillStyle = col;
           ctx.beginPath(); ctx.arc(t.x, t.y, CELL * 0.26, 0, Math.PI * 2); ctx.fill();
+          const rpat = seatPattern(ctx, p.seat, { size: CELL * 0.34 });                                    // motif par siège (revenant)
+          if (rpat) { const sb = ctx.shadowBlur; ctx.shadowBlur = 0; ctx.fillStyle = rpat; ctx.fill(); ctx.shadowBlur = sb; ctx.fillStyle = col; }
           ctx.lineWidth = 2; ctx.strokeStyle = p.seat === mySeat ? '#fff' : 'rgba(255,255,255,0.5)'; ctx.stroke();
           ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.font = '10px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('☠', t.x, t.y + 0.5); ctx.restore();
           return;
@@ -281,6 +326,8 @@ export default (function () {
         ctx.save(); if (p.invuln || p.ghost) ctx.globalAlpha = 0.5 + 0.4 * Math.sin(now / 70);
         ctx.shadowColor = col; ctx.shadowBlur = 10 * FX; ctx.fillStyle = col;
         ctx.beginPath(); ctx.arc(t.x, t.y, CELL * 0.32, 0, Math.PI * 2); ctx.fill();
+        const pat = seatPattern(ctx, p.seat, { size: CELL * 0.34 });                                       // motif par siège : lisible même en mode équipe (couleurs partagées)
+        if (pat) { const sb = ctx.shadowBlur; ctx.shadowBlur = 0; ctx.fillStyle = pat; ctx.fill(); ctx.shadowBlur = sb; ctx.fillStyle = col; }
         ctx.lineWidth = 2; ctx.strokeStyle = p.shield ? '#7fd1ff' : (p.seat === mySeat ? '#fff' : 'rgba(255,255,255,0.5)'); ctx.stroke();
         ctx.shadowBlur = 0;                                                              // petit visage cartoon
         ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(t.x - 4, t.y - 2.5, 2.7, 0, Math.PI * 2); ctx.arc(t.x + 4, t.y - 2.5, 2.7, 0, Math.PI * 2); ctx.fill();
@@ -296,7 +343,7 @@ export default (function () {
     if (snap && (snap.gs === 'lobby' || snap.gs === 'paused')) {
       ctx.fillStyle = 'rgba(4,5,12,0.66)'; ctx.fillRect(0, 0, ARENA, ARENA); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if (snap.gs === 'paused') { ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', ARENA / 2, ARENA / 2 + 28); }
-      else { ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(255,160,80,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 26px system-ui,sans-serif'; ctx.fillText('BOMBERMAN', ARENA / 2, ARENA / 2 - 32); ctx.restore(); const n = snap.connected, nb = snap.botCount || 0; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText(`${n} joueur${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n + nb < 2 ? ' (solo : entraînement)' : '')}`, ARENA / 2, ARENA / 2 - 4); if (snap.revenge) { ctx.fillStyle = '#ff9b6b'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('☠ Revanche — les morts bombardent depuis le bord et peuvent revenir', ARENA / 2, ARENA / 2 + 14); } ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('▶ Espace / clic pour lancer', ARENA / 2, ARENA / 2 + (snap.revenge ? 34 : 24)); }
+      else { drawTitle(ARENA / 2, ARENA / 2 - 32, now); const n = snap.connected, nb = snap.botCount || 0; ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText(`${n} joueur${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n + nb < 2 ? ' (solo : entraînement)' : '')}`, ARENA / 2, ARENA / 2 - 4); if (snap.revenge) { ctx.fillStyle = '#ff9b6b'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('☠ Revanche — les morts bombardent depuis le bord et peuvent revenir', ARENA / 2, ARENA / 2 + 14); } ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('▶ Espace / clic pour lancer', ARENA / 2, ARENA / 2 + (snap.revenge ? 34 : 24)); }
     }
   }
   function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }   // filet : une erreur de rendu ne fige plus le jeu

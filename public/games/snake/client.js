@@ -3,6 +3,7 @@ import { GW as GW0, GH as GH0, CELL as CELL0, ARENA } from './shared.js';
 // grille dynamique (nb de joueurs) : l'arène garde la MÊME taille logique, seule la taille des cases change
 let GW = GW0, GH = GH0, CELL = CELL0;
 import { createMusic } from '../../music.js';
+import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (lisibilité daltonien / 6 joueurs)
 
 // musique : jardin léger — nappe douce majeure, plucks pentatoniques ; climax (sprint food-rush / duel) = contre-voix + tempo
 const MUSIC_THEME = { bpm: 102, bpmBoost: 12, vol: 0.42, root: 130.81, len: 32,
@@ -66,7 +67,8 @@ export default (function () {
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
-      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
+      const gly = `<span class="sc" title="motif du siège">${SEAT_GLYPH[i] || ''}</span>`;   // constante : jamais de texte réseau ici
+      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${gly}${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       lv.textContent = p.playing ? (p.alive ? `● L${p.len} · 🍎${p.score}` : '✖ mort') : 'prêt';
     });
@@ -190,6 +192,77 @@ export default (function () {
     ctx.strokeStyle = TH.border || 'rgba(255,255,255,0.22)'; ctx.lineWidth = 3; ctx.strokeRect(1.5, 1.5, ARENA - 3, ARENA - 3);
     ctx = old;
   }
+  // ——— Logo du lobby : « SNAKE » porté par une tige végétale qui ondule (identité jardin) ———
+  const TITLE = 'SNAKE', TITLE_FONT = 'Fredoka, "Segoe UI", sans-serif';
+  let titleLay = null;                              // mesures du logo : recalculées de loin en loin (police Google chargée tard)
+  function layoutTitle(now) {
+    let fs = Math.min(34, ARENA * 0.075);
+    const ws = [];
+    let total = 0;
+    for (let pass = 0; pass < 4; pass++) {          // réduit la police tant que le mot + la tête dépassent l'arène (mobile)
+      ctx.font = '700 ' + fs.toFixed(1) + 'px ' + TITLE_FONT;
+      ws.length = 0; total = 0;
+      for (let i = 0; i < TITLE.length; i++) { const cw = ctx.measureText(TITLE.charAt(i)).width; ws.push(cw); total += cw; }
+      total += fs * 0.06 * (TITLE.length - 1);
+      if (total + fs * 2.2 <= ARENA * 0.94 || fs <= 14) break;
+      fs = Math.max(14, fs * (ARENA * 0.94) / (total + fs * 2.2));
+    }
+    return { at: now, fs, ws, total };
+  }
+  function drawTitle(cx, cy, now) {
+    if (!titleLay || now - titleLay.at > 600) titleLay = layoutTitle(now);
+    const fs = titleLay.fs, ws = titleLay.ws, total = titleLay.total, n = TITLE.length;
+    const soft = !A.reduceFx, t = soft ? now / 1000 : 0, amp = soft ? fs * 0.11 : 0;
+    const x0 = cx - total / 2, gap = fs * 0.06, sx = x0 - fs * 0.3, sw = total + fs * 0.9;
+    const wave = u => Math.sin(t * 1.4 - u * 2.8) * amp;          // ondulation lente commune à la tige et aux lettres
+    const stemY = u => cy + fs * 0.14 + wave(u) * 1.3;
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.font = '700 ' + fs.toFixed(1) + 'px ' + TITLE_FONT;
+    ctx.strokeStyle = '#3f8f45'; ctx.lineWidth = Math.max(2, fs * 0.10);          // la tige, derrière les lettres
+    ctx.beginPath();
+    for (let k = 0; k <= 22; k++) { const u = k / 22, x = sx + u * sw, y = stemY(u); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+    ctx.stroke();
+    for (let k = 0; k < 5; k++) {                                                 // feuilles qui poussent le long de la tige
+      const u = 0.09 + k * 0.17, x = sx + u * sw, y = stemY(u), up = (k & 1) === 0;
+      const gr = soft ? 0.8 + 0.2 * Math.sin(t * 1.1 + k * 1.3) : 1, len = fs * (up ? 0.40 : 0.22) * gr;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(up ? -1.05 : 0.75);
+      ctx.fillStyle = up ? '#79cf6f' : '#57b45c';
+      ctx.beginPath(); ctx.ellipse(len * 0.58, 0, len * 0.58, len * 0.26, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(18,64,22,0.35)'; ctx.lineWidth = Math.max(1, fs * 0.028);
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(len * 1.1, 0); ctx.stroke();
+      ctx.restore();
+    }
+    if (soft) {                                                                   // pollen qui monte : 5 points dérivés du temps, aucun état
+      ctx.fillStyle = '#e6ffc0';
+      for (let k = 0; k < 5; k++) {
+        const pr = (t * 0.17 + k * 0.2) % 1, ppx = x0 + total * ((0.1 + k * 0.21 + Math.sin(t * 0.5 + k) * 0.04) % 1), ppy = cy + fs * 0.1 - pr * fs * 2.1;
+        ctx.globalAlpha = 0.42 * (1 - pr); ctx.beginPath(); ctx.arc(ppx, ppy, fs * 0.045 + 0.5, 0, 6.2832); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+    const gd = ctx.createLinearGradient(0, cy - fs * 0.65, 0, cy + fs * 0.45);    // feuillage clair en haut, vert profond en bas
+    gd.addColorStop(0, '#f4ffe0'); gd.addColorStop(0.55, '#aae88e'); gd.addColorStop(1, '#5cb862');
+    let lx = x0;
+    for (let i = 0; i < n; i++) {                                                 // lettres : chacune ondule avec un décalage de phase
+      const u = (lx + ws[i] / 2 - x0) / Math.max(1, total), cxi = lx + ws[i] / 2, cyi = cy - fs * 0.12 + wave(u);
+      if (soft) { ctx.shadowColor = 'rgba(140,235,150,0.55)'; ctx.shadowBlur = fs * 0.5; }
+      ctx.strokeStyle = '#1d5a26'; ctx.lineWidth = fs * 0.17; ctx.strokeText(TITLE.charAt(i), cxi, cyi);
+      ctx.shadowBlur = 0; ctx.fillStyle = gd; ctx.fillText(TITLE.charAt(i), cxi, cyi);
+      lx += ws[i] + gap;
+    }
+    const hx = sx + sw, hy = stemY(1), hr = fs * 0.22;                            // petite tête de serpent au bout de la tige
+    ctx.save(); ctx.translate(hx, hy); ctx.rotate(Math.atan2(hy - stemY(0.93), sw * 0.07));
+    ctx.fillStyle = '#6ec96a'; ctx.beginPath(); ctx.ellipse(hr * 0.4, 0, hr * 1.3, hr * 0.92, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(hr * 0.62, -hr * 0.32, hr * 0.3, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = '#12301a'; ctx.beginPath(); ctx.arc(hr * 0.72, -hr * 0.32, hr * 0.15, 0, 6.2832); ctx.fill();
+    if (soft && t % 2.6 < 0.3) {                                                  // langue fourchue qui claque de temps en temps
+      ctx.strokeStyle = '#ff6b8a'; ctx.lineWidth = Math.max(1, fs * 0.045);
+      ctx.beginPath(); ctx.moveTo(hr * 1.6, hr * 0.1); ctx.lineTo(hr * 2.4, hr * 0.1); ctx.lineTo(hr * 3, -hr * 0.25); ctx.moveTo(hr * 2.4, hr * 0.1); ctx.lineTo(hr * 3, hr * 0.45); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.restore();
+  }
   function draw() {
     if (destroyed) return;
     const now = performance.now();
@@ -243,6 +316,7 @@ export default (function () {
         if (!p.playing || !p.alive) return;        // un serpent mort disparaît du plateau (il n'est plus un obstacle)
         const col = colSeat(p.seat), hv = heads && heads[p.seat];
         const hx = hv ? px(hv.x) : px(p.head.x), hy = hv ? px(hv.y) : px(p.head.y);
+        const pat = seatPattern(ctx, p.seat, { size: Math.round(CELL * 1.5) });   // écailles du siège (null pour le siège 0)
         const ga = p.ghost ? (A.reduceFx ? 0.5 : 0.45 + 0.25 * Math.sin(now / 110)) : 1;   // fantôme : translucide
         ctx.save(); ctx.globalAlpha = ga;
         ctx.strokeStyle = col; ctx.lineWidth = CELL - 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -257,6 +331,13 @@ export default (function () {
             prev = pt; k++;
           }
           if (prev) { ctx.globalAlpha = ga; ctx.beginPath(); ctx.moveTo(px(prev[0]), px(prev[1])); ctx.lineTo(hx, hy); ctx.stroke(); }
+          if (pat) {                                  // surimpression du motif de siège : même tracé repassé d'un coup, sans halo
+            ctx.globalAlpha = ga * 0.8; ctx.shadowBlur = 0; ctx.strokeStyle = pat;
+            ctx.beginPath(); let pv = null;
+            for (const pt of path) { if (!pt) { pv = null; continue; } if (pv) ctx.lineTo(px(pt[0]), px(pt[1])); else ctx.moveTo(px(pt[0]), px(pt[1])); pv = pt; }
+            if (pv) ctx.lineTo(hx, hy);
+            ctx.stroke();
+          }
         }
         ctx.restore();
         // tête arrondie + yeux orientés selon la direction (un saut de wrap inverse le signe)
@@ -267,6 +348,7 @@ export default (function () {
         if (!dx && !dy) dx = 1;
         ctx.save(); ctx.globalAlpha = ga; ctx.shadowColor = col; ctx.shadowBlur = 12 * FX; ctx.fillStyle = col;
         ctx.beginPath(); ctx.arc(hx, hy, CELL * 0.55, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+        if (pat) { ctx.fillStyle = pat; ctx.beginPath(); ctx.arc(hx, hy, CELL * 0.55, 0, Math.PI * 2); ctx.fill(); }   // motif aussi sur la tête
         const perpx = -dy, perpy = dx, fwd = CELL * 0.12, side = CELL * 0.2, er = CELL * 0.14;
         for (const s of [-1, 1]) {
           const ex = hx + dx * fwd + perpx * side * s, ey = hy + dy * fwd + perpy * side * s;
@@ -298,7 +380,7 @@ export default (function () {
       ctx.fillStyle = 'rgba(4,5,12,0.66)'; ctx.fillRect(0, 0, ARENA, ARENA); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if (snap.gs === 'paused') { ctx.fillStyle = '#fff'; ctx.font = 'bold 34px system-ui,sans-serif'; ctx.fillText('PAUSE', ARENA / 2, ARENA / 2 - 6); ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '14px system-ui,sans-serif'; ctx.fillText('P / Échap pour reprendre', ARENA / 2, ARENA / 2 + 28); }
       else {
-        ctx.save(); if (!A.reduceFx) { ctx.shadowColor = 'rgba(120,220,150,.6)'; ctx.shadowBlur = 22; } ctx.fillStyle = '#fff'; ctx.font = 'bold 30px system-ui,sans-serif'; ctx.fillText('SNAKE', ARENA / 2, ARENA / 2 - 36); ctx.restore();
+        drawTitle(ARENA / 2, ARENA / 2 - 36, now);   // logo animé : tige végétale + feuilles + tête de serpent
         const n = snap.connected, nb = snap.botCount || 0;
         ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(255,255,255,.7)'; ctx.font = '15px system-ui,sans-serif'; ctx.fillText(`${n} joueur${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n + nb < 2 ? ' (solo : entraînement)' : '')}`, ARENA / 2, ARENA / 2 - 6);
         if (snap.rush) { ctx.fillStyle = '#ffd24a'; ctx.font = 'bold 13px system-ui,sans-serif'; ctx.fillText('🏁 Food-rush — premier à ' + (snap.rushTarget || 20) + ' 🍎 gagne', ARENA / 2, ARENA / 2 + 14); }
