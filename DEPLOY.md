@@ -32,15 +32,18 @@ Le serveur (`server.js`) utilise **déjà** `process.env.PORT` → aucun changem
    - *New* → *Web Service* → connecte ton repo GitHub
    - Render lit `render.yaml` et remplit tout seul. Sinon, en manuel :
      - Runtime : **Node**
-     - Build Command : **laisser VIDE** ⚠️
+     - Build Command : `node --version` ⚠️ (voir ci-dessous)
      - Start Command : `npm start`
      - Plan : **Free**
    - *Create Web Service*
 
-   > ⚠️ **Build Command vide, c'est important.** Le projet n'a **aucune dépendance** : `npm install`
-   > (ou `yarn install`, que Render met parfois par défaut) ne sert à rien, régénère un lockfile à chaque
-   > build et ouvre une porte par laquelle une dépendance pourrait s'introduire sans qu'on le veuille.
-   > La version de Node est fixée par **`.node-version`** (24) et bornée par `engines` dans `package.json` :
+   > ⚠️ **Surtout pas `npm install` ni `yarn install`.** Le projet n'a **aucune dépendance** : ces commandes
+   > ne servent à rien, régénèrent un lockfile à chaque build et ouvrent une porte par laquelle une
+   > dépendance pourrait s'introduire sans qu'on le veuille. Render **refuse un champ vide**, donc on y met
+   > un no-op — `node --version` est le bon choix : il ne fait rien et **affiche dans le log la version de
+   > Node réellement installée**, ce qui permet de vérifier que `.node-version` est bien pris en compte.
+   >
+   > Cette version est fixée par **`.node-version`** (24) et bornée par `engines` dans `package.json` :
    > sans ça, Render prend la **dernière** version publiée et un déploiement peut basculer tout seul sur un
    > Node majeur jamais testé.
 
