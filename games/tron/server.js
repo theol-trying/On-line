@@ -1,5 +1,12 @@
 // Jeu TRON / Light Cycles. 2 à 6 joueurs. FFA ou équipes. Bonus, boost à la jauge, rétrécissement, traînée qui s'efface.
-import { GW, GH } from '../../public/games/tron/shared.js';
+import { GW as GW0, GH as GH0 } from '../../public/games/tron/shared.js';
+// Grille À L'ÉCHELLE du nombre de participants : chaque joueur occupe un nombre FIXE de cases,
+// donc agrandir la grille réduit réellement l'encombrement (contrairement à Pong où ce serait un zoom).
+let GW = GW0, GH = GH0;
+function setGrid(n) {
+  const side = Math.min(76, Math.round(GW0 * (1 + 0.14 * (Math.max(2, n) - 2))));   // 2 j : 50 … 6 j : 76
+  GW = side; GH = side;
+}
 import { board, pushHistory, save, markDirty, reset } from '../../leaderboard.js';
 
 const GID = 'tron';
@@ -118,6 +125,7 @@ export function createTron(room) {
     nteams = numTeamsFor(mode, N);
     parts.forEach((p, i) => { p.playing = true; p.team = i % nteams; });
     nParts = N; deaths = 0; endTick = 0; winner = null; fx = []; shrinkLevel = 0;
+    setGrid(N);                                        // grille dimensionnée AVANT le placement
     spawnPlayers(parts);
     round++; tick = 0; countdownUntil = COUNTDOWN_TICKS; gameState = 'countdown';
   }
@@ -232,7 +240,9 @@ export function createTron(room) {
     if (gameState === 'countdown') { tick++; if (tick >= countdownUntil) { gameState = 'play'; tick = 0; } return; }
     if (gameState !== 'play') return;
     tick++;
-    if (tick >= SHRINK_START && (tick - SHRINK_START) % SHRINK_EVERY === 0) { shrinkLevel++; applyShrink(); }
+    // sur une grande grille il faut plus d'anneaux : on resserre l'intervalle pour que la manche dure autant
+    const shrinkEv = Math.max(6, Math.round(SHRINK_EVERY * GW0 / GW));
+    if (tick >= SHRINK_START && (tick - SHRINK_START) % shrinkEv === 0) { shrinkLevel++; applyShrink(); }
     const alive = players.filter(p => p.alive);
     for (const p of alive) if (p.bot) botThink(p);
     for (const p of alive) { let pd = p.pendingDir; if (pd && p.invertUntil > tick) pd = { x: -pd.x, y: -pd.y }; if (pd && !(pd.x === -p.dir.x && pd.y === -p.dir.y)) p.dir = pd; p.pendingDir = null; }
@@ -261,7 +271,7 @@ export function createTron(room) {
   function snapshot() {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, shrink: shrinkLevel, fade: fadeMode,
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, shrink: shrinkLevel, fade: fadeMode, gw: GW, gh: GH,
       pickups: pickups.map(p => ({ x: p.gx, y: p.gy, t: p.type })),
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts } : null,
       players: players.map(p => ({

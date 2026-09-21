@@ -74,7 +74,7 @@ export default (function () {
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
-      cards[i].querySelector('.pn').innerHTML = `${p.name || ('P' + (i + 1))} <span class="sc">🏆${p.score} · ${p.kills}⚡</span> ${tags.join('')}`;
+      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${p.name || ('P' + (i + 1))} <span class="sc">🏆${p.score} · ${p.kills}⚡</span> ${tags.join('')}`;
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       const counts = [p.shield ? '⛉' + p.shield : '', p.mineN ? '◈' + p.mineN : ''].filter(Boolean).join(' ');
       const bars = (p.buffs || []).map(([k, fr]) => { const d = PU[k] || { i: '?', c: '#fff' }, pct = Math.max(0, Math.min(100, Math.round(fr * 100))); return `<span class="buff" style="background:linear-gradient(90deg,${d.c} ${pct}%,rgba(255,255,255,.12) ${pct}%);border-color:${d.c}66">${d.i}</span>`; }).join('');

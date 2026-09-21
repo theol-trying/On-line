@@ -298,6 +298,18 @@ body.flat .fxon{ animation:none; }
 .readybar .rbtn:hover{ border-color:var(--accent); }
 .readybar .rbtn.on{ background:transparent; border-color:var(--ok); color:var(--okTxt); box-shadow:0 0 0 1px var(--ok) inset; }
 .readybar .rbtn.force{ background:#5a3a12; border-color:#b9812e; color:#ffe9c8; }
+/* avatars de profil (emoji ou image 64x64 liee au pseudo) */
+.avbtn{ width:34px; height:34px; padding:0; font-size:18px; border-radius:50%; overflow:hidden; vertical-align:middle; margin-right:6px;
+  display:inline-flex; align-items:center; justify-content:center; }
+.avbtn img{ width:100%; height:100%; object-fit:cover; display:block; }
+.avprev{ width:72px; height:72px; margin:8px auto 0; border-radius:50%; overflow:hidden; font-size:34px;
+  display:flex; align-items:center; justify-content:center; background:var(--panel2); border:1px solid var(--border2); }
+.avprev img{ width:100%; height:100%; object-fit:cover; }
+.avgrid{ display:flex; flex-wrap:wrap; gap:4px; }
+.avgrid button{ font-size:20px; padding:4px 7px; background:transparent; border:none; border-radius:8px; cursor:pointer; }
+.avgrid button:hover{ background:var(--panel2); }
+.av{ width:16px; height:16px; border-radius:50%; object-fit:cover; vertical-align:-3px; margin-right:3px; }
+.av-e{ margin-right:3px; }
 /* podium de tournoi */
 .champ{ text-align:center; font-size:16px; font-weight:800; color:#ffd76b; padding:10px 4px 14px; }
 /* calque de fondu lors d'un changement de jeu */

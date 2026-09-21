@@ -1,5 +1,7 @@
 // Module client SNAKE : serpents sur grille partagée, pastilles à manger, dernier en vie gagne. FFA + équipes.
-import { GW, GH, CELL, ARENA } from './shared.js';
+import { GW as GW0, GH as GH0, CELL as CELL0, ARENA } from './shared.js';
+// grille dynamique (nb de joueurs) : l'arène garde la MÊME taille logique, seule la taille des cases change
+let GW = GW0, GH = GH0, CELL = CELL0;
 import { createMusic } from '../../music.js';
 
 // musique : jardin léger — nappe douce majeure, plucks pentatoniques ; climax (sprint food-rush / duel) = contre-voix + tempo
@@ -64,7 +66,7 @@ export default (function () {
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
-      cards[i].querySelector('.pn').innerHTML = `${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
+      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${p.name || ('P' + (i + 1))} <span class="sc">${p.kills} ⚡</span> ${tags.join('')}`;
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       lv.textContent = p.playing ? (p.alive ? `● L${p.len} · 🍎${p.score}` : '✖ mort') : 'prêt';
     });
@@ -99,6 +101,7 @@ export default (function () {
   function onMessage(m) { if (m && m.t === 'welcome') mySeat = m.seat; }
   function onLb(d) { board = d.board || []; renderLB(); }
   function onState(m) {
+    if (m.gw && m.gw !== GW) { GW = m.gw; GH = m.gh || m.gw; CELL = ARENA / GW; }   // grille redimensionnée
     snap = m; teamMode = m.mode && m.mode !== 'ffa';
     const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
@@ -171,7 +174,7 @@ export default (function () {
 
   let terrainCv = null, terrainKey = '';            // décor statique pré-rendu (damier + grille + bordure + fleurs) — redessiné seulement au resize
   function ensureTerrain() {
-    const key = '' + cv.width;
+    const key = cv.width + '|' + GW;   // le damier dépend aussi de la taille de grille
     if (terrainCv && key === terrainKey) return;
     terrainKey = key;
     if (!terrainCv) terrainCv = document.createElement('canvas');

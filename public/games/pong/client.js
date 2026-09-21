@@ -1,7 +1,8 @@
 // Module client PONG : rendu canvas, HUD, inputs, sons, options/leaderboard.
 // Contrat : init(ctx), onState(snap), onMessage(m), onLb(data), onA11y(), teardown().
 // Le shell fournit ctx = { root, send, a11y, togglePanel, closePanels }. Réseau/pseudo/thème = shell.
-import { W, H, BALL_R, PAD_W, PAD_OFF, PU_R } from './shared.js';
+import { W as W0, H as H0, BALL_R, PAD_W, PAD_OFF, PU_R } from './shared.js';
+let W = W0, H = H0;        // espace logique : agrandi par le serveur selon le nombre de joueurs (snapshot aw/ah)
 import { createMusic } from '../../music.js';
 
 const SHAPE = { 2: 'Face à face', 3: 'Triangle', 4: 'Carré', 5: 'Pentagone', 6: 'Hexagone' };
@@ -97,7 +98,7 @@ export default (function () {
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
-      document.getElementById('pn' + i).innerHTML = `${p.name || ('P' + (i + 1))} <span class="sc">${p.score} pt</span> ${tags.join('')}`;
+      document.getElementById('pn' + i).innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${p.name || ('P' + (i + 1))} <span class="sc">${p.score} pt</span> ${tags.join('')}`;
       cards[i].classList.toggle('dead', p.playing && !p.alive);
       cards[i].classList.toggle('me', i === mySeat);
     });
@@ -195,6 +196,7 @@ export default (function () {
     if (snap && snap.gs === 'over' && endShown) showEndscreen(snap);
   }
   function onState(m) {
+    if (m.aw && m.aw !== W) { W = m.aw; H = m.ah || m.aw; }  // arène redimensionnée (nb de joueurs)
     if (m.geo === undefined && snap) m.geo = snap.geo;      // delta réseau : géométrie absente = inchangée (null = vraiment vide)
     const prev = snap; snap = m;
     teamMode = m.mode && m.mode !== 'ffa';

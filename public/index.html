@@ -18,7 +18,22 @@
   </header>
 
   <div id="msg"><span id="status-dot"></span><span id="msg-txt">Connexion…</span><span id="pingTxt"></span></div>
-  <div class="namebar"><input id="nameInput" maxlength="12" placeholder="Ton pseudo" autocomplete="off"></div>
+  <div class="namebar"><button id="avBtn" class="avbtn" aria-label="choisir ton avatar">🙂</button><input id="nameInput" maxlength="12" placeholder="Ton pseudo" autocomplete="off"></div>
+
+  <!-- ===== choix de l'avatar (emoji ou image perso, lié au pseudo) ===== -->
+  <div id="avPanel" class="settings hidden" style="width:min(94vw,380px);">
+    <div class="shead"><h3>👤 Ton avatar</h3><button class="sclose" aria-label="fermer">✕</button></div>
+    <div class="sbody">
+      <div id="avPrev" class="avprev">🙂</div>
+      <h4>Emoji</h4>
+      <div id="avGrid" class="avgrid"></div>
+      <h4>Image personnelle</h4>
+      <label class="ghostbtn" for="avFile" style="display:block; text-align:center; cursor:pointer;">🖼 Importer une image…</label>
+      <input type="file" id="avFile" accept="image/*" style="display:none">
+      <div class="note">L'image est réduite en 64×64 puis <b>liée à ton pseudo</b> : elle te suit d'un appareil à l'autre et les autres joueurs la voient. Garde un pseudo identique pour la retrouver.</div>
+      <button id="avClear" class="ghostbtn">✕ Retirer l'avatar</button>
+    </div>
+  </div>
 
   <div class="shellrow">
     <div id="gamemenu"></div>

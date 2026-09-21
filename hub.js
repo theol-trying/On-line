@@ -1,7 +1,7 @@
 // Hub multijeux : registre des jeux, identité/pseudo/token, UNE salle active, lobby, routage, boucle de tick.
 // Une seule partie active à la fois (les joueurs choisissent le jeu dans le lobby quand la salle est libre).
 import { attachWebSocket } from './ws.js';
-import { lbMsg, dirtyGames, anyDirty, clearDirty, reset } from './leaderboard.js';
+import { lbMsg, dirtyGames, anyDirty, clearDirty, reset, getAvatar, setAvatar } from './leaderboard.js';
 import pong from './games/pong/server.js';
 import tron from './games/tron/server.js';
 import tank from './games/tank/server.js';
@@ -32,7 +32,29 @@ const room = {
 
 function ensureGame() { if (!game) game = GAMES[activeId].create(room); }
 function roomMsg() { return { t: 'room', active: activeId, host: hostId(), players: members.map(m => ({ id: m.id, name: m.name, role: m.role, ready: !!m.ready })) }; }
-function hostId() { const p = members.find(m => m.role === 'player'); return (p || members[0] || {}).id || null; }   // hôte = 1er joueur connecté
+// Game master = détenteur de la clé ADMIN_KEY s'il est connecté, sinon le 1er joueur connecté (repli).
+function hostId() {
+  const gm = members.find(m => m.gm);
+  if (gm) return gm.id;
+  const p = members.find(m => m.role === 'player');
+  return (p || members[0] || {}).id || null;
+}
+// Réglages de partie réservés au game master (messages routés vers les jeux via {t:'g',m}).
+const GM_ONLY = new Set(['mode', 'preset', 'opt', 'bots', 'botdiff', 'arena', 'wintarget', 'ff', 'gen', 'variant', 'rush', 'revenge', 'fade', 'lbreset']);
+// Avatar valide = court emoji SANS caractère HTML, ou data URL image en base64 strict.
+// Indispensable : les clients l'injectent en innerHTML dans les cartes HUD (sinon injection possible).
+const AV_OK = a => typeof a === 'string' && (
+  (a.length <= 24 && !/[<>&"'`\\]/.test(a)) ||
+  (a.length <= 20000 && /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/.test(a))
+);
+function sendAvatars(conn) {                       // à la connexion : avatars des membres déjà présents
+  const seen = new Set();
+  for (const m of members) {
+    if (!m.name || !m.avatar || seen.has(m.name)) continue;
+    seen.add(m.name);
+    if (conn.readyState === 1) conn.send(JSON.stringify({ t: 'av', name: m.name, a: m.avatar }));
+  }
+}
 function allReady() { const ps = members.filter(m => m.role === 'player'); return ps.length <= 1 || ps.every(m => m.ready); } // solo : pas de gate ; bots = non-membres → exclus → jamais bloquants
 function tourMsg() {
   if (!tour) return { t: 'tour', on: false };
@@ -94,10 +116,20 @@ function wire(member) {                          // (re)branche les handlers d'u
     if (m.t === 'name') {
       const nm = ('' + (m.name || '')).replace(/[<>&"']/g, '').trim().slice(0, 12);   // assaini à la source : les clients l'injectent en innerHTML
       member.ident.name = nm; member.name = nm;
+      if (nm) {                                    // l'avatar suit le pseudo (= le profil)
+        if (member.avatar) setAvatar(nm, member.avatar);
+        else { const st = getAvatar(nm); if (st) member.avatar = st; }
+        if (member.avatar) room.broadcast({ t: 'av', name: nm, a: member.avatar });
+      }
       if (game && game.onRename) game.onRename(member);
       broadcastRoom();
+    } else if (m.t === 'auth') {
+      // le client présente la clé admin : il devient game master (vérifié côté serveur, non usurpable)
+      const KEY = process.env.ADMIN_KEY;
+      if (KEY && typeof m.key === 'string' && m.key === KEY && !member.gm) { member.gm = true; broadcastRoom(); }
     } else if (m.t === 'pick') {
       if (tour) return;                              // pendant un tournoi, c'est lui qui choisit les jeux
+      if (member.id !== hostId()) { room.send(member, { t: 'denied' }); return; }
       pick(m.id);
     } else if (m.t === 'tour') {
       if (member.id !== hostId()) return;            // réservé à l'hôte
@@ -112,9 +144,15 @@ function wire(member) {                          // (re)branche les handlers d'u
       }
     } else if (m.t === 'g') {
       ensureGame();
+      if (m.m && GM_ONLY.has(m.m.t) && member.id !== hostId()) { room.send(member, { t: 'denied' }); return; } // réglages : game master seulement
       if (m.m && m.m.t === 'start' && tour && tour.wait > 0) return;                        // transition de tournoi : pas de relance de l'ancien jeu
       if (m.m && m.m.t === 'start' && game.isIdle() && !allReady()) { room.send(member, { t: 'notready' }); return; } // gate « Prêt » : démarrage seulement si tous les joueurs sont prêts
       game.onMessage(member, m.m);
+    } else if (m.t === 'avatar') {
+      const a = (m.a === null || m.a === undefined || m.a === '') ? '' : m.a;
+      if (a !== '' && !AV_OK(a)) return;            // format refusé : on ignore silencieusement
+      member.avatar = a;
+      if (member.name) { setAvatar(member.name, a || null); room.broadcast({ t: 'av', name: member.name, a }); }
     } else if (m.t === 'ready') {
       member.ready = !!m.v; broadcastRoom();
     } else if (m.t === 'reseat') {
@@ -153,6 +191,7 @@ function onConnection(conn, token) {
     ensureGame();
     conn.send(JSON.stringify({ t: 'hello', you: { id: member.id, name: member.name, token: member.token }, games: META, active: activeId }));
     joinGame(member);                           // onJoin idempotent -> renvoie le même siège (welcome)
+    sendAvatars(conn);
     for (const meta of META) conn.send(lbMsg(meta.id)); // tous les classements (sinon vides au changement de jeu sans recharger)
     if (tour) conn.send(JSON.stringify(tourMsg()));     // tournoi en cours : resynchronise le bandeau
     broadcastRoom();
@@ -162,11 +201,12 @@ function onConnection(conn, token) {
   let ident = token && identities.get(token);
   let tok = token;
   if (!ident) { tok = newToken(); ident = { id: 'm' + (idSeq++), name: '' }; identities.set(tok, ident); }
-  const member = { id: ident.id, name: ident.name, conn, token: tok, role: null, ident, ready: false };
+  const member = { id: ident.id, name: ident.name, conn, token: tok, role: null, ident, ready: false, gm: false, avatar: getAvatar(ident.name) || '' };
   members.push(member);
   ensureGame();
   conn.send(JSON.stringify({ t: 'hello', you: { id: member.id, name: member.name, token: tok }, games: META, active: activeId }));
   joinGame(member);
+  sendAvatars(conn);
   for (const meta of META) conn.send(lbMsg(meta.id)); // tous les classements (sinon vides au changement de jeu sans recharger)
   if (tour) conn.send(JSON.stringify(tourMsg()));     // tournoi en cours : resynchronise le bandeau
   broadcastRoom();
