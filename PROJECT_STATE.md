@@ -495,6 +495,55 @@ Retour : *« les icônes ne sont pas forcément claires »*. Nouveau module part
 En DOM et non au canvas : texte net, zéro coût par frame, et le style suit l'identité du jeu actif via
 les variables CSS. Les libellés disent l'**effet**, pas le nom (« Tir rapide : cadence doublée »).
 
+## Retours de partie du 22/09 (soir)
+
+### Chat inutilisable en jeu — deux causes cumulées
+1. Les 5 jeux appellent `closePanels()` **à chaque instantané de partie**, soit 60 fois par seconde :
+   le chat se refermait sous les doigts. Les modules reçoivent désormais `closeGamePanels`, qui
+   épargne le chat — **un seul changement dans `app.js`, aucun jeu modifié**.
+2. `.settings` est en `z-index:10`, donc **sous** les boutons flottants (11), les confettis (12) et les
+   bulles (13) : le panneau passait derrière. `#chatPanel` monte à 14.
+Le chat devient aussi la **seule fenêtre non modale** du site (pas de voile, pas de capture des clics) et
+s'**ancre dans un coin** en partie au lieu de se centrer sur le plateau. Sur mobile il remonte dans la
+bande du haut, loin du pavé directionnel — il y était purement masqué.
+
+### Game master : l'échec était silencieux
+Le mécanisme était correct — `hostId()` fait bien passer le porteur de `ADMIN_KEY` **devant** le titulaire
+par défaut, donc il reprend la main en arrivant. Mais une clé absente ou refusée ne provoquait **aucune
+réponse** : indiscernable d'un bug. Le hub répond maintenant `{t:'gm', ok, why}` et le client l'affiche
+(`nokey` = `ADMIN_KEY` non configurée sur le serveur, `bad` = clé invalide). Le statut affiche `👑 game master`.
+> **Manip** : ouvrir une fois `https://on-line.onrender.com/?admin=<clé>`, la clé est mémorisée et renvoyée
+> à chaque connexion. Et `ADMIN_KEY` doit être défini dans les variables d'environnement Render.
+
+### Pong : blocage sur parois parallèles
+Constaté en partie : les deux joueurs face à face éliminés, il ne restait que deux murs parallèles et la
+balle rebondissait indéfiniment sur le même axe — la manche ne pouvait plus se terminer.
+`bounce()` impose désormais une composante **minimale le long de la paroi** (`WALL_MIN_TAN = 0.24`) plus un
+léger aléa : la balle dérive donc toujours latéralement et finit par rencontrer une raquette. C'est une
+garantie **géométrique**, pas statistique, et elle s'applique à tous les effectifs.
+
+### Pong : murs-bumpers rendus perceptibles
+« On ne remarque pas l'effet » : le ×1,035 discret devient un **pic à ×1,45** qui retombe en ~0,4 s
+(`WALL_BURST_DECAY`), par-dessus un gain permanent ×1,05. Surtout, chaque bord éliminé **relève le plafond
+de vitesse** (+7 %, plafonné à +50 %) — sans ça la relance était absorbée dès que la balle touchait le
+plafond : très visible, mais sans effet sur la durée.
+**Mesuré** (6 participants, 1 vie, bots) : manche terminée en **35 s contre 61 s** avant ce réglage, et
+13 à 37 pics soudains par manche. À 8, les éliminations passent de `5s 23s 49s 76s 94s` à `5s 14s 23s 38s 65s 85s`.
+
+### Tanks
+- **👁 Camouflage** : le tank était affiché à 10 % d'opacité, donc toujours repérable. Il **disparaît**
+  maintenant complètement de l'écran des adversaires (ni caisse, ni nom, ni barre de vie) ; seuls le porteur
+  du **📡 radar**, ses coéquipiers et lui-même le voient. Mais **ses obus restent visibles** et il continue
+  de soulever **poussière et boue** (émission sortie du filtre d'opacité, et plus dense sur une case de boue) :
+  on peut le pister à la trace. La fumée de tank endommagé, elle, vient du tank et non du sol : elle est coupée.
+  > Le camouflage est appliqué **côté client** : la position transite toujours sur le fil. C'est un jeu entre
+  > amis, pas de l'anti-triche — masquer côté serveur imposerait un instantané par joueur et défferait
+  > l'optimisation réseau (trame unique partagée).
+- **➳ Obus perçant** : traverse et détruit **3 caisses de bois ou 1 bloc de métal** (avant : une seule caisse
+  de bois, et le métal l'arrêtait net).
+- **👟 Vitesse** : s'applique désormais **aussi à la rotation**. Elle en était exclue — un tank « rapide »
+  tournait à vitesse normale, ce qui rendait le bonus peu lisible. L'avance et la marche arrière l'avaient déjà.
+
 ## Limites connues (assumées)
 - **Reste à gagner, non fait** : **prédiction locale** de sa propre raquette — le seul levier qui retire vraiment
   l'aller-retour réseau du *ressenti* de contrôle (le débit, lui, n'est plus un sujet).

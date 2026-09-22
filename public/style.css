@@ -349,6 +349,12 @@ body.not-gm #tourBtn{ opacity:.5; filter:grayscale(.5); }
 /* mini-chat de salon : lanceur flottant (à côté des émotes) + journal + saisie */
 #chatFloat{ position:fixed; left:62px; bottom:12px; z-index:11; width:44px; height:44px; padding:0; font-size:20px; border-radius:50%;
   display:flex; align-items:center; justify-content:center; }
+/* Le chat est la SEULE fenêtre non modale : elle doit rester utilisable pendant une manche.
+   Au-dessus des boutons flottants (z-11) et des confettis (z-12), et ancrée dans un coin en
+   partie plutôt que centrée sur le plateau. */
+#chatPanel{ z-index:14; }
+body.playing #chatPanel{ top:auto; bottom:64px; left:12px; transform:none; width:min(92vw,360px); }
+body.playing #chatPanel .chatlog{ max-height:150px; }
 .chatdot{ position:absolute; top:4px; right:4px; width:9px; height:9px; border-radius:50%; background:#ff5a4e; box-shadow:0 0 6px rgba(255,90,78,.9); }
 .chatdot.hidden{ display:none; }
 .chatlog{ max-height:230px; overflow-y:auto; display:flex; flex-direction:column; gap:5px; padding:2px 0 6px;
@@ -504,7 +510,12 @@ body.game-bomb:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.5),0 0 0 3p
   #pauseFloat:active, .pauseFloat:active, #quitFloat:active, #setFloat:active{ opacity:1; }
   #emoteFloat{ width:40px; height:40px; font-size:18px; opacity:.55; }
   #chatFloat{ left:58px; width:40px; height:40px; font-size:18px; opacity:.55; }
-  body.playing #emoteFloat, body.playing #emoteBar, body.playing #chatFloat{ display:none; }   /* en partie : libère le coin bas-gauche du pavé directionnel */
+  body.playing #emoteFloat, body.playing #emoteBar{ display:none; }   /* en partie : libère le coin bas-gauche du pavé directionnel */
+  /* Le chat, lui, reste joignable : il remonte dans la bande du haut, loin du pavé directionnel. */
+  body.playing #chatFloat{ top:9px; left:58px; bottom:auto; width:42px; height:42px; opacity:.6; }
+  body.playing #chatFloat:active{ opacity:1; }
+  body.playing #chatPanel{ top:58px; bottom:auto; left:9px; right:9px; width:auto; }
+  body.playing #chatPanel .chatlog{ max-height:120px; }
   #xfade{ font-size:26px; }
 }
 @media (max-width:370px){                               /* très petits écrans (ancien iPhone) : on réduit pour tout faire tenir sans chevauchement */

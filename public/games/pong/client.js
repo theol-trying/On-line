@@ -309,12 +309,15 @@ export default (function () {
     else if (kind === 'bad') { tone(330, 0.12, 'sawtooth', 0.05); tone(220, 0.20, 'sawtooth', 0.05, 0.10); }
     else if (kind === 'ghost') tone(880, 0.10, 'sine', 0.04);
     else if (kind === 'bump') tone(300, 0.05, 'square', 0.04);
+    else if (kind === 'wallboost') { tone(240, 0.05, 'square', 0.05); tone(480, 0.09, 'square', 0.045, 0.04); }   // mur d'éliminé : relance sèche
   }
   function playFx(f) {
     sound(f.type === 'powerup' ? (f.bad ? 'bad' : 'powerup') : f.type);
     if (A.reduceFx) return;
     const now = performance.now();
-    const col = f.type === 'powerup' ? (f.bad ? '#ff5a5a' : (PU_COL[f.pu] || '#fff')) : colSeat(f.side);
+    const col = f.type === 'powerup' ? (f.bad ? '#ff5a5a' : (PU_COL[f.pu] || '#fff'))
+      : f.type === 'wallboost' ? '#ffb545'                           // ambre : même code couleur que le bord relanceur
+      : colSeat(f.side);
     rings.push({ x: f.x, y: f.y, born: now, color: col, big: f.type === 'death', kind: f.type });
     flashes.push({ x: f.x, y: f.y, born: now, color: col, r: f.type === 'death' ? 34 : 18 });
     ballPopUntil = now + 90;

@@ -225,9 +225,14 @@ function wire(member) {                          // (re)branche les handlers d'u
       if (game && game.onRename) game.onRename(member);
       broadcastRoom();
     } else if (m.t === 'auth') {
-      // le client présente la clé admin : il devient game master (vérifié côté serveur, non usurpable)
+      // Le client présente la clé admin : il devient game master (vérifié ici, donc non usurpable),
+      // et hostId() le fait passer DEVANT le titulaire par défaut — il reprend la main en arrivant.
+      // On répond toujours : l'échec était silencieux, donc indiscernable d'un bug (retour de test).
       const KEY = process.env.ADMIN_KEY;
-      if (KEY && typeof m.key === 'string' && m.key === KEY && !member.gm) { member.gm = true; broadcastRoom(); }
+      if (!KEY) { room.send(member, { t: 'gm', ok: false, why: 'nokey' }); return; }
+      if (typeof m.key !== 'string' || m.key !== KEY) { room.send(member, { t: 'gm', ok: false, why: 'bad' }); return; }
+      if (!member.gm) { member.gm = true; broadcastRoom(); }
+      room.send(member, { t: 'gm', ok: true });
     } else if (m.t === 'pick') {
       if (tour) return;                              // pendant un tournoi, c'est lui qui choisit les jeux
       if (member.id !== hostId()) { room.send(member, { t: 'denied' }); return; }
