@@ -11,6 +11,12 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
 
 - **Modules ES** (`"type": "module"`). Le client passe obligatoirement par le serveur
   (imports ESM → pas de `file://`). Après modification : Ctrl+F5.
+- **Vieux iOS** — pièges vérifiés en vrai, tous rencontrés sur ce repo : pas de `clamp()`/`min()`
+  ni de `gap` en flex ; `user-select` doit être écrit **aussi** en `-webkit-user-select` ;
+  `-webkit-touch-callout:none` est **indispensable** sur tout ce qui se touche, sinon l'appui long
+  ouvre la loupe, sélectionne le glyphe et **fige les commandes** ; Pointer Events n'existe que
+  depuis iOS 13 (un shim tactile dans `app.js` prend le relais en dessous). Côté JS : pas
+  d'optional chaining ni de `??`.
 - Repo GitHub : `theol-trying/On-line` · prod : https://on-line.onrender.com
   (le `name: pong-line` du `render.yaml` est un reste, ce n'est pas le service live).
 - `buildCommand: node --version` — no-op volontaire, **surtout pas** `npm install`.
