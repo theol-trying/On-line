@@ -23,10 +23,16 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
 ## Lancer et tester
 
 ```
+npm test                      # test de fumée : les 5 jeux, de vrais clients WebSocket — À LANCER AVANT CHAQUE PUSH
 node server.js                # :3000, ou preview_start via .claude/launch.json
 HUB_TRACE=1 node server.js    # journalise chaque diffusion
 ```
 
-`node --check` ne détecte pas les `ReferenceError` à l'exécution : pour tout changement de
-gameplay, ouvrir de vrais clients WebSocket depuis un script `.mjs` (Node ≥ 22 fournit
-`WebSocket` nativement) et jouer une manche.
+`npm test` (`test/smoke.mjs`, zéro dépendance) démarre le serveur sur le port 3999, joue une
+manche dans chaque jeu et vérifie : pas de plantage, l'état « play » atteint, la reconstitution
+du protocole delta, les tailles d'arène, le ratio de raquette de Pong, et l'arrivée d'un joueur
+en cours de partie. Sort en code 1 au moindre échec. Il affiche aussi la **cadence réelle** de
+chaque jeu — un écart au `tickHz` signale une régression de la boucle serveur.
+
+`node --check` ne détecte **pas** les `ReferenceError` à l'exécution : c'est exactement ce qui a
+mis le site à terre le 21/09 (`CELL is not defined` dans Bomberman). D'où le test de fumée.

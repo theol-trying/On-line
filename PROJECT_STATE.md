@@ -443,22 +443,54 @@ et tout rentre dans l'ordre au-dessus. À 10 joueurs la raquette passe de 171 à
 - `PAD_SPD` n'a pas bougé : il suit toujours k, si bien qu'à 10 joueurs on traverse son bord en ~26 ticks
   contre ~60 en duel — ce qui compense la raquette plus courte.
 
+## Test de fumée et ménage (22 septembre 2026)
+
+### `npm test` — `test/smoke.mjs`, zéro dépendance
+Démarre le serveur sur le port 3999, ouvre de **vrais** clients WebSocket, joue une manche dans chacun des
+5 jeux, puis sort en code 1 au moindre échec. **48 vérifications** : pas de plantage, état « play » atteint,
+reconstitution du protocole delta, tailles d'arène, ratio de raquette de Pong, arrivée d'un joueur en cours
+de partie, et journal serveur sans trace d'erreur.
+> Il existe parce que les **deux pannes de production du 21/09** (`CELL is not defined` qui tuait le serveur
+> entier, et le delta envoyé aux arrivants) étaient invisibles pour `node --check` — il fallait exécuter.
+> Les deux auraient été attrapées ici en quelques secondes. **À lancer avant chaque push.**
+
+### Pas de temps fixe — les jeux tournaient au ralenti
+`setInterval(step, 1000/hz)` réarme le timer **après** le callback : la cadence réelle vaut
+`1000 / (période + durée du tick)`, elle **chute donc quand la charge monte**. Mesuré par le test de fumée :
+
+| | Pong | Tanks | Bomberman | Snake | Tron |
+|---|---|---|---|---|---|
+| Avant | 51/s | 27/s | 27/s | 11/s | 15/s |
+| Après | **60/s** | **30/s** | **30/s** | **12/s** | **15/s** |
+
+J'avais documenté ça comme « cosmétique, ~4 % de dérive » : c'était faux en amplitude **et en sens**.
+Une balle 15 % trop lente, un décompte et des power-ups 15 % trop longs, et le jeu qui ralentissait à mesure
+que des joueurs arrivaient. Corrigé par un accumulateur (timer 2× plus rapide que le pas, rattrapage plafonné
+à 4 pas et 250 ms) : la cadence moyenne ne dépend plus de la charge.
+
+### Purge des identités · grisage des réglages
+Voir « Limites connues » ci-dessous, les deux lignes sont désormais barrées.
+
 ## Limites connues (assumées)
 - **Reste à gagner, non fait** : **prédiction locale** de sa propre raquette — le seul levier qui retire vraiment
   l'aller-retour réseau du *ressenti* de contrôle (le débit, lui, n'est plus un sujet).
 - Hébergement Render en **Europe (Frankfurt)** — confirmé par l'utilisateur, donc ~15-25 ms de ping : le ping
   résiduel vient du code et du réseau local, pas de la région.
-- La boucle serveur utilise `setInterval(step, 1000/hz)` : à 60 Hz, 16,67 ms n'est pas entier → le jeu tourne en
-  réalité à ~62 Hz avec une légère dérive. Cosmétique (les durées en ticks sont 4 % courtes), pas un problème de
-  fluidité. Un pas fixe à accumulateur serait plus juste.
+- ~~Dérive de la boucle serveur~~ **FAIT — pas de temps fixe** (voir section dédiée) : ce n'était pas cosmétique,
+  les jeux tournaient **10 à 15 % au ralenti**, et d'autant plus qu'il y avait de monde.
 - Identité par **pseudo** sans comptes (mêmes pseudos = stats fusionnées). Reconnexion best-effort.
 - Spectateurs restent spectateurs même si un siège se libère (bouton 🪑 « Prendre un siège » hors partie).
 - Pas de TLS/auth/rate-limit (LAN de confiance).
-- Les boutons de réglages restent **visibles** pour les non-game-masters (refus + toast au clic, pas de grisage visuel).
+- ~~Pas de grisage des réglages game master~~ **FAIT** : `body.not-gm` (posé dans `app.js` à chaque message `room`)
+  + classe `gm` sur les 26 boutons concernés d'`index.html`. Purement CSS, on ne touche pas à `disabled` que chaque
+  jeu pilote lui-même. « Démarrer » reste actif : lancer est un droit de **joueur**, pas de game master.
 - ~~Optimisation différée~~ **FAIT — delta réseau** : `grid` (Tank/Bomb) et `geo` (Pong) ne sont émis **que s'ils changent** (+ refresh 2×/s : arrivants/auto-réparation ; toujours émis hors play). Champ `undefined` → omis du JSON → le client **réutilise le précédent** (fusion en tête de `onState` ; `geo:null` = vraiment vide). Gain ≈ 40 Ko/s/client (Pong) + 7 (Tank) + 5 (Bomb). Les chemins Tron/Snake changent chaque tick (pas de delta possible).
-- `identities` (hub) non purgé → légère croissance mémoire sur très longue durée.
+- ~~`identities` non purgé~~ **FAIT** : plafonné à 400, les plus anciens sautent (Map = ordre d'insertion), en
+  épargnant les jetons connectés ou en attente de reprise. Sans effet visible : le client renvoie son pseudo.
 - Multi-onglets de test : localStorage partagé → même token/pseudo par défaut (mettre un pseudo distinct par onglet).
-- **Rien exécuté par l'assistant** (consigne) : tests runtime à faire côté utilisateur (voir checklist fournie en conversation).
+- **Ce que `npm test` ne couvre pas** : le ressenti de jeu à plusieurs humains, le mobile (surtout le vieil iPhone),
+  la lisibilité des motifs à 8-10, et les fins de manche longues (mort subite de Bomberman jusqu'au bout).
+  Ces choses-là n'ont jamais été trouvées par l'automatisation — toujours par les testeurs.
 
 ## Pistes non faites (idées futures)
 Mobs IA solo Bomberman ; salles multiples (codes de room) ; replay de fin de manche ; avatars dessinés sur les pièces en jeu ;
