@@ -448,6 +448,7 @@ function connect() {
       activeId = m.active; renderMenu(); loadModule(activeId);
       const ps = m.players || [];
       roomPlayers = ps; roomHost = m.host || null;
+      document.body.classList.toggle('not-gm', !!you.id && !!roomHost && roomHost !== you.id);   // grise les réglages réservés au game master
       dailyOn = !!m.daily; renderDaily();
       const me = ps.find(p => p.id === you.id);
       const human = ps.filter(p => p.role !== 'spectator').length;

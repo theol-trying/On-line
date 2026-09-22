@@ -7,7 +7,8 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/smoke.mjs"
   },
   "comment": "Aucune dépendance, et il ne doit jamais y en avoir : le serveur WebSocket est écrit à la main et Upstash passe par le fetch natif. La borne haute de `engines` évite qu'un déploiement bascule tout seul sur un Node majeur non testé ; .node-version fixe la version exacte utilisée en ligne.",
   "engines": {

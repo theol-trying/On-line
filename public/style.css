@@ -312,6 +312,12 @@ body.flat .fxon{ animation:none; }
 .av-e{ margin-right:3px; }
 /* podium de tournoi */
 .champ{ text-align:center; font-size:16px; font-weight:800; color:#ffd76b; padding:10px 4px 14px; }
+/* Réglages réservés au game master : rendus visuellement inertes pour les autres.
+   Purement cosmétique — le hub refuse déjà ces messages ; on évite juste de laisser croire
+   que le bouton va marcher. On ne touche PAS à `disabled` : chaque jeu le pilote lui-même. */
+body.not-gm button.gm{ opacity:.4; filter:grayscale(.65); cursor:not-allowed; }
+body.not-gm #gamemenu .gtab:not(.on){ opacity:.5; filter:grayscale(.5); cursor:not-allowed; }
+body.not-gm #tourBtn{ opacity:.5; filter:grayscale(.5); }
 /* mini-chat de salon : lanceur flottant (à côté des émotes) + journal + saisie */
 #chatFloat{ position:fixed; left:62px; bottom:12px; z-index:11; width:44px; height:44px; padding:0; font-size:20px; border-radius:50%;
   display:flex; align-items:center; justify-content:center; }

@@ -39,6 +39,20 @@ const TRACE = !!process.env.HUB_TRACE;         // HUB_TRACE=1 : journalise chaqu
 const RECONNECT_GRACE = 12000;                 // délai pour reprendre son siège après une coupure (F5) en pleine partie
 const pendingLeaves = new Map();               // token -> { member, timer } : joueurs déconnectés dont le siège est gardé
 const newToken = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+// `identities` ne servait qu'à grossir : un jeton par visiteur, jamais relâché. Sur un serveur qui
+// tourne des mois, c'est une fuite lente. On plafonne en supprimant les plus anciens (une Map itère
+// dans l'ordre d'insertion), en épargnant les jetons encore utilisés ou en attente de reprise.
+// Sans conséquence pour le joueur : le client renvoie son pseudo à chaque connexion.
+const IDENT_MAX = 400;
+function purgeIdentities() {
+  if (identities.size <= IDENT_MAX) return;
+  const vivants = new Set(members.map(m => m.token));
+  for (const tok of identities.keys()) {
+    if (identities.size <= IDENT_MAX) break;
+    if (vivants.has(tok) || pendingLeaves.has(tok)) continue;
+    identities.delete(tok);
+  }
+}
 
 const room = {
   get members() { return members; },
@@ -83,7 +97,30 @@ function tourMsg() {
   return { t: 'tour', on: true, idx: tour.idx, total: tour.order.length, game: tour.order[Math.min(tour.idx, tour.order.length - 1)], scores };
 }
 function broadcastRoom() { room.broadcast(roomMsg()); }
-function setLoop() { const hz = GAMES[activeId].meta.tickHz || 60; if (hz === curHz && loop) return; if (loop) clearInterval(loop); curHz = hz; loop = setInterval(step, 1000 / hz); }
+// Pas de temps FIXE. `setInterval(step, 1000/hz)` réarme le timer APRÈS le callback : la cadence
+// réelle vaut 1000/(période + durée du tick), donc elle CHUTE quand la charge monte — mesuré à
+// 51 Hz au lieu de 60 sur Pong à 10 joueurs, 27 au lieu de 30 sur Tanks. Le jeu tournait au ralenti,
+// et d'autant plus qu'il y avait de monde (balle plus lente, décompte et power-ups rallongés d'autant).
+// Ici le timer bat deux fois plus vite que le pas et un accumulateur rattrape : la cadence moyenne
+// ne dépend plus de la charge.
+let acc = 0, lastT = 0;
+function tickLoop() {
+  const now = Date.now();
+  let dt = now - lastT; lastT = now;
+  if (dt > 250) dt = 250;                       // reprise après une pause longue : pas de rattrapage explosif
+  acc += dt;
+  const pas = 1000 / curHz, hz0 = curHz;
+  let n = 0;
+  while (acc >= pas && n < 4 && curHz === hz0) { acc -= pas; step(); n++; }   // hz0 : step() peut changer de jeu (donc de cadence)
+  if (acc > pas * 4) acc = 0;                   // retard irrattrapable : on repart proprement
+}
+function setLoop() {
+  const hz = GAMES[activeId].meta.tickHz || 60;
+  if (hz === curHz && loop) return;
+  if (loop) clearInterval(loop);
+  curHz = hz; acc = 0; lastT = Date.now();
+  loop = setInterval(tickLoop, Math.max(1, Math.floor(500 / hz)));
+}
 
 function joinGame(member) {
   const r = game.onJoin(member) || { role: 'spectator' };
@@ -283,7 +320,7 @@ function onConnection(conn, token) {
   }
   let ident = token && identities.get(token);
   let tok = token;
-  if (!ident) { tok = newToken(); ident = { id: 'm' + (idSeq++), name: '' }; identities.set(tok, ident); }
+  if (!ident) { tok = newToken(); ident = { id: 'm' + (idSeq++), name: '' }; identities.set(tok, ident); purgeIdentities(); }
   const member = { id: ident.id, name: ident.name, conn, token: tok, role: null, ident, ready: false, gm: false, avatar: getAvatar(ident.name) || '' };
   members.push(member);
   ensureGame();
