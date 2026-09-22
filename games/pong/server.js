@@ -33,6 +33,10 @@ function setArena(n) {
   PAD_SPD = PAD_SPD0 * k;
   PAD_LEN = PAD_LEN0 * k;      // valeur provisoire : recalculée sur la vraie longueur d'arête dans configure()
 }
+// Murs des joueurs éliminés = bumpers, à partir de 6 participants (cf. bounceWall).
+// 1,035 est volontairement plus doux qu'un renvoi de raquette (HIT_SPEEDUP = 1,05) : l'effet doit
+// se cumuler au fil des éliminations, pas transformer le premier mur venu en catapulte.
+const WALL_BOOST = 1.035, WALL_BOOST_MIN_PARTS = 6;
 const PADDLE_MAX_ANGLE = 1.05; // ~60° max p/r à la normale (impact en bout de raquette)
 const HIT_SPEEDUP = 1.05;      // léger gain de vitesse à chaque renvoi raquette
 
@@ -237,6 +241,7 @@ export function createPong(room) {
   // que la mort subite avançait, exactement l'inverse de l'effet recherché.
   const padBase = p => (geo && p.edge >= 0) ? geo.edges[p.edge].len * PAD_RATIO : PAD_LEN;
   const padLenOf = p => { const b = padBase(p); return (p.growUntil > tick ? b * GROW_MULT : b) * (p.isLeader ? 0.82 : 1) * (p.shrinkUntil > tick ? SHRINK_MULT : 1); };
+  const wallBoostOn = () => nParts >= WALL_BOOST_MIN_PARTS;
   function clampSpeed(b, max) {
     let spd = Math.hypot(b.vx, b.vy);
     if (spd > max) { b.vx *= max / spd; b.vy *= max / spd; spd = max; }
@@ -429,9 +434,20 @@ export function createPong(room) {
       clampSpeed(b, max);
       b.last = -1;
     };
-    if (e.owner < 0) { bounce(); return false; }
+    // Mur d'un joueur éliminé : il renvoie la balle un peu PLUS VITE, comme un bumper.
+    // Retour de test : au-delà de 5 joueurs les fins de partie s'éternisaient — chaque élimination
+    // ajoutait un mur passif et il restait de moins en moins de raquettes pour conclure. Désormais
+    // chaque mur mort accélère le jeu, donc la pression monte toute seule à mesure que le terrain
+    // se vide. Plafonné par clampSpeed : la balle ne peut pas s'emballer.
+    const bounceWall = () => {
+      bounce();
+      if (!wallBoostOn()) return;
+      b.vx *= WALL_BOOST; b.vy *= WALL_BOOST;
+      clampSpeed(b, max);
+    };
+    if (e.owner < 0) { bounceWall(); return false; }
     const p = players[e.owner];
-    if (!inPlay(p)) { bounce(); return false; }
+    if (!inPlay(p)) { bounceWall(); return false; }
     if (p.shieldUntil > tick || p.immuneUntil > tick) {
       bounce();
       if (p.shieldUntil > tick) fx.push({ type: 'shield', side: p.seat, x: b.x, y: b.y });
@@ -515,6 +531,7 @@ export function createPong(room) {
     return {
       gs: gameState, winner, fx, botCount, connected: connectedCount(), maxBots: maxBots(),
       mode, nteams, preset, maxLives: cfg.lives, aw: W, ah: H,
+      wallBoost: wallBoostOn(),                        // le client dessine les bords éliminés en bumpers
       count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / 60)) : 0,
       sd: sdActive, slow: slowUntil > tick,
       opts: {

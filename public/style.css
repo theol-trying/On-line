@@ -312,6 +312,34 @@ body.flat .fxon{ animation:none; }
 .av-e{ margin-right:3px; }
 /* podium de tournoi */
 .champ{ text-align:center; font-size:16px; font-weight:800; color:#ffd76b; padding:10px 4px 14px; }
+/* Messages de bonus / malus (public/gamemsg.js) — les icônes seules n'étaient pas claires.
+   Deux placements distincts, tous deux HORS du centre du plateau :
+     .gmsg-global : bande fine collée au bord supérieur — un effet qui touche tout le monde
+                    doit se voir sans gêner ceux qu'il concerne.
+     .gmsg-perso  : ce que TU viens de ramasser, juste en dessous, plus lisible. */
+.gmsg{ position:absolute; left:0; right:0; z-index:4; pointer-events:none; text-align:center;
+  opacity:0; transition:opacity .16s ease, transform .16s ease; transform:translateY(-6px); }
+.gmsg.on{ opacity:1; transform:none; }
+.gmsg-global{ top:2px; }
+.gmsg-perso{ top:30px; }
+.gmsg-global .gmsg-i, .gmsg-global .gmsg-t,
+.gmsg-perso .gmsg-i, .gmsg-perso .gmsg-t{ vertical-align:middle; }
+.gmsg-global > *{ display:inline-block; }
+.gmsg-global .gmsg-t, .gmsg-perso .gmsg-t{ margin-left:6px; }
+.gmsg-global .gmsg-i{ font-size:14px; } .gmsg-perso .gmsg-i{ font-size:19px; }
+.gmsg-global .gmsg-t{ font-size:12px; } .gmsg-perso .gmsg-t{ font-size:15px; font-weight:700; }
+.gmsg-global, .gmsg-perso{ --gmsg-col:var(--accent); }
+.gmsg-global .gmsg-i, .gmsg-global .gmsg-t{ color:var(--gmsg-col); }
+.gmsg-perso .gmsg-i, .gmsg-perso .gmsg-t{ color:#fff; }
+.gmsg-global::before, .gmsg-perso::before{ content:''; position:absolute; inset:0; margin:0 auto;
+  border-radius:999px; background:rgba(8,10,20,.72); border:1px solid var(--gmsg-col);
+  width:100%; max-width:min(92%,420px); z-index:-1; }
+.gmsg-global{ padding:3px 0; } .gmsg-perso{ padding:6px 0; }
+.gmsg.bad{ --gmsg-col:#ff6a5a; }
+.gmsg.bad .gmsg-t, .gmsg.bad .gmsg-i{ color:#ffd9d4; }
+body.flat .gmsg{ transition:none; }
+@media (max-width:600px){ .gmsg-perso{ top:24px; } .gmsg-perso .gmsg-t{ font-size:13px; } .gmsg-global .gmsg-t{ font-size:11px; } }
+
 /* Réglages réservés au game master : rendus visuellement inertes pour les autres.
    Purement cosmétique — le hub refuse déjà ces messages ; on évite juste de laisser croire
    que le bouton va marcher. On ne touche PAS à `disabled` : chaque jeu le pilote lui-même. */

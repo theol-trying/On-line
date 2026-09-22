@@ -4,6 +4,7 @@ import { GW as GW0, GH as GH0, CELL as CELL0, ARENA } from './shared.js';
 let GW = GW0, GH = GH0, CELL = CELL0;
 import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (lisibilité daltonien / jusqu'à 10 joueurs)
+import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // retour de test : l'icône seule ne dit pas l'effet, on l'écrit
 
 // musique : jardin léger — nappe douce majeure, plucks pentatoniques ; climax (sprint food-rush / duel) = contre-voix + tempo
 const MUSIC_THEME = { bpm: 102, bpmBoost: 12, vol: 0.42, root: 130.81, len: 32,
@@ -24,6 +25,15 @@ const TEAM_LETTER = ['A', 'B', 'C', 'D', 'E'];
 const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2', '3v3': '3 v 3', '4v4': '4 v 4', '2v2v2v2': '2 v 2 v 2 v 2', '3v3v3': '3 v 3 v 3', '5v5': '5 v 5', '2v2v2v2v2': '2 v 2 v 2 v 2 v 2' };
 const TEAM_TOTALS = [4, 6, 8, 9, 10];               // effectifs pour lesquels un mode par équipes existe (4→2v2 … 10→5v5 / 2v2v2v2v2)
 const VARIANT_NAMES = ['🐍 Classique', '🌀 Murs traversants', '🪨 Obstacles'];
+// Libellés des nourritures spéciales : dire l'EFFET, pas le nom (les icônes 🟡🍄👻 ne sont pas parlantes).
+// Volontairement PAS de message pour la pomme ordinaire : on en ramasse une toutes les deux secondes,
+// ce serait un bandeau permanent — et c'est la seule nourriture dont l'icône se comprend seule.
+// Ces nourritures n'affectent QUE celui qui les mange (cf. games/snake/server.js) : elles sont donc personnelles.
+const FOOD_MSG = {
+  gold:   { i: '🟡', t: 'Pomme dorée : +3 points' },
+  shrink: { i: '🍄', t: 'Champignon : tu raccourcis' },
+  ghost:  { i: '👻', t: 'Fantôme : tu traverses les serpents' },
+};
 // identité visuelle propre au jeu (fixe) : Jardin / Terrarium
 const SKIN = { bg: '#0f2410', field: '#1c3a17', field2: '#234a1d', grid: 'rgba(170,255,150,0.05)', border: 'rgba(120,200,110,0.55)', apple: true };
 // fond animé : lucioles qui flânent + pétales qui tombent (identité jardin) — coupé par reduceFx
@@ -37,6 +47,7 @@ export default (function () {
   let A, send, root, cv, ctx, togglePanel = () => {}, closePanels = () => {};
   let CC = PAL.normal, TEAMCC = TEAMPAL.normal, TH = SKIN, FX = 1;
   let mySeat = -1, snap = null, prevGs = 'lobby', teamMode = false, endShown = false, inGamePrev = false, prevRound = -1, _lastCount = -1;
+  let rushAlerted = false, duelAlerted = false;   // messages globaux « une seule fois par manche »
   let board = [], buf = [];
   const particles = [];
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null;
@@ -114,7 +125,7 @@ export default (function () {
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
-    if (m.round !== prevRound) { prevRound = m.round; buf = []; particles.length = 0; }
+    if (m.round !== prevRound) { prevRound = m.round; buf = []; particles.length = 0; rushAlerted = duelAlerted = false; }
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
@@ -125,8 +136,10 @@ export default (function () {
     { let inten = 0;                                  // musique : 1 en jeu, 2 = sprint final food-rush ou duel (parmi 3+)
       if (m.gs === 'play' || m.gs === 'countdown') {
         inten = 1;
-        if (m.rush) { let lead = 0; m.players.forEach(p => { if (p.playing && p.score > lead) lead = p.score; }); if (lead >= (m.rushTarget || 20) * 0.7) inten = 2; }
-        else { const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length; if (tot >= 3 && alive <= 2) inten = 2; }
+        if (m.rush) { let lead = 0; m.players.forEach(p => { if (p.playing && p.score > lead) lead = p.score; });
+          if (lead >= (m.rushTarget || 20) * 0.7) { inten = 2; if (!rushAlerted) { rushAlerted = true; msgGlobal('🏁', 'Sprint final : cible proche', { color: '#ffd24a' }); } } }   // concerne tout le monde : bande haute, une seule fois par manche
+        else { const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length;
+          if (tot >= 3 && alive <= 2) { inten = 2; if (alive === 2 && !duelAlerted) { duelAlerted = true; msgGlobal('⚔', 'Duel final : deux survivants'); } } }
       }
       music.setIntensity(inten); }
     refreshHUD();
@@ -153,7 +166,8 @@ export default (function () {
   function psound(k, gx) { sndPan = Math.max(-1, Math.min(1, (px(gx) / ARENA - 0.5) * 1.7)); sound(k); sndPan = 0; }   // son positionné gauche/droite
   function sound(k) { if (!actx) return; if (k === 'crash') { tone(180, 0.22, 'sawtooth', 0.06); tone(90, 0.3, 'sawtooth', 0.05, 0.04); } else if (k === 'eat') { tone(620, 0.06, 'square', 0.05); tone(880, 0.07, 'square', 0.05, 0.05); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
-    if (f.type === 'eat') { if (f.seat === mySeat) psound('eat', f.x); if (!A.reduceFx) { const x = px(f.x), y = px(f.y), now = performance.now(); for (let k = 0; k < 8; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.2; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 300 + Math.random() * 180, color: '#ff5a6a' }); } } return; }   // éclaboussure de pomme
+    if (f.type === 'eat') { if (f.seat === mySeat) { psound('eat', f.x); const fm = FOOD_MSG[f.ft || 'apple']; if (fm) msgPerso(fm.i, fm.t); }   // nourriture spéciale ramassée par MOI : on annonce l'effet (les autres n'en sont pas affectés, donc rien à leur dire)
+      if (!A.reduceFx) { const x = px(f.x), y = px(f.y), now = performance.now(); for (let k = 0; k < 8; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.2; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 300 + Math.random() * 180, color: '#ff5a6a' }); } } return; }   // éclaboussure de pomme
     if (f.type === 'crash') {
       psound('crash', f.x); music.sting('kill'); if (A.reduceFx) return;
       shakeMag = Math.max(shakeMag, 6);
@@ -409,6 +423,8 @@ export default (function () {
     A = ctx0.a11y; send = ctx0.send; root = ctx0.root;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('snc'); ctx = cv.getContext('2d'); hud = $('snHud'); endEl = $('snEnd');
+    { const wrap = cv.parentElement;                 // bandeaux de message posés sur le cadre du canvas (.canvas-wrap)
+      if (wrap && wrap.classList && wrap.classList.contains('canvas-wrap')) initGameMsg(wrap); }
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('snStart'); pauseBtn = $('snPause'); modeBtn = $('snMode'); variantBtn = $('snVariant'); rushBtn = $('snRush'); botsBtn = $('snBots'); pauseFloat = $('snPauseFloat');

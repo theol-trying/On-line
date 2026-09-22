@@ -4,6 +4,7 @@ import { GW as GW0, GH as GH0, CELL as CELL0, ARENA } from './shared.js';
 let GW = GW0, GH = GH0, CELL = CELL0;
 import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (daltonisme / jusqu'à 10 joueurs)
+import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // bandeaux « ce que tu viens de ramasser »
 
 // musique : synthwave sombre — nappe en quintes, basse pulsée, arpège néon ; climax (duel final) = arp rapide + charley + tempo
 const MUSIC_THEME = { bpm: 122, bpmBoost: 14, vol: 0.5, root: 82.41, len: 32,
@@ -28,6 +29,20 @@ const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2'
 const MAX_SEATS = 10;                                   // nombre de sièges max (aligné sur le serveur)
 const TEAM_TOTALS = [4, 6, 8, 9, 10];                   // effectifs exacts pour lesquels le serveur propose un mode par équipes
 const PU = { speed: { i: '»', c: '#9fe6ff' }, ghost: { i: '◌', c: '#cbb3ff' }, cut: { i: '✄', c: '#ffd76b' }, blink: { i: '➤', c: '#7fffd4' }, breaker: { i: '⊘', c: '#ffcf5a' }, invert: { i: '⇄', c: '#ff9be0' } };
+// Retour de test : l'icône seule ne dit pas l'effet. Libellés affichés au ramassage — constantes du
+// client uniquement, jamais une chaîne venue du réseau. Bonus PERSONNELS (n'affectent que le ramasseur).
+const PU_MSG = {
+  speed: { i: '»', t: 'Vitesse : 2× plus rapide' },
+  ghost: { i: '◌', t: 'Fantôme : tu traverses les traînées' },
+  cut: { i: '✄', t: 'Coupe : ta traînée effacée' },
+  blink: { i: '➤', t: 'Téléport : saut vers l’avant' },
+  breaker: { i: '⊘', t: 'Casse-mur : perce UNE traînée' },
+};
+// Effets vus par tout le monde : l'inversion frappe TOUS les adversaires du ramasseur, et le
+// rétrécissement de l'arène concerne les survivants. Bande fine en haut, hors de la zone de jeu.
+const INVERT_MSG = { i: '⇄', autres: 'Adversaires : contrôles inversés', moi: 'Tes contrôles sont inversés' };
+const BREAK_MSG = { i: '⊘', t: 'Casse-mur consommé' };
+const SHRINK_MSG = { i: '⚠', t: 'L’arène se referme !' };
 const THEMES = {
   neon: { bg: '#0a0a14', field: '#0d0e1c', grid: 'rgba(255,255,255,0.05)', wall: '#2a2f48' },
   crt: { bg: '#04140b', field: '#06190e', grid: 'rgba(120,255,170,0.08)', wall: '#16432a' },
@@ -124,7 +139,7 @@ export default (function () {
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) music.sting('count');   // décompte musical 3·2·1
     if (prevGs === 'countdown' && m.gs === 'play') music.sting('go');
     lastCount = m.count;
-    const shr = (m.shrink | 0) > 0; if (shr && !prevSd) music.sting('alert'); prevSd = shr;    // riser : l'arène se referme
+    const shr = (m.shrink | 0) > 0; if (shr && !prevSd) { music.sting('alert'); msgGlobal(SHRINK_MSG.i, SHRINK_MSG.t, { bad: true }); } prevSd = shr;    // riser : l'arène se referme
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 quand il ne reste qu'un duel (parmi 3+)
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length; if (tot >= 3 && alive <= 2) inten = 2; }
@@ -152,7 +167,23 @@ export default (function () {
   function psound(k, gx) { sndPan = Math.max(-1, Math.min(1, (px(gx) / ARENA - 0.5) * 1.7)); sound(k); sndPan = 0; }   // son positionné gauche/droite
   function sound(k) { if (!actx) return; if (k === 'crash') { tone(180, 0.22, 'sawtooth', 0.06); tone(90, 0.3, 'sawtooth', 0.05, 0.04); } else if (k === 'pickup') { tone(660, 0.07, 'square', 0.05); tone(990, 0.08, 'square', 0.05, 0.06); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
   function playFx(f) {
-    if (f.type === 'pickup' || f.type === 'break') return sound('pickup');
+    if (f.type === 'pickup') {
+      sound('pickup');
+      if (f.kind === 'invert') {                       // touche tous les adversaires du ramasseur => global, pour tous
+        const meP = (snap && mySeat >= 0 && snap.players) ? snap.players[mySeat] : null;
+        const touche = !!(meP && meP.inv);             // le serveur vient de me poser l'inversion : je suis une victime
+        msgGlobal(INVERT_MSG.i, touche ? INVERT_MSG.moi : INVERT_MSG.autres, { bad: touche });
+      } else if (f.seat === mySeat) {                  // bonus personnel : rien à afficher chez les autres, ce serait du bruit
+        const d = PU_MSG[f.kind];
+        if (d && d.t) msgPerso(d.i, d.t);              // `d.t` : garde-fou si `kind` tombe sur une clé du prototype
+      }
+      return;
+    }
+    if (f.type === 'break') {                          // casse-mur dépensé : le joueur doit savoir qu'il n'en a plus
+      sound('pickup');
+      if (f.seat === mySeat) msgPerso(BREAK_MSG.i, BREAK_MSG.t);
+      return;
+    }
     if (f.type === 'crash') {
       psound('crash', f.x); music.sting('kill');
       if (f.seat === mySeat && !A.reduceFx) killcam = { x: f.x, y: f.y, born: performance.now() };   // killcam sur ta propre collision
@@ -346,6 +377,8 @@ export default (function () {
     A = ctx0.a11y; send = ctx0.send; root = ctx0.root;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('trc'); ctx = cv.getContext('2d'); hud = $('trHud'); endEl = $('trEnd');
+    const wrap = cv.parentElement;                                                  // cadre du canvas : support des bandeaux bonus/malus
+    initGameMsg(wrap && wrap.classList.contains('canvas-wrap') ? wrap : null);
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('trStart'); pauseBtn = $('trPause'); modeBtn = $('trMode'); fadeBtn = $('trFade'); botsBtn = $('trBots'); pauseFloat = $('trPauseFloat');
