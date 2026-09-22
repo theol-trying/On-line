@@ -338,15 +338,23 @@ export default (function () {
       snap.players.forEach(p => {
         if (!p.playing || !p.alive) return;
         const t = (tv && tv[p.seat]) || p, col = colSeat(p.seat);
-        let alpha = 1;                               // camouflage : quasi invisible pour les ennemis (sauf radar)
-        if (p.camo) { if (p.seat === mySeat) alpha = 0.5; else { const enemy = !teamMode || (me && p.team !== me.team); alpha = (enemy && !myRadar) ? 0.1 : 0.5; } }
-        if (!A.reduceFx && alpha > 0.3) {
+        // 👁 Camouflage : le tank disparaît VRAIMENT de l'écran des adversaires. Il était affiché à
+        // 10 % d'opacité, donc encore parfaitement repérable — le bonus ne servait à rien. Restent
+        // seuls à le voir : lui-même, ses coéquipiers, et le porteur du 📡 radar.
+        let alpha = 1;
+        if (p.camo) { if (p.seat === mySeat) alpha = 0.5; else { const enemy = !teamMode || (me && p.team !== me.team); alpha = (enemy && !myRadar) ? 0 : 0.5; } }
+        // Les traces au SOL restent visibles même pour un tank invisible : poussière, boue et chenilles
+        // sont la réaction du terrain, pas le tank lui-même. C'est le seul moyen de le pister, et ça
+        // évite que le camouflage soit une disparition pure et simple.
+        if (!A.reduceFx) {
           const lp = lastPos[p.seat];
-          if (lp && Math.hypot(t.x - lp.x, t.y - lp.y) > 0.6 && Math.random() < 0.5) puffs.push({ x: t.x - Math.cos(t.angle) * TANK_R, y: t.y - Math.sin(t.angle) * TANK_R, vx: (Math.random() * 2 - 1) * 0.3, vy: (Math.random() * 2 - 1) * 0.3 - 0.15, born: now, life: 340 + Math.random() * 220, r0: 3 + Math.random() * 3, col: '210,190,140' }); // poussière
-          if (p.lives <= 1 && Math.random() < 0.12) puffs.push({ x: t.x + (Math.random() * 2 - 1) * 4, y: t.y - TANK_R * 0.4, vx: (Math.random() * 2 - 1) * 0.2, vy: -0.5 - Math.random() * 0.4, born: now, life: 600 + Math.random() * 400, r0: 3 + Math.random() * 3, col: '70,70,76' }); // fumée (tank endommagé)
+          const boue = (snap.mud || []).indexOf(Math.floor(t.y / BLK) * G + Math.floor(t.x / BLK)) >= 0;
+          if (lp && Math.hypot(t.x - lp.x, t.y - lp.y) > 0.6 && Math.random() < (boue ? 0.85 : 0.5)) puffs.push({ x: t.x - Math.cos(t.angle) * TANK_R, y: t.y - Math.sin(t.angle) * TANK_R, vx: (Math.random() * 2 - 1) * 0.3, vy: (Math.random() * 2 - 1) * 0.3 - 0.15, born: now, life: 340 + Math.random() * 220, r0: 3 + Math.random() * 3, col: boue ? '96,68,32' : '210,190,140' }); // poussière, plus dense et plus sombre dans la boue
+          if (alpha > 0.3 && p.lives <= 1 && Math.random() < 0.12) puffs.push({ x: t.x + (Math.random() * 2 - 1) * 4, y: t.y - TANK_R * 0.4, vx: (Math.random() * 2 - 1) * 0.2, vy: -0.5 - Math.random() * 0.4, born: now, life: 600 + Math.random() * 400, r0: 3 + Math.random() * 3, col: '70,70,76' }); // fumée : vient du tank, pas du sol -> pas de fumée si camouflé
           if (lp && Math.hypot(t.x - lp.x, t.y - lp.y) > 1.2) { tracks.push({ x: t.x, y: t.y, a: t.angle, born: now }); if (tracks.length > 160) tracks.shift(); }   // traces de chenilles
           lastPos[p.seat] = { x: t.x, y: t.y };
         }
+        if (alpha <= 0) return;                      // camouflé : ni caisse, ni nom, ni barre de vie — seuls ses obus et ses traces le trahissent
         ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.angle);
         ctx.globalAlpha = alpha;
         if (p.invuln) ctx.globalAlpha *= 0.35 + 0.35 * Math.sin(now / 60);

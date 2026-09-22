@@ -34,9 +34,17 @@ function setArena(n) {
   PAD_LEN = PAD_LEN0 * k;      // valeur provisoire : recalculée sur la vraie longueur d'arête dans configure()
 }
 // Murs des joueurs éliminés = bumpers, à partir de 6 participants (cf. bounceWall).
-// 1,035 est volontairement plus doux qu'un renvoi de raquette (HIT_SPEEDUP = 1,05) : l'effet doit
-// se cumuler au fil des éliminations, pas transformer le premier mur venu en catapulte.
-const WALL_BOOST = 1.035, WALL_BOOST_MIN_PARTS = 6;
+// Retour de test : « on ne remarque pas l'effet ». Le ×1,035 discret devient donc un PIC net
+// (×1,45) qui retombe en ~0,4 s, par-dessus un petit gain permanent (×1,05) qui, lui, se cumule
+// au fil des éliminations et raccourcit réellement la fin de manche.
+const WALL_BOOST_MIN_PARTS = 6;
+const WALL_GAIN = 1.05, WALL_BURST = 1.45, WALL_BURST_DECAY = 0.985;
+const WALL_CAP_GAIN = 0.07;        // +7 % de plafond de vitesse par bord éliminé (plafonné à +50 %)
+// Anti-blocage. Un renvoi parfaitement perpendiculaire entre deux parois parallèles renvoie la
+// balle indéfiniment sur le même axe : constaté en test quand les deux joueurs face à face sont
+// éliminés, plus aucune raquette n'était atteignable et la manche ne pouvait plus se terminer.
+// On impose donc une composante minimale LE LONG de la paroi, plus un léger aléa.
+const WALL_JITTER = 0.09, WALL_MIN_TAN = 0.24;
 const PADDLE_MAX_ANGLE = 1.05; // ~60° max p/r à la normale (impact en bout de raquette)
 const HIT_SPEEDUP = 1.05;      // léger gain de vitesse à chaque renvoi raquette
 
@@ -429,6 +437,15 @@ export function createPong(room) {
     const bounce = () => {
       const vd = b.vx * e.nx + b.vy * e.ny;
       b.vx -= 2 * vd * e.nx; b.vy -= 2 * vd * e.ny;
+      // Anti-blocage (cf. WALL_MIN_TAN) : on garantit que la balle se déplace TOUJOURS un minimum
+      // le long de la paroi, donc qu'elle finit par faire le tour du polygone et rencontrer une raquette.
+      const sp = Math.hypot(b.vx, b.vy) || 1;
+      let ct = (b.vx * e.tx + b.vy * e.ty) / sp + (Math.random() * 2 - 1) * WALL_JITTER;   // part tangentielle
+      if (ct > 1) ct = 1; else if (ct < -1) ct = -1;
+      if (Math.abs(ct) < WALL_MIN_TAN) ct = ct < 0 ? -WALL_MIN_TAN : WALL_MIN_TAN;
+      const cn = Math.sqrt(Math.max(0.04, 1 - ct * ct));                                   // part normale, toujours vers l'intérieur
+      b.vx = (e.tx * ct + e.nx * cn) * sp;
+      b.vy = (e.ty * ct + e.ny * cn) * sp;
       const dd = (b.x - e.ax) * e.nx + (b.y - e.ay) * e.ny;
       b.x += (BALL_R + 1 - dd) * e.nx; b.y += (BALL_R + 1 - dd) * e.ny;
       clampSpeed(b, max);
@@ -442,8 +459,12 @@ export function createPong(room) {
     const bounceWall = () => {
       bounce();
       if (!wallBoostOn()) return;
-      b.vx *= WALL_BOOST; b.vy *= WALL_BOOST;
-      clampSpeed(b, max);
+      const sp = Math.hypot(b.vx, b.vy) || 1;
+      const palier = Math.min(max, sp * WALL_GAIN);     // gain permanent (plafonné) : c'est lui qui écourte la manche
+      const f = (palier * WALL_BURST) / sp;
+      b.vx *= f; b.vy *= f;                             // pic immédiat, volontairement AU-DESSUS du plafond
+      b.burstTo = palier;                               // vitesse vers laquelle redescendre (cf. boucle de mouvement)
+      fx.push({ type: 'wallboost', side: -1, x: b.x, y: b.y });
     };
     if (e.owner < 0) { bounceWall(); return false; }
     const p = players[e.owner];
@@ -506,6 +527,14 @@ export function createPong(room) {
     if (cfg.accelEvery && tick % cfg.accelEvery === 0) for (const b of balls) { b.vx *= cfg.accelMul; b.vy *= cfg.accelMul; }
     if (sdAccel && tick % 30 === 0) for (const b of balls) { b.vx *= 1.04; b.vy *= 1.04; }
     let curMax = cfg.max * (cfg.accelEvery ? (1 + tick / 7200) : 1);   // montée du plafond adoucie (×2 en 2 min au lieu d'1)
+    // Chaque bord éliminé relève aussi le PLAFOND de vitesse. Sans ça, la relance des murs-bumpers
+    // était absorbée par le plafond dès que la balle y était collée : très visible, mais sans effet
+    // sur la durée. C'est ce facteur-là qui écourte réellement la fin de manche.
+    if (wallBoostOn() && geo) {
+      let morts = 0;
+      for (const e of geo.edges) if (e.owner < 0 || !inPlay(players[e.owner])) morts++;
+      if (morts) curMax *= Math.min(1.5, 1 + WALL_CAP_GAIN * morts);
+    }
     if (sdAccel) curMax = Math.max(curMax, cfg.max * 1.6);
     // aimant : oriente les balles vers la raquette du porteur (vitesse conservée, pas d'emballement)
     for (const p of players) if (inPlay(p) && p.magnetUntil > tick) {
@@ -515,7 +544,14 @@ export function createPong(room) {
     // bumpers : rotation des orbiteurs + retrait des temporaires expirés
     if (bumpers.length) { for (const bm of bumpers) if (bm.orbR > 0) { bm.orbAng += bm.orbSp; bm.x = CX + Math.cos(bm.orbAng) * bm.orbR; bm.y = CY + Math.sin(bm.orbAng) * bm.orbR; } bumpers = bumpers.filter(bm => !bm.until || tick <= bm.until); }
     const slowF = slowUntil > tick ? SLOW_FACTOR : 1;
-    for (const b of balls) { b.x += b.vx * slowF; b.y += b.vy * slowF; }
+    for (const b of balls) {
+      b.x += b.vx * slowF; b.y += b.vy * slowF;
+      if (b.burstTo) {                                  // retombée progressive après le pic d'un mur-bumper
+        const sp = Math.hypot(b.vx, b.vy);
+        if (sp > b.burstTo * 1.01) { const f = Math.max(b.burstTo / sp, WALL_BURST_DECAY); b.vx *= f; b.vy *= f; }
+        else b.burstTo = 0;
+      }
+    }
     if (bumpers.length) for (const b of balls) ballBumpers(b);
     for (const b of balls) ballPaddles(b, curMax);
     for (const b of balls) ballPowerups(b);

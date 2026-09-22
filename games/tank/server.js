@@ -205,9 +205,12 @@ export function createTank(room) {
   }
   function moveTank(p) {
     if (p.empUntil > tick) return;     // EMP : immobilisé
-    if (p.inputs.left) p.angle -= ROT;
-    if (p.inputs.right) p.angle += ROT;
-    let base = p.speedUntil > tick ? TANK_SPD * SPEED_MUL : TANK_SPD;
+    // 👟 Vitesse : s'applique à TOUS les déplacements, rotation comprise. La rotation en était
+    // exclue — un tank « rapide » tournait à la vitesse normale, ce qui rendait le bonus peu lisible.
+    const boost = p.speedUntil > tick ? SPEED_MUL : 1;
+    if (p.inputs.left) p.angle -= ROT * boost;
+    if (p.inputs.right) p.angle += ROT * boost;
+    let base = TANK_SPD * boost;
     if (mudSet.has(bidx(Math.floor(p.x / BLK), Math.floor(p.y / BLK)))) base *= MUD_MUL;   // zone de boue : ralentit
     const s = p.inputs.fwd ? base : p.inputs.back ? -base * REV : 0;
     if (!s) return;
@@ -225,7 +228,7 @@ export function createTank(room) {
     const angs = p.tripleUntil > tick ? [-0.18, 0, 0.18] : [0];
     for (const da of angs) {
       const a = p.angle + da, mx = p.x + Math.cos(a) * (TANK_R + SHELL_R + 1), my = p.y + Math.sin(a) * (TANK_R + SHELL_R + 1);
-      shells.push({ x: mx, y: my, vx: Math.cos(a) * SHELL_SPD, vy: Math.sin(a) * SHELL_SPD, o: p.seat, team: p.team, bounces: 0, life: SHELL_LIFE, pierce: p.pierceUntil > tick, homing: p.homingUntil > tick });
+      shells.push({ x: mx, y: my, vx: Math.cos(a) * SHELL_SPD, vy: Math.sin(a) * SHELL_SPD, o: p.seat, team: p.team, bounces: 0, life: SHELL_LIFE, pWood: p.pierceUntil > tick ? 3 : 0, pMetal: p.pierceUntil > tick ? 1 : 0, homing: p.homingUntil > tick });
     }
     fx.push({ type: 'shot', x: p.x, y: p.y, seat: p.seat });
   }
@@ -259,7 +262,17 @@ export function createTank(room) {
     if (gx < 0 || gy < 0 || gx >= G || gy >= G) return null;
     const b = blocks[bidx(gx, gy)];
     if (!b) return null;
-    if (b === 2) { blocks[bidx(gx, gy)] = 0; fx.push({ type: 'wall', x: gx, y: gy }); return sh.pierce ? (sh.pierce = false, 'pass') : 'die'; }
+    // ➳ Obus perçant : traverse 3 caisses de bois OU 1 bloc de métal, en les détruisant.
+    // Avant, il ne traversait qu'une seule caisse de bois et ignorait totalement le métal.
+    if (b === 2) {                                       // bois (destructible)
+      blocks[bidx(gx, gy)] = 0; fx.push({ type: 'wall', x: gx, y: gy });
+      if (sh.pWood > 0) { sh.pWood--; return 'pass'; }
+      return 'die';
+    }
+    if (sh.pMetal > 0) {                                 // métal : une seule fois, et l'obus continue
+      sh.pMetal--; blocks[bidx(gx, gy)] = 0; fx.push({ type: 'wall', x: gx, y: gy });
+      return 'pass';
+    }
     const ox = gx * BLK, oy = gy * BLK, nx = clamp(sh.x, ox, ox + BLK), ny = clamp(sh.y, oy, oy + BLK), dx = sh.x - nx, dy = sh.y - ny;
     if (Math.abs(dx) >= Math.abs(dy)) { sh.vx = -sh.vx; sh.x = nx + Math.sign(dx || sh.vx) * (SHELL_R + 0.5); }
     else { sh.vy = -sh.vy; sh.y = ny + Math.sign(dy || sh.vy) * (SHELL_R + 0.5); }
@@ -367,7 +380,7 @@ export function createTank(room) {
       round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, winTarget, gen: arenaStyle, ff,
       ag: G,                                                                       // côté de la grille : le client recale ARENA = ag × BLK
       grid: sendGrid ? g : undefined,
-      shells: shells.map(s => ({ x: Math.round(s.x), y: Math.round(s.y), vx: Math.round(s.vx * 10) / 10, vy: Math.round(s.vy * 10) / 10, o: s.o, p: !!s.pierce, h: !!s.homing })),
+      shells: shells.map(s => ({ x: Math.round(s.x), y: Math.round(s.y), vx: Math.round(s.vx * 10) / 10, vy: Math.round(s.vy * 10) / 10, o: s.o, p: s.pWood > 0 || s.pMetal > 0, h: !!s.homing })),
       mines: mines.map(m => ({ x: m.x, y: m.y, o: m.owner, armed: tick >= m.arm })),
       pickups: pickups.map(k => ({ x: k.x, y: k.y, t: k.type })),
       barrels: barrels.map(b => ({ x: Math.round(b.x), y: Math.round(b.y) })),

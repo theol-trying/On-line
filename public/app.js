@@ -49,6 +49,13 @@ document.addEventListener('pointerdown', e => { if (e.target.closest && e.target
 /* ---------- panneaux modaux (partagés shell + jeu) ---------- */
 function closePanels() { document.querySelectorAll('.settings').forEach(p => p.classList.add('hidden')); scrim.classList.add('hidden'); }
 function togglePanel(p) { const show = p.classList.contains('hidden'); closePanels(); if (show) { p.classList.remove('hidden'); scrim.classList.remove('hidden'); } }
+// Les 5 jeux appellent closePanels() à CHAQUE instantané de partie (60×/s) pour dégager l'écran.
+// Le chat doit y échapper, sinon il se referme sous les doigts et devient inutilisable en jeu.
+// C'est cette fonction-là qui est passée aux modules de jeu, pas closePanels.
+function closeGamePanels() {
+  document.querySelectorAll('.settings').forEach(p => { if (p !== chatPanel) p.classList.add('hidden'); });
+  if (!chatPanel || chatPanel.classList.contains('hidden')) scrim.classList.add('hidden');
+}
 scrim.onclick = closePanels;
 document.querySelectorAll('.sclose').forEach(b => b.onclick = closePanels);
 setBtn.onclick = () => togglePanel(settingsPanel);
@@ -213,10 +220,18 @@ function sendChat() {
   if (!v) return;
   send({ t: 'chat', m: v }); chatInput.value = '';
 }
+// Le chat s'ouvre SANS voile modal : en pleine partie, il ne doit ni masquer le plateau
+// ni intercepter les clics. C'est la seule fenêtre du site dans ce cas.
 if (chatFloat) chatFloat.onclick = () => {
-  togglePanel(chatPanel);
-  if (chatDot) chatDot.classList.add('hidden');
-  if (chatPanel && !chatPanel.classList.contains('hidden')) { if (chatLogEl) chatLogEl.scrollTop = chatLogEl.scrollHeight; if (chatInput) setTimeout(() => chatInput.focus(), 40); }
+  if (!chatPanel) return;
+  const ouvrir = chatPanel.classList.contains('hidden');
+  closePanels();                                  // referme le reste (et le voile), puis…
+  if (ouvrir) {
+    chatPanel.classList.remove('hidden');
+    if (chatDot) chatDot.classList.add('hidden');
+    if (chatLogEl) chatLogEl.scrollTop = chatLogEl.scrollHeight;
+    if (chatInput) setTimeout(() => chatInput.focus(), 40);
+  }
 };
 if (chatSend) chatSend.onclick = sendChat;
 // stopPropagation : sans ça, Espace/flèches tapés dans le champ atteindraient les raccourcis du jeu (lancer, se déplacer…)
@@ -332,7 +347,7 @@ async function loadModule(id) {
     const m = await import(`./games/${id}/client.js`);
     if (loadingId !== id) return;                 // un chargement plus récent a pris le relais
     mod = m.default;
-    mod.init({ root: rootEl || document.body, send: gameSend, a11y, togglePanel, closePanels });
+    mod.init({ root: rootEl || document.body, send: gameSend, a11y, togglePanel, closePanels: closeGamePanels });
     modId = id; modReady = true; loadingId = null;
     if (mod.onA11y) mod.onA11y();
     const p = pend[id];                           // vider le tampon de ce jeu
@@ -453,7 +468,8 @@ function connect() {
       const me = ps.find(p => p.id === you.id);
       const human = ps.filter(p => p.role !== 'spectator').length;
       const specs = ps.filter(p => p.role === 'spectator').length;
-      setStatus(`${me && me.role === 'spectator' ? 'Spectateur · ' : ''}${human} connecté${human > 1 ? 's' : ''}${specs ? ' · 👁 ' + specs : ''}`, 'ok');
+      const jeSuisGm = !!you.id && roomHost === you.id;
+      setStatus(`${me && me.role === 'spectator' ? 'Spectateur · ' : ''}${human} connecté${human > 1 ? 's' : ''}${specs ? ' · 👁 ' + specs : ''}${jeSuisGm ? ' · 👑 game master' : ''}`, 'ok');
       renderReady();
     } else if (m.t === 'g') {
       const g = m.g || activeId;
@@ -471,6 +487,11 @@ function connect() {
       else { if (tourState) note('🏆 Tournoi annulé'); tourState = null; renderTour(); }
     } else if (m.t === 'denied') {
       if (!window.__lastDN || performance.now() - window.__lastDN > 1500) { window.__lastDN = performance.now(); note(m.why === 'spec' ? '👁 Réservé aux joueurs — tu es spectateur' : '👑 Réservé au game master'); }
+    } else if (m.t === 'gm') {
+      // Réponse du hub à la clé admin. Avant, un échec ne disait rien : on croyait à un bug du site.
+      if (m.ok) note('👑 Game master activé');
+      else if (m.why === 'nokey') note('👑 Clé refusée : ADMIN_KEY n\'est pas configurée sur le serveur');
+      else note('👑 Clé admin invalide');
     } else if (m.t === 'note') {
       if (typeof m.m === 'string') note(m.m.slice(0, 160));          // message d'information émis par le hub
     } else if (m.t === 'daily') {
