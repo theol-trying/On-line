@@ -45,6 +45,33 @@ if (setMvol) setMvol.oninput = () => { a11y.mvol = (parseInt(setMvol.value, 10) 
 if (setFull) setFull.onclick = () => { if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen(); else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); };
 /* vibration tactile (mobile) sur les boutons de contrôle .touch */
 document.addEventListener('pointerdown', e => { if (e.target.closest && e.target.closest('.touch')) { try { navigator.vibrate && navigator.vibrate(8); } catch {} } }, { passive: true });
+/* iOS, appui long sur une flèche : Safari ouvre la loupe et sélectionne le glyphe, ce qui capture le
+   toucher et fige les commandes. Le CSS (-webkit-touch-callout / -webkit-user-select) suffit sur les
+   versions récentes ; ce garde-fou couvre les plus anciennes, qui les appliquent mal.
+   Volontairement limité aux `.touch` : ces boutons répondent à pointerdown/pointerup et JAMAIS à click,
+   donc annuler le comportement par défaut ne supprime aucun clic utile. L'étendre aux autres boutons
+   casserait leur `onclick` sur mobile. */
+document.addEventListener('touchstart', e => {
+  if (e.target && e.target.closest && e.target.closest('.touch')) { try { e.preventDefault(); } catch {} }
+}, { passive: false });
+/* Safari iOS n'a les Pointer Events que depuis la version 13. En dessous, les pavés tactiles — qui
+   n'écoutent QUE pointerdown/pointerup — sont totalement muets. On traduit alors les événements
+   tactiles en événements pointeur synthétiques, sans toucher au code des 5 jeux.
+   Le bloc entier est ignoré dès que PointerEvent existe : aucun effet possible sur un appareil récent
+   (sinon chaque appui compterait double). */
+if (typeof window.PointerEvent === 'undefined') {
+  const relais = (type, e) => {
+    const el = e.target && e.target.closest && e.target.closest('.touch');
+    if (!el) return;
+    e.preventDefault();
+    const ev = document.createEvent('Event');
+    ev.initEvent(type, true, true);
+    el.dispatchEvent(ev);
+  };
+  document.addEventListener('touchstart', e => relais('pointerdown', e), { passive: false });
+  document.addEventListener('touchend', e => relais('pointerup', e), { passive: false });
+  document.addEventListener('touchcancel', e => relais('pointercancel', e), { passive: false });
+}
 
 /* ---------- panneaux modaux (partagés shell + jeu) ---------- */
 function closePanels() { document.querySelectorAll('.settings').forEach(p => p.classList.add('hidden')); scrim.classList.add('hidden'); }

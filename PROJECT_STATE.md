@@ -544,6 +544,30 @@ plafond : très visible, mais sans effet sur la durée.
 - **👟 Vitesse** : s'applique désormais **aussi à la rotation**. Elle en était exclue — un tank « rapide »
   tournait à vitesse normale, ce qui rendait le bonus peu lisible. L'avance et la marche arrière l'avaient déjà.
 
+## iOS : l'appui long figeait les commandes (22/09)
+Sur un ancien iPhone, maintenir une flèche ouvrait la **loupe** de Safari et **sélectionnait le glyphe** :
+la sélection capturait le toucher, plus rien ne répondait et rien ne permettait de désélectionner.
+Deux manques précis :
+- **`-webkit-touch-callout` n'était déclaré nulle part** — c'est pourtant LA propriété qui désactive
+  ce menu d'appui long sur iOS ;
+- **`user-select` n'existait que sans préfixe**, or Safari < 12.1 ignore la version non préfixée.
+Ajoutés sur tout ce qui se touche (commandes, boutons, onglets, canvas) et sur `body.playing`, avec
+l'exception attendue : les champs de saisie restent sélectionnables, sinon le chat devient inutilisable.
+
+**Deux garde-fous JS dans `app.js`, aucun jeu modifié :**
+1. `preventDefault()` sur `touchstart`, **strictement limité aux `.touch`** : ces boutons répondent à
+   `pointerdown`/`pointerup` et jamais à `click`, donc l'annuler ne supprime aucun clic utile.
+   L'étendre aux autres boutons casserait leur `onclick` sur mobile.
+2. **Shim Pointer Events** : Safari iOS ne les a que depuis la **version 13**. En dessous, les pavés
+   tactiles étaient totalement muets. Les événements tactiles sont traduits en événements pointeur
+   synthétiques. Le bloc entier est ignoré dès que `PointerEvent` existe — aucun risque de double appui
+   sur un appareil récent.
+
+> **Vérifiable seulement sur iOS** : Chrome n'implémente pas `-webkit-touch-callout` et le retire même du
+> CSSOM. Ce qui a pu être confirmé ici : `user-select:none` appliqué aux commandes et au canvas,
+> `user-select:text` conservé sur le champ de chat, `touchstart` bien annulé sur les `.touch`, appui et
+> relâchement toujours transmis (pas de double envoi), shim inerte quand `PointerEvent` existe.
+
 ## Limites connues (assumées)
 - **Reste à gagner, non fait** : **prédiction locale** de sa propre raquette — le seul levier qui retire vraiment
   l'aller-retour réseau du *ressenti* de contrôle (le débit, lui, n'est plus un sujet).
