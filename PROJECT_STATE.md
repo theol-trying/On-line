@@ -471,6 +471,30 @@ que des joueurs arrivaient. Corrigé par un accumulateur (timer 2× plus rapide 
 ### Purge des identités · grisage des réglages
 Voir « Limites connues » ci-dessous, les deux lignes sont désormais barrées.
 
+## Retours de test du 22/09 — murs-bumpers et messages de bonus
+
+### Pong : les bords éliminés renvoient plus vite (6 participants et +)
+Retour : *« à plus de 5 joueurs la partie s'éternise »*. Chaque élimination ajoutait un mur **passif**
+alors qu'il restait de moins en moins de raquettes pour conclure. Désormais un bord dont le
+propriétaire est éliminé relance la balle à **×1,035** (volontairement plus doux qu'un renvoi de
+raquette, `HIT_SPEEDUP = 1,05`) : la pression monte toute seule à mesure que le terrain se vide.
+Plafonné par `clampSpeed`, donc pas d'emballement. Actif seulement à partir de `nParts >= 6`.
+- Le client dessine ces bords en **liseré ambré pulsant** (`snap.wallBoost` + état du propriétaire) :
+  subir une accélération sans la voir venir aurait été pire que le problème d'origine.
+- **Mesuré** par un compteur temporaire : à 10 participants, rebonds cumulés sur mur mort = 0 (10 et
+  9 survivants), puis 3, 6, 9, 11, 14 à mesure des éliminations. À 4 participants : le compteur ne
+  bouge pas. Échafaudage retiré.
+- Au passage, la sonde a confirmé le diagnostic : **aucune élimination en 45 s à 10 joueurs** avec les
+  vies par défaut.
+
+### Messages de bonus / malus (les 5 jeux)
+Retour : *« les icônes ne sont pas forcément claires »*. Nouveau module partagé **`public/gamemsg.js`** :
+- `msgPerso()` — ce que TU viens de ramasser, bandeau lisible en haut du cadre.
+- `msgGlobal()` — un effet qui touche tout le monde, bande fine **collée au bord supérieur, hors de la
+  zone de jeu** : la contrainte était de prévenir tout le monde *sans gêner les personnes concernées*.
+En DOM et non au canvas : texte net, zéro coût par frame, et le style suit l'identité du jeu actif via
+les variables CSS. Les libellés disent l'**effet**, pas le nom (« Tir rapide : cadence doublée »).
+
 ## Limites connues (assumées)
 - **Reste à gagner, non fait** : **prédiction locale** de sa propre raquette — le seul levier qui retire vraiment
   l'aller-retour réseau du *ressenti* de contrôle (le débit, lui, n'est plus un sujet).

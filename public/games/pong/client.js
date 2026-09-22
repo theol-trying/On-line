@@ -5,11 +5,22 @@ import { W as W0, H as H0, BALL_R, PAD_W, PAD_OFF, PU_R } from './shared.js';
 let W = W0, H = H0;        // espace logique : agrandi par le serveur selon le nombre de joueurs (snapshot aw/ah)
 import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège : lisibles même à 10 ou en mode équipe
+import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // messages de ramassage : l'icône seule ne parle pas
 
 const SHAPE = { 2: 'Face à face', 3: 'Triangle', 4: 'Carré', 5: 'Pentagone', 6: 'Hexagone', 7: 'Heptagone', 8: 'Octogone', 9: 'Ennéagone', 10: 'Décagone' };
 const PU_GLYPH = { multi: '+1', grow: 'XL', shield: '⛉', ghost: '◌', invert: '⇄', shrinkT: '▭', slow: '≈', mini: '▽', flip: '✕', speed: '»', blocker: '🧱', magnet: '🧲', invis: '∅' };
 const PU_COL = { multi: '#fff', grow: '#ffd76b', shield: '#7fd1ff', ghost: '#cbb3ff', invert: '#ff9be0', shrinkT: '#ffb36b', slow: '#9fe6ff', mini: '#ff5a5a', flip: '#ff5a5a', speed: '#ff5a5a', blocker: '#c9a06a', magnet: '#ff8e6e', invis: '#ff5a5a' };
-const PU_NAME = { multi: 'Multi-balle', grow: 'Raquette XL', shield: 'Bouclier', ghost: 'Balle fantôme', invert: 'Inversion (adversaire)', shrinkT: 'Raquette réduite (adversaire)', slow: 'Ralenti', mini: 'Malus : ta raquette réduit', flip: 'Malus : tes contrôles inversés', speed: 'Malus : balle accélérée', blocker: 'Mur-bloqueur', magnet: 'Aimant', invis: 'Malus : balle invisible' };
+// Retour de test : « les icônes ne sont pas forcément claires ». Les libellés disent donc
+// désormais l'EFFET et non le nom du power-up, en 5 mots maximum (c'est lu en une fraction
+// de seconde). Source de vérité : le panneau d'aide de Pong dans index.html.
+// Les libellés « globaux » sont volontairement neutres (« un joueur ») : ils s'affichent
+// pour tout le monde, y compris pour la personne touchée.
+const PU_NAME = { multi: 'La balle se divise', grow: 'Ta raquette s\'agrandit', shield: 'Bouclier : un renvoi gratuit', ghost: 'Balle fantôme : traverse une raquette', invert: 'Contrôles inversés pour un joueur', shrinkT: 'Raquette d\'un joueur rétrécie', slow: 'La balle ralentit un instant', mini: 'Ta raquette rétrécit', flip: 'Tes contrôles s\'inversent', speed: 'La balle accélère pour tous', blocker: 'Un plot bloqueur apparaît', magnet: 'Ta raquette attire les balles', invis: 'La balle devient presque invisible' };
+// Portée du ramassage. true = tout le monde est concerné (balle commune modifiée, obstacle
+// posé sur le terrain, ou adversaire touché) → bande globale collée au bord, hors de la zone
+// de jeu. Absent = l'effet ne change que l'équipement du ramasseur → message perso, pour lui
+// seul : l'afficher aux autres ne serait que du bruit.
+const PU_GLOBAL = { multi: true, ghost: true, invert: true, shrinkT: true, slow: true, blocker: true, speed: true, invis: true };
 const BUFF_ICON = { grow: 'XL', shield: '⛉', invert: '⇄', shrink: '▭', magnet: '🧲' };           // effets affichés sur les cartes (barres dégressives)
 const BUFF_COL = { grow: '#ffd76b', shield: '#7fd1ff', invert: '#ff9be0', shrink: '#ffb36b', magnet: '#ff8e6e' };
 const TEAM_LETTER = ['A', 'B', 'C', 'D', 'E'];
@@ -219,7 +230,7 @@ export default (function () {
     (m.fx || []).forEach(playFx);
     (m.fx || []).forEach(f => {
       if (f.type === 'death') { music.sting('kill'); if (f.elim) addKill(f.by, f.side); }
-      else if (f.type === 'powerup' && f.bad) banner('⚠ ' + (PU_NAME[f.pu] || 'PIÈGE !'));
+      else if (f.type === 'powerup') msgPowerup(f);   // remplace l'ancien banner() des malus : il s'affichait au centre, pour tout le monde, même quand le malus ne touchait que le ramasseur
     });
     detectBanners(prev, m);
     if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
@@ -332,6 +343,18 @@ export default (function () {
     b.innerHTML = `<span class="bann">${text}</span>`;
     clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { b.innerHTML = ''; }, 1300);
   }
+  // Un power-up vient d'être ramassé : on le DIT, en plus de l'anneau et du son.
+  // Un message par événement `fx` (donc par ramassage), jamais par frame.
+  //   - effet global  → bande fine en haut du cadre, pour tout le monde. Un seul message,
+  //                     même pour le ramasseur : inutile de le prévenir deux fois.
+  //   - effet perso   → bandeau seulement chez le ramasseur ; les autres n'affichent rien.
+  // Le texte vient toujours de PU_NAME (constantes du client), jamais du réseau.
+  function msgPowerup(f) {
+    const txt = PU_NAME[f.pu]; if (!txt) return;
+    const ico = PU_GLYPH[f.pu] || '✦';
+    if (PU_GLOBAL[f.pu]) msgGlobal(ico, txt, f.bad ? { bad: true } : { color: PU_COL[f.pu] || '#ffffff' });
+    else if (mySeat >= 0 && f.side === mySeat) msgPerso(ico, txt, f.bad ? { bad: true } : null);
+  }
   function detectBanners(prev, m) {
     if (!prev || m.gs !== 'play') return;
     if (m.sd && !prev.sd) { banner('MORT SUBITE'); return; }
@@ -429,9 +452,22 @@ export default (function () {
       ctx.restore();
       const edgeA = A.contrast ? 'aa' : '66';
       const wallC = A.contrast ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.16)';
+      // Bord d'un joueur éliminé quand les murs-bumpers sont actifs (6 participants et +) :
+      // il renvoie la balle plus vite, il doit donc se VOIR — sinon on subit une accélération
+      // inexpliquée. Liseré ambré épais + pulsation lente.
+      const estMort = e => { const q = e.owner >= 0 && snap.players ? snap.players[e.owner] : null; return !!(snap.wallBoost && q && !(q.playing && q.alive)); };
       E.forEach(e => {
-        ctx.strokeStyle = e.owner >= 0 ? colSeat(e.owner) + edgeA : wallC;
-        ctx.lineWidth = e.owner >= 0 ? 2 : 3;
+        const mort = estMort(e);
+        if (mort) {
+          const puls = A.reduceFx ? 1 : 0.75 + 0.25 * Math.sin(now / 260);
+          ctx.save();
+          if (!A.reduceFx) { ctx.shadowColor = '#ffb545'; ctx.shadowBlur = 14 * puls; }
+          ctx.strokeStyle = 'rgba(255,181,69,' + (0.55 + 0.35 * puls).toFixed(2) + ')'; ctx.lineWidth = 5;
+          ctx.beginPath(); ctx.moveTo(e.ax, e.ay); ctx.lineTo(e.bx, e.by); ctx.stroke();
+          ctx.restore();
+        }
+        ctx.strokeStyle = mort ? wallC : (e.owner >= 0 ? colSeat(e.owner) + edgeA : wallC);
+        ctx.lineWidth = e.owner >= 0 && !mort ? 2 : 3;
         ctx.beginPath(); ctx.moveTo(e.ax, e.ay); ctx.lineTo(e.bx, e.by); ctx.stroke();
         const ef = edgeFlash[e.owner];
         if (e.owner >= 0 && !A.reduceFx && ef && now - ef < 240) {
@@ -629,6 +665,8 @@ export default (function () {
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel;
     if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('c'); ctx = cv.getContext('2d');
+    { const wrap = cv.parentElement;   // conteneur `.canvas-wrap` : les messages se posent dessus, pas sur le canvas
+      if (wrap && wrap.classList && wrap.classList.contains('canvas-wrap')) initGameMsg(wrap); }
     hud = $('hud');
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => {

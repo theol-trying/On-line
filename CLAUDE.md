@@ -36,3 +36,10 @@ chaque jeu — un écart au `tickHz` signale une régression de la boucle serveu
 
 `node --check` ne détecte **pas** les `ReferenceError` à l'exécution : c'est exactement ce qui a
 mis le site à terre le 21/09 (`CELL is not defined` dans Bomberman). D'où le test de fumée.
+
+⚠️ **Piège de test récurrent** : un onglet navigateur laissé ouvert sur `localhost:3000` reste
+connecté **et se reconnecte tout seul**. S'il s'est connecté en premier, c'est *lui* le game
+master : un script de test se prend alors des `denied` sur `pick`/`bots` et des `notready` sur
+`start`, et la partie ne démarre jamais. **Fermer l'onglet avant de lancer une sonde.**
+Idem côté processus : sous Git Bash `pkill` ne tue pas node, utiliser
+`Get-Process node | Stop-Process -Force` en PowerShell.

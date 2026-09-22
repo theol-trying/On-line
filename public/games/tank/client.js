@@ -5,6 +5,7 @@ import { ARENA as ARENA0, TANK_R, SHELL_R, BLK, G as G0 } from './shared.js';
 let G = G0, ARENA = ARENA0;
 import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';
+import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 
 // musique : guerre/désert — drone grave en quintes, tambours martiaux ; climax (1 vie / duel final) = cor de tension + roulement
 const MUSIC_THEME = { bpm: 96, bpmBoost: 12, vol: 0.55, root: 73.42, len: 32,
@@ -27,6 +28,23 @@ const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2'
 const MAX_SEATS = 8;            // Tanks plafonne à 8 sièges (aligné sur le serveur) : nombre de cartes du HUD
 const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
 const PU = { rapid: { i: '»', c: '#9fe6ff' }, triple: { i: '⋔', c: '#ffd76b' }, shield: { i: '⛉', c: '#7fd1ff' }, speed: { i: '👟', c: '#7ff0bd' }, pierce: { i: '➳', c: '#ff9be0' }, mine: { i: '◈', c: '#ff8e6e' }, repair: { i: '🔧', c: '#7ff0bd' }, emp: { i: '⚡', c: '#9fe6ff' }, homing: { i: '🚀', c: '#ff7a7a' }, camo: { i: '👁', c: '#b9a6ff' }, radar: { i: '📡', c: '#7ff0bd' } };
+// Retour de test : « les icônes ne sont pas forcément claires ». Chaque ramassage se DIT donc, avec
+// l'effet et non le nom du bonus. Les libellés reprennent le panneau d'aide (❔ Power-ups) en plus court.
+// `g: 1` = l'effet déborde sur les autres tanks -> message global (tout le monde doit comprendre ce qui
+// vient de changer) ; sans `g`, c'est de l'équipement personnel -> message visible du seul ramasseur.
+const PU_MSG = {
+  rapid:  { t: 'Tir rapide : cadence doublée' },
+  triple: { t: 'Tir triple : 3 obus' },
+  shield: { t: 'Bouclier : encaisse un tir' },
+  speed:  { t: 'Vitesse : tank plus rapide' },
+  pierce: { t: 'Obus perçant : traverse un mur' },
+  mine:   { t: 'Mine prête : E ou ◈' },
+  repair: { t: 'Réparation : +1 vie' },
+  emp:    { t: 'EMP : tanks proches étourdis', g: 1 },   // frappe les ennemis alentour : ils subissent sans rien ramasser
+  homing: { t: 'Missile guidé : suit l\'ennemi' },
+  camo:   { t: 'Camouflage : un tank invisible', g: 1 }, // un tank disparaît de TOUS les écrans : sans message, on croit à un bug
+  radar:  { t: 'Radar : révèle les camouflés' },
+};
 // identité visuelle propre au jeu (fixe) : Désert / Champ de bataille
 const SKIN = { bg: '#14130c', floor: '#2b2818', floor2: '#262313', solid: '#564f45', soft: '#8a6a3c', softTop: '#b58a4c', grid: 'rgba(255,220,150,0.045)', border: 'rgba(210,180,120,0.3)', steel: true, crate: true };
 // fond animé : grains de sable/poussière qui dérivent dans le vent (identité désert) — coupé par reduceFx
@@ -159,6 +177,15 @@ export default (function () {
   function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); let dest = actx.destination; if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); dest = pn; } gg.connect(dest); o.start(t0); o.stop(t0 + d); }
   function psound(k, x) { sndPan = Math.max(-1, Math.min(1, (x / ARENA - 0.5) * 1.7)); sound(k); sndPan = 0; }   // son positionné gauche/droite selon le x de l'événement
   function sound(k) { if (!actx) return; if (k === 'shot') tone(320, 0.05, 'square', 0.03); else if (k === 'hit') tone(200, 0.08, 'square', 0.05); else if (k === 'pickup') { tone(660, 0.07, 'square', 0.05); tone(990, 0.08, 'square', 0.05, 0.06); } else if (k === 'boom') { tone(150, 0.25, 'sawtooth', 0.06); tone(80, 0.32, 'sawtooth', 0.05, 0.05); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
+  // Un power-up vient d'être ramassé : on annonce son EFFET. Jamais de nom de joueur (constantes seules).
+  // Perso pour l'équipement (les autres n'ont pas à le savoir : ce serait du bruit), global quand l'effet
+  // change la partie de tout le monde — la bande globale reste collée au bord, hors zone de jeu.
+  function direPU(kind, seat) {
+    const m = PU_MSG[kind]; if (!m) return;
+    const d = PU[kind] || { i: '?', c: '#fff' };
+    if (m.g) msgGlobal(d.i, m.t, { color: d.c });
+    else if (seat === mySeat) msgPerso(d.i, m.t, { color: d.c });
+  }
   function playFx(f) {
     if (f.type === 'shot') { psound('shot', f.x); if (!A.reduceFx) { const now = performance.now(); for (let k = 0; k < 6; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.6; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 150 + Math.random() * 120, color: '#ffe08a' }); } } return; } // flash de bouche
     if (f.type === 'hit') return psound('hit', f.x);
@@ -167,7 +194,10 @@ export default (function () {
       if (!A.reduceFx) { const now = performance.now(), cx0 = (f.x + 0.5) * BLK, cy0 = (f.y + 0.5) * BLK; for (let k = 0; k < 7; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.4; particles.push({ x: cx0, y: cy0, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 260 + Math.random() * 200, color: '#b58a4c' }); } }
       return;
     }
-    if (f.type === 'pickup' || f.type === 'mineset') return sound('pickup');
+    if (f.type === 'pickup') { sound('pickup'); direPU(f.kind, f.seat); return; }
+    if (f.type === 'mineset') return sound('pickup');
+    if (f.type === 'emp') { if (f.seat === mySeat) msgPerso(PU.emp.i, 'Étourdi : ni tir ni marche', { bad: true }); return; }   // victime d'un EMP : elle seule a besoin de savoir pourquoi elle est bloquée
+    if (f.type === 'shield') { if (f.seat === mySeat) msgPerso(PU.shield.i, 'Bouclier : tir encaissé', { color: PU.shield.c }); return; }   // explique ce que le ⛉ vient d'absorber
     if (f.type === 'barrel') { psound('boom', f.x); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 9); const now = performance.now(); for (let k = 0; k < 26; k++) { const a = Math.random() * Math.PI * 2, sp = 1.5 + Math.random() * 5; particles.push({ x: f.x, y: f.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 320, color: Math.random() < 0.5 ? '#ff8a3a' : '#ffd23f' }); } return; } // explosion de baril (orange/jaune)
     if (f.type === 'boom') {
       psound('boom', f.x); if (!f.small) music.sting('kill'); if (A.reduceFx) return;
@@ -387,6 +417,8 @@ export default (function () {
     A = ctx0.a11y; send = ctx0.send; root = ctx0.root;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('tkc'); ctx = cv.getContext('2d'); hud = $('tkHud'); endEl = $('tkEnd');
+    const wrap = cv.parentElement;                                     // messages de bonus/malus : posés dans le cadre du canvas
+    initGameMsg(wrap && wrap.classList.contains('canvas-wrap') ? wrap : null);
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('tkStart'); pauseBtn = $('tkPause'); modeBtn = $('tkMode'); botsBtn = $('tkBots'); arenaBtn = $('tkArena'); winBtn = $('tkWin'); ffBtn = $('tkFf'); pauseFloat = $('tkPauseFloat');

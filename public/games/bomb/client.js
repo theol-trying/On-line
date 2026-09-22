@@ -5,6 +5,7 @@ import { GW as GW0, GH as GH0, CELL, ARENA as ARENA0 } from './shared.js';
 let GW = GW0, GH = GH0, ARENA = ARENA0;
 import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';
+import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 
 // musique : cartoon enjoué — basse bondissante, mélodie espiègle, woodblock ; climax (mort subite) = motif chromatique + grosse caisse + tempo
 const MUSIC_THEME = { bpm: 134, bpmBoost: 16, vol: 0.48, root: 130.81, len: 32,
@@ -29,6 +30,25 @@ const MODE_NAME = { ffa: 'Chacun pour soi', '2v2': '2 v 2', '2v2v2': '2 v 2 v 2'
 const MAX_SEATS = 8;                                 // Bomberman plafonne à 8 sièges (cf. serveur)
 const GEN_NAMES = ['Symétrique', 'Aléatoire', '4 coins'];
 const PICK_ICON = { bomb: '💣', flame: '🔥', speed: '👟', kick: '🦵', remote: '📡', ghost: '👻', throw: '🧤', shield: '🛡', line: '📏', reverse: '🔀', slow: '🐌', auto: '⏱', skull: '💀' };
+// Retour de test : « les icônes ne sont pas forcément claires ». On DIT donc l'effet, pas le nom.
+// Libellés courts (lus en une fraction de seconde) : [icône, texte]. Source de vérité = le panneau
+// d'aide de Bomberman (index.html) et applyPick() du serveur. Ce sont des CONSTANTES : jamais de
+// chaîne venue du réseau dans un message.
+const PICK_MSG = {
+  bomb:    ['💣', 'Bombe +1 : une de plus'],
+  flame:   ['🔥', 'Flamme +1 : explosions plus longues'],
+  speed:   ['👟', 'Vitesse : tu bouges plus vite'],
+  kick:    ['🦵', 'Coup de pied : pousse les bombes'],
+  remote:  ['📡', 'Détonateur : tu choisis le moment'],
+  ghost:   ['👻', 'Fantôme : traverse les caisses'],
+  throw:   ['🧤', 'Gant : lance la bombe (action)'],
+  shield:  ['🛡', 'Bouclier : encaisse une explosion'],
+  line:    ['📏', 'Bombe en ligne : rangée devant toi'],
+  reverse: ['🔀', "Inversé : tes commandes s'inversent"],
+  slow:    ['🐌', 'Ralenti : tu marches moins vite'],
+  auto:    ['⏱', 'Pose auto : bombes toutes seules'],
+  skull:   ['💀', 'Crâne : malédiction contagieuse !'],
+};
 // fond animé : ombres de nuages qui défilent doucement (identité cartoon) — coupé par reduceFx
 const AMB_CLOUDS = Array.from({ length: 5 }, () => ({ y: 0.05 + Math.random() * 0.85, v: 5 + Math.random() * 7, s: 22 + Math.random() * 26, ph: Math.random() * 1000 }));
 const INTERP_MS = 55;
@@ -125,7 +145,8 @@ export default (function () {
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) music.sting('count');   // décompte musical 3·2·1
     if (prevGs === 'countdown' && m.gs === 'play') music.sting('go');
     lastCount = m.count;
-    if (m.sd && !prevSd) music.sting('alert'); prevSd = !!m.sd;                                // riser : mort subite
+    if (m.sd && !prevSd) { music.sting('alert'); msgGlobal('🧱', 'Mort subite : des blocs tombent', { bad: true }); }   // riser + annonce : mort subite
+    prevSd = !!m.sd;
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 dès la mort subite
       if (m.gs === 'play' || m.gs === 'countdown') inten = m.sd ? 2 : 1;
@@ -151,13 +172,25 @@ export default (function () {
   function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const _v = (A && typeof A.sfx === 'number') ? A.sfx : 1; if (!actx || _v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * _v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); let dest = actx.destination; if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); dest = pn; } gg.connect(dest); o.start(t0); o.stop(t0 + d); }
   function psound(k, gx) { sndPan = Math.max(-1, Math.min(1, (cpx(gx) / ARENA - 0.5) * 1.7)); sound(k); sndPan = 0; }   // son positionné gauche/droite
   function sound(k) { if (!actx) return; if (k === 'place') tone(330, 0.05, 'square', 0.03); else if (k === 'wall') tone(240, 0.07, 'square', 0.04); else if (k === 'pickup') { tone(660, 0.07, 'square', 0.05); tone(880, 0.08, 'square', 0.05, 0.06); } else if (k === 'bad') { tone(300, 0.1, 'sawtooth', 0.05); tone(180, 0.18, 'sawtooth', 0.05, 0.08); } else if (k === 'boom') { tone(140, 0.28, 'sawtooth', 0.07); tone(70, 0.34, 'sawtooth', 0.05, 0.05); } else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); } }
+  // Annonce d'un ramassage. Règle de partage :
+  //  - le crâne 💀 inflige une affliction CONTAGIEUSE (le serveur la transmet au contact) : tout le
+  //    monde finit concerné, donc message GLOBAL, quel que soit le ramasseur ;
+  //  - tous les autres bonus/malus ne modifient que l'équipement ou la vitesse du ramasseur : message
+  //    PERSO si c'est moi, et rien du tout sinon (ce ne serait que du bruit).
+  function annoncePick(f) {
+    const e = Object.prototype.hasOwnProperty.call(PICK_MSG, f.kind) ? PICK_MSG[f.kind] : null;
+    if (!e) return;
+    if (f.kind === 'skull') { msgGlobal(e[0], e[1], { bad: true }); return; }
+    if (f.seat !== mySeat) return;
+    msgPerso(e[0], e[1], { bad: !!f.bad });
+  }
   function playFx(f) {
     if (f.type === 'place' || f.type === 'throw') return psound('place', f.x);
     if (f.type === 'wall') { psound('wall', f.x); if (!A.reduceFx) { wallAnims.push({ x: f.x, y: f.y, born: performance.now() }); if (wallAnims.length > 30) wallAnims.shift(); } return; }
     if (f.type === 'guard' || f.type === 'warp') return sound('pickup');
     if (f.type === 'spawn') { sound('pickup'); if (!A.reduceFx) { const x = cpx(f.x), y = cpx(f.y), now = performance.now(); for (let k = 0; k < 14; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 3.2; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 320 + Math.random() * 220, color: colSeat(f.seat) }); } } return; } // retour de revanche
     if (f.type === 'drop') { if (!A.reduceFx) shakeMag = Math.max(shakeMag, 4); return; }
-    if (f.type === 'pickup') return sound(f.bad ? 'bad' : 'pickup');
+    if (f.type === 'pickup') { sound(f.bad ? 'bad' : 'pickup'); annoncePick(f); return; }
     if (f.type === 'boom') { psound('boom', f.x); music.sting('kill'); if (A.reduceFx) return; shakeMag = Math.max(shakeMag, 6); const col = colSeat(f.seat), now = performance.now(), x = cpx(f.x), y = cpx(f.y); for (let k = 0; k < 16; k++) { const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 4; particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: now, life: 380 + Math.random() * 240, color: col }); } }
   }
   function viewPlayers(now) {
@@ -378,6 +411,8 @@ export default (function () {
     A = ctx0.a11y; send = ctx0.send; root = ctx0.root;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('bmc'); ctx = cv.getContext('2d'); hud = $('bmHud'); endEl = $('bmEnd');
+    const wrap = cv.parentElement;   // conteneur .canvas-wrap : accueille les bandeaux bonus/malus
+    initGameMsg(wrap && wrap.classList.contains('canvas-wrap') ? wrap : null);
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('bmStart'); pauseBtn = $('bmPause'); modeBtn = $('bmMode'); genBtn = $('bmGen'); ffBtn = $('bmFf'); revBtn = $('bmRevenge'); botsBtn = $('bmBots'); pauseFloat = $('bmPauseFloat'); lbBtn = $('bmLbBtn'); lbPanel = $('bmLbPanel'); lbBody = $('bmLbBody');
