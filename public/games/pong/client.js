@@ -427,8 +427,8 @@ export default (function () {
   /* ---- recadrage du terrain ----------------------------------------------------------------
      Le serveur bâtit un polygone RÉGULIER INSCRIT dans un cercle : sur un carré (duel, ou 4
      joueurs) le terrain ne mesure que R√2, soit 66 % du canvas — le tiers restant n'était que
-     du fond étoilé. On recadre donc le polygone sur le canvas. Marge haute plus généreuse :
-     c'est là que s'affichent les bandeaux de bonus (public/gamemsg.js).
+     du fond étoilé. On recadre donc le polygone sur le canvas, marges réduites au minimum :
+     les bandeaux de bonus (public/gamemsg.js) passent brièvement par-dessus le bord haut.
      ⚠ On FIGE le recadrage pendant la manche : la mort subite rétrécit le terrain, un recadrage
      permanent compenserait pile ce rétrécissement et on ne le verrait plus du tout. */
   const FIT_ID = { s: 1, tx: 0, ty: 0 };
@@ -447,7 +447,7 @@ export default (function () {
     }
     const bw = x1 - x0, bh = y1 - y0;
     if (!(bw > 1 && bh > 1)) return FIT_ID;
-    const MT = 26, M = 14;                       // marge haute (bandeaux de bonus) · marges gauche/droite/bas
+    const MT = 8, M = 6;                         // terrain au plus près des bords (demande : toute la hauteur de l'écran)
     const s = Math.min((W - M * 2) / bw, (H - MT - M) / bh);
     const res = { s, tx: M + (W - M * 2 - bw * s) / 2 - x0 * s, ty: MT + (H - MT - M - bh * s) / 2 - y0 * s };
     fitSig = sig; fitCache = res;
@@ -465,9 +465,14 @@ export default (function () {
     // `base` : repère du CANVAS (fonds, voiles, écrans de titre) · `world` : repère du TERRAIN recadré.
     const base = () => ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
     const world = () => ctx.setTransform(sc * fit.s, 0, 0, sc * fit.s, sc * (fit.tx + ox), sc * (fit.ty + oy));
+    // Plein écran sur PC : le fond étoilé est celui de la colonne centrale (style.css), prolongé sur
+    // toute sa largeur. Le canvas reste TRANSPARENT hors du terrain — sinon son carré se découpait
+    // sur les étoiles de la colonne. On efface en repère brut : la secousse décale `base()`.
+    const ambiant = document.body.classList.contains('dock') && document.body.classList.contains('playing');
+    if (ambiant) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); }
     base();
-    ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, W, H);
-    if (!A.reduceFx) { ctx.save(); ctx.fillStyle = '#9fd0ff'; for (const s of AMB_STARS) { const y = (s.y * H + now / 1000 * s.v) % H, tw = 0.5 + 0.5 * Math.sin(now / 900 + s.ph); ctx.globalAlpha = 0.05 + 0.16 * tw; ctx.beginPath(); ctx.arc(s.x * W, y, s.r, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); }   // starfield
+    if (!ambiant) { ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, W, H); }
+    if (!ambiant && !A.reduceFx) { ctx.save(); ctx.fillStyle = '#9fd0ff'; for (const s of AMB_STARS) { const y = (s.y * H + now / 1000 * s.v) % H, tw = 0.5 + 0.5 * Math.sin(now / 900 + s.ph); ctx.globalAlpha = 0.05 + 0.16 * tw; ctx.beginPath(); ctx.arc(s.x * W, y, s.r, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); }   // starfield
     const view = computeView(now);
     const vballs = view ? view.balls : (snap ? snap.balls : []);
     const vpos = s => (view && view.pos[s] != null) ? view.pos[s] : (snap ? snap.players[s].pos : 0);
