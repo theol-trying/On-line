@@ -653,16 +653,61 @@ redeviennent accessibles **à l'élimination**, à la demande.
   marqué ni éliminé ni spectateur dans le DOM — il n'a le chat qu'à la fin de la manche.
 - Seuil : `innerWidth <= 600`, le même que le bloc mobile de `style.css`. PC et tablettes inchangés.
 
-### Page de test `/manette.html` — TEMPORAIRE
-Prototype des commandes tactiles, **lié nulle part** (`noindex`), pour que l'utilisateur essaie au
-pouce sur son ancien iPhone : 4 dispositions (actuelle · pouces · joystick flottant · Pong au glisser),
-curseur de taille, compteur de ratés. Événements tactiles bruts : fonctionne sous iOS 12.
-**À supprimer** une fois la disposition choisie et câblée dans les 5 jeux.
+### Page d'essai `/manette.html` — PERMANENTE
+Prototype des commandes tactiles (`noindex`), **lié depuis Réglages d'affichage** : 4 dispositions
+(actuelle · pouces · joystick flottant · Pong au glisser), curseur de taille, compteur de ratés.
+Événements tactiles bruts : fonctionne sous iOS 12. **À garder** (demande utilisateur) : chacun doit
+pouvoir tester et faire des retours, notamment sur ancien iPhone. Ne pas proposer de la supprimer.
 
 Constat fait en la construisant, qui pèse sur le choix : **en portrait, c'est la largeur qui plafonne la
 taille des touches**, pas le réglage. Une croix de 3 touches + une colonne d'actions ne tiennent côte à
 côte qu'à ~77 px sur 375 px de large (iPhone 8) et ~64 px sur 320 px (iPhone SE) — à 82 px elles se
 chevauchaient. Le joystick flottant n'a pas cette contrainte (78 px sur SE).
+
+## Joystick tactile (23/09) — `public/joystick.js`
+Choix utilisateur après essai sur `/manette.html` : **joystick flottant à 82 px** (Pixel 7 Pro). Défaut
+sur téléphone (≤ 600 px) pour les 5 jeux ; réglage « Manette tactile : Joystick / Croix »
+(`a11y.pad`, `body.pad-croix`) pour revenir à la croix.
+- Le stick naît sous le pouce, n'importe où dans sa zone (anneau 139 px, bouton 51 px, zone 189 px),
+  zone morte 28 % du rayon. Actions à 92 / 82 px. En partie, la manette est collée en bas de l'écran.
+- **Il ne réimplémente aucune commande** : il actionne les boutons tactiles existants de chaque jeu par
+  des `pointerdown`/`pointerup` synthétiques (comme le relais vieil-iOS). Logique d'entrée des jeux intacte.
+- Tables (`CARTES`) : Tron, Snake, Bomberman = 4 directions avec hystérésis (il faut dominer de 25 %
+  pour changer d'axe — sinon un pouce à 45° ferait zigzaguer serpent et moto) ; Tanks = 8 directions
+  (avancer ET tourner, comme au clavier).
+- **Pong** fournit `mod.joy(dx, dy)` : la poussée est projetée sur la tangente du bord du joueur, avec la
+  même règle de sens que `humanMove()` côté serveur. Dès 3 joueurs les bords sont inclinés : on pousse le
+  stick là où l'on veut voir filer sa raquette. Vérifié : en duel ↑/↓ pilotent, ←/→ ne font rien ; à 5,
+  ↑ et ← vont vers l'extrémité haut-gauche du bord.
+- Relâche tout au changement de jeu, à la perte de focus et quand la page passe en arrière-plan.
+
+### Revue contradictoire du lot (workflow, 3 relecteurs + 1 sceptique par défaut)
+5 défauts signalés, 3 confirmés, 2 réfutés — les 4 corrigés ci-dessous ont été vérifiés en navigateur :
+- **Accumulation d'écouteurs (défaut ANCIEN, le plus grave)** : les 5 jeux branchaient leurs boutons
+  tactiles dans `init()`, rappelé à chaque retour sur le jeu (module singleton, DOM statique) sans les
+  débrancher. Après k retours, un appui partait k fois : **k mines** (Tanks), **k bombes** (Bomberman),
+  k virages. Avec la limite de débit, un joueur pouvait même être coupé en tournoi. Corrigé par un
+  drapeau `cable` : branchement au premier `init()` seulement. Vérifié : 1 appui = 1 message après
+  plusieurs allers-retours.
+- **Hystérésis du joystick** (signalé puis réfuté de justesse, corrigé quand même) : un pouce posé pile
+  sur un seuil basculait enfoncé/relâché à chaque `touchmove` ; la limite de débit risquait de jeter le
+  relâchement final. Tous les seuils sortent désormais à 75 % du seuil d'entrée. Vérifié : 20
+  frémissements autour du seuil = 0 message.
+- **Pong sur iPhone SE** : le joystick (189 px) faisait déborder la page. `arenaSize()` déduit
+  maintenant la hauteur réelle des commandes sur téléphone (plancher 200 px). Vérifié en 320×568 :
+  Pong, Tanks, Snake tiennent sans défilement.
+- **Recul d'horloge** : le seau à jetons pouvait plonger sous zéro → `Math.max(0, now - seauT)`.
+
+## Protections du serveur (23/09) — le site est public, l'instance unique
+- **Plafond de trame** (`ws.js · MAX_FRAME` = 64 Ko, le plus gros message légitime — l'avatar — fait
+  ~19 Ko). Refus dès l'en-tête, avant de stocker la suite. Avant : une trame annonçant une taille énorme
+  faisait accumuler au serveur tout ce qu'on lui envoyait, jusqu'à saturer la mémoire.
+- **Débit par connexion** (`hub.js · wire()`, seau à jetons) : 40 messages/s en régime, rafales de 80 ;
+  au-delà les messages sont ignorés, et 500 rejets en 5 s coupent la connexion.
+- Tron et Snake ignorent désormais la répétition automatique du clavier (`!e.repeat`, comme les 3 autres) :
+  ils renvoyaient la même direction ~30×/s pour rien.
+- `npm test` couvre les deux (54 vérifications) : trame de 70 Ko coupée, message de 30 Ko accepté,
+  rythme humain (30/s) jamais bridé, inondation coupée sans toucher les autres joueurs.
 
 ## Limites connues (assumées)
 - **Reste à gagner, non fait** : **prédiction locale** de sa propre raquette — le seul levier qui retire vraiment
@@ -673,7 +718,10 @@ chevauchaient. Le joystick flottant n'a pas cette contrainte (78 px sur SE).
   les jeux tournaient **10 à 15 % au ralenti**, et d'autant plus qu'il y avait de monde.
 - Identité par **pseudo** sans comptes (mêmes pseudos = stats fusionnées). Reconnexion best-effort.
 - Spectateurs restent spectateurs même si un siège se libère (bouton 🪑 « Prendre un siège » hors partie).
-- Pas de TLS/auth/rate-limit (LAN de confiance).
+- ~~Pas de TLS/auth/rate-limit (LAN de confiance)~~ : le site est **public** depuis Render (TLS fourni par
+  Render). Taille et débit des messages sont désormais plafonnés (voir « Protections du serveur »).
+  Toujours pas de comptes : identité par pseudo.
+- Téléphone en **paysage** (> 600 px de large) : ni joystick ni croix, seul le clavier est prévu.
 - ~~Pas de grisage des réglages game master~~ **FAIT** : `body.not-gm` (posé dans `app.js` à chaque message `room`)
   + classe `gm` sur les 26 boutons concernés d'`index.html`. Purement CSS, on ne touche pas à `disabled` que chaque
   jeu pilote lui-même. « Démarrer » reste actif : lancer est un droit de **joueur**, pas de game master.

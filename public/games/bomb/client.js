@@ -406,7 +406,13 @@ export default (function () {
   const onBlur = () => { let ch = false; for (const k in input) if (input[k]) { input[k] = false; ch = true; } if (ch) pushInput(); };
   function hold(id, k) { const el = $(id); if (!el) return; const on = e => { e.preventDefault(); unlockAudio(); setIn(k, true); }; const off = e => { e.preventDefault(); setIn(k, false); }; el.addEventListener('pointerdown', on); el.addEventListener('pointerup', off); el.addEventListener('pointerleave', off); el.addEventListener('pointercancel', off); }
 
+  // Les boutons du DOM sont STATIQUES et le module est un singleton (import() en cache) : init() est
+  // rappelé à chaque retour sur le jeu. Sans ce drapeau, chaque retour rebranchait les écouteurs sans
+  // débrancher les précédents — après k retours, un appui partait k fois (k mines, k bombes, k virages).
+  // Leurs gestionnaires lisent l’état COURANT du module (send, snap…) : les brancher une fois suffit.
+  let cable = false;
   function init(ctx0) {
+    const premiere = !cable; cable = true;
     destroyed = false;              // module singleton réutilisé : réarmer la boucle de rendu après un précédent teardown
     A = ctx0.a11y; send = ctx0.send; root = ctx0.root;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
@@ -423,11 +429,11 @@ export default (function () {
     diffBtn = $('bmDiff'); if (diffBtn) diffBtn.onclick = () => send({ t: 'botdiff' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('bmHelp'), helpPanel = $('bmHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
-    cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
-    endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
-    hold('bmUp', 'up'); hold('bmDown', 'down'); hold('bmLeft', 'left'); hold('bmRight', 'right');
-    const bomb = $('bmBomb'); if (bomb) bomb.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t: 'bomb' }); });
-    const act = $('bmAct'); if (act) act.addEventListener('pointerdown', e => { e.preventDefault(); send({ t: 'action' }); });
+    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
+    if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
+    if (premiere) { hold('bmUp', 'up'); hold('bmDown', 'down'); hold('bmLeft', 'left'); hold('bmRight', 'right'); }
+    const bomb = $('bmBomb'); if (bomb && premiere) bomb.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t: 'bomb' }); });
+    const act = $('bmAct'); if (act && premiere) act.addEventListener('pointerdown', e => { e.preventDefault(); send({ t: 'action' }); });
     applyColors(); resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
     music.start();

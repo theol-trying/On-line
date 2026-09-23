@@ -366,13 +366,19 @@ export default (function () {
     if (e.key === ' ' && snap && snap.gs !== 'play' && snap.gs !== 'paused') return send({ t: 'start' });
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) return send({ t: 'pause' });
     if ((e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !boostHeld) { boostHeld = true; send({ t: 'boost', on: true }); return; }
-    const d = DIR_KEYS[e.code]; if (d) send({ t: 'dir', d });
+    const d = DIR_KEYS[e.code]; if (d && !e.repeat) send({ t: 'dir', d });   // la répétition auto renvoyait la même direction ~30×/s pour rien
   };
   const onKeyUp = e => { if (e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') { boostHeld = false; send({ t: 'boost', on: false }); } };
   const onBlur = () => { if (boostHeld) { boostHeld = false; send({ t: 'boost', on: false }); } };
   function dpad(id, d) { const el = $(id); if (!el) return; el.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t: 'dir', d }); }); }
 
+  // Les boutons du DOM sont STATIQUES et le module est un singleton (import() en cache) : init() est
+  // rappelé à chaque retour sur le jeu. Sans ce drapeau, chaque retour rebranchait les écouteurs sans
+  // débrancher les précédents — après k retours, un appui partait k fois (k mines, k bombes, k virages).
+  // Leurs gestionnaires lisent l’état COURANT du module (send, snap…) : les brancher une fois suffit.
+  let cable = false;
   function init(ctx0) {
+    const premiere = !cable; cable = true;
     destroyed = false;              // module singleton réutilisé : réarmer la boucle de rendu après un précédent teardown
     A = ctx0.a11y; send = ctx0.send; root = ctx0.root;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
@@ -392,10 +398,10 @@ export default (function () {
     diffBtn = $('trDiff'); if (diffBtn) diffBtn.onclick = () => send({ t: 'botdiff' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('trHelp'), helpPanel = $('trHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
-    cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
-    endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
-    dpad('trUp', 'up'); dpad('trDown', 'down'); dpad('trLeft', 'left'); dpad('trRight', 'right');
-    const bb = $('trBoost'); if (bb) { const on = e => { e.preventDefault(); send({ t: 'boost', on: true }); }; const off = e => { e.preventDefault(); send({ t: 'boost', on: false }); }; bb.addEventListener('pointerdown', on); bb.addEventListener('pointerup', off); bb.addEventListener('pointerleave', off); bb.addEventListener('pointercancel', off); }
+    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
+    if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
+    if (premiere) { dpad('trUp', 'up'); dpad('trDown', 'down'); dpad('trLeft', 'left'); dpad('trRight', 'right'); }
+    const bb = $('trBoost'); if (bb && premiere) { const on = e => { e.preventDefault(); send({ t: 'boost', on: true }); }; const off = e => { e.preventDefault(); send({ t: 'boost', on: false }); }; bb.addEventListener('pointerdown', on); bb.addEventListener('pointerup', off); bb.addEventListener('pointerleave', off); bb.addEventListener('pointercancel', off); }
     applyColors();
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);

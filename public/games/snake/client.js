@@ -414,11 +414,17 @@ export default (function () {
     unlockAudio();
     if (e.key === ' ' && snap && snap.gs !== 'play' && snap.gs !== 'paused') return send({ t: 'start' });
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) return send({ t: 'pause' });
-    const d = DIR_KEYS[e.code]; if (d) send({ t: 'dir', d });
+    const d = DIR_KEYS[e.code]; if (d && !e.repeat) send({ t: 'dir', d });   // la répétition auto renvoyait la même direction ~30×/s pour rien
   };
   function dpad(id, d) { const el = $(id); if (!el) return; el.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t: 'dir', d }); }); }
 
+  // Les boutons du DOM sont STATIQUES et le module est un singleton (import() en cache) : init() est
+  // rappelé à chaque retour sur le jeu. Sans ce drapeau, chaque retour rebranchait les écouteurs sans
+  // débrancher les précédents — après k retours, un appui partait k fois (k mines, k bombes, k virages).
+  // Leurs gestionnaires lisent l’état COURANT du module (send, snap…) : les brancher une fois suffit.
+  let cable = false;
   function init(ctx0) {
+    const premiere = !cable; cable = true;
     destroyed = false;              // module singleton réutilisé : réarmer la boucle de rendu après un précédent teardown
     A = ctx0.a11y; send = ctx0.send; root = ctx0.root;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
@@ -439,9 +445,9 @@ export default (function () {
     diffBtn = $('snDiff'); if (diffBtn) diffBtn.onclick = () => send({ t: 'botdiff' });
     { const helpBtn = $('snHelp'), helpPanel = $('snHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel); }
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
-    cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
-    endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
-    dpad('snUp', 'up'); dpad('snDown', 'down'); dpad('snLeft', 'left'); dpad('snRight', 'right');
+    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
+    if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
+    if (premiere) { dpad('snUp', 'up'); dpad('snDown', 'down'); dpad('snLeft', 'left'); dpad('snRight', 'right'); }
     applyColors();
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown);

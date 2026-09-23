@@ -703,7 +703,13 @@ export default (function () {
     el.addEventListener('pointerleave', off); el.addEventListener('pointercancel', off);
   }
 
+  // Les boutons du DOM sont STATIQUES et le module est un singleton (import() en cache) : init() est
+  // rappelé à chaque retour sur le jeu. Sans ce drapeau, chaque retour rebranchait les écouteurs sans
+  // débrancher les précédents — après k retours, un appui partait k fois (k mines, k bombes, k virages).
+  // Leurs gestionnaires lisent l’état COURANT du module (send, snap…) : les brancher une fois suffit.
+  let cable = false;
   function init(ctx0) {
+    const premiere = !cable; cable = true;
     destroyed = false;              // module singleton réutilisé : réarmer la boucle de rendu après un précédent teardown
     A = ctx0.a11y; send = ctx0.send; root = ctx0.root;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel;
@@ -732,7 +738,7 @@ export default (function () {
     botsBtn.onclick = () => send({ t: 'bots' });
     modeBtn.onclick = () => send({ t: 'mode' });
     presetBtn.onclick = () => send({ t: 'preset' });
-    cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
+    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
     optBtn.onclick = () => togglePanel(optionsPanel);
     { const puBtn = $('puBtn'), puPanel = $('puhelp'); if (puBtn && puPanel) puBtn.onclick = () => togglePanel(puPanel); }
     $('optLivesMinus').onclick = () => send({ t: 'opt', op: 'lives', d: -1 });
@@ -754,8 +760,8 @@ export default (function () {
     $('lbReset').onclick = () => { if (confirm('Réinitialiser le classement ?')) send({ t: 'lbreset' }); };
     voteBtn.onclick = () => send({ t: 'vote' });
     histPreset.onchange = renderHist; histMode.onchange = renderHist;
-    $('endscreen').addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
-    hold($('touchUp'), 'up'); hold($('touchDn'), 'dn');
+    if (premiere) $('endscreen').addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
+    if (premiere) { hold($('touchUp'), 'up'); hold($('touchDn'), 'dn'); }
 
     applyColors();
     resizeH = resizeCanvas;
@@ -770,5 +776,21 @@ export default (function () {
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
   }
 
-  return { init, onState, onMessage, onLb, onA11y, teardown };
+  // Joystick tactile (public/joystick.js) : la poussée est PROJETÉE sur le bord du joueur, à l'écran.
+  // Dès 3 joueurs les bords sont inclinés et « haut/bas » n'y veut plus rien dire ; pousser le stick
+  // dans le sens où l'on veut voir filer sa raquette marche, lui, sur tous les bords.
+  // Même règle de sens que le serveur (humanMove) : `up` = vers le haut sur un bord plutôt vertical,
+  // vers la gauche sur un bord plutôt horizontal. Le repère recadré (geoFit) est une homothétie :
+  // la tangente du bord est la même à l'écran que dans le monde.
+  // `actuel` = bouton déjà enfoncé : on le garde jusqu'à 0,22 (hystérésis, cf. joystick.js), on n'en
+  // enfonce un nouveau qu'à partir de 0,3 — sinon un pouce posé sur le seuil bascule à chaque touchmove.
+  function joy(dx, dy, actuel) {
+    const me = snap && mySeat >= 0 ? snap.players[mySeat] : null;
+    const e = me && me.edge >= 0 && snap.geo ? snap.geo.edges[me.edge] : null;
+    const proj = e ? dx * e.tx + dy * e.ty : dy;       // > 0 : vers +pos le long du bord (sans bord : axe vertical)
+    const sign = e ? (((Math.abs(e.ty) >= Math.abs(e.tx)) ? e.ty > 0 : e.tx > 0) ? 1 : -1) : 1;
+    const cand = (proj > 0 ? 1 : -1) * sign < 0 ? 'touchUp' : 'touchDn';
+    return Math.abs(proj) < (cand === actuel ? 0.22 : 0.3) ? null : cand;
+  }
+  return { init, onState, onMessage, onLb, onA11y, teardown, joy };
 })();

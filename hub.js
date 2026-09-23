@@ -211,8 +211,26 @@ function step() {
   if (dailyChanged()) { const s = dailyMsg(); for (const m of members) if (m.conn.readyState === 1) m.conn.send(s); }   // classement du jour (drapeau séparé : ne doit pas passer par lbMsg)
 }
 
+// Débit par connexion (seau à jetons) : DEBIT messages/s en régime, rafales de SEAU_MAX.
+// Un humain plafonne vers 15-20 messages/s (les commandes ne partent qu'aux CHANGEMENTS de touche,
+// la répétition automatique du clavier est ignorée par les 5 jeux) : 40/s laisse une marge large.
+// Au-delà, les messages sont IGNORÉS ; une inondation soutenue (REJETS_MAX rejets dans la fenêtre)
+// coupe la connexion. Le serveur est unique : un client détraqué ne doit pas l'accaparer.
+const DEBIT = 40, SEAU_MAX = 80, REJETS_MAX = 500, REJETS_FENETRE = 5000;
 function wire(member) {                          // (re)branche les handlers d'une socket sur un membre donné
-  member.conn.onMessage(raw => {
+  const conn = member.conn;
+  let seau = SEAU_MAX, seauT = Date.now(), rejets = 0, rejetsT = seauT;
+  conn.onMessage(raw => {
+    const now = Date.now();
+    // max(0, …) : si l'horloge système recule (resynchronisation), le seau ne doit pas plonger sous zéro
+    // et bloquer plusieurs secondes les commandes d'un joueur honnête (relâchements compris).
+    seau = Math.min(SEAU_MAX, seau + Math.max(0, now - seauT) * DEBIT / 1000); seauT = now;
+    if (seau < 1) {
+      if (now - rejetsT > REJETS_FENETRE) { rejets = 0; rejetsT = now; }
+      if (++rejets > REJETS_MAX) { try { conn.socket.destroy(); } catch {} }
+      return;
+    }
+    seau -= 1;
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (m.t === 'name') {
       const nm = ('' + (m.name || '')).replace(/[<>&"']/g, '').trim().slice(0, 12);   // assaini à la source : les clients l'injectent en innerHTML

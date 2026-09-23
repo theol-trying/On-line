@@ -3,6 +3,14 @@ import crypto from 'crypto';
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
+// Plafond d'une trame ENTRANTE. Le plus gros message légitime est l'avatar (data URL refusée
+// au-delà de ~19 Ko par app.js · avFromFile) : 64 Ko laisse une large marge.
+// Sans ce plafond, une trame annonçant une taille énorme faisait accumuler au serveur TOUT ce
+// qu'on lui envoyait ensuite, jusqu'à saturer la mémoire de l'unique instance Render — un seul
+// visiteur pouvait couper le site pour tout le monde. Au-delà : connexion coupée net.
+export const MAX_FRAME = 64 * 1024;
+const MAX_ENTETE = 14;                     // 2 + 8 (longueur étendue) + 4 (masque)
+
 function encodeFrame(str) {
   const data = Buffer.from(str, 'utf8');
   const len = data.length;
@@ -20,6 +28,7 @@ function decodeFrame(buf) {
   let len = buf[1] & 0x7f, off = 2;
   if (len === 126) { if (buf.length < 4) return null; len = buf.readUInt16BE(2); off = 4; }
   else if (len === 127) { if (buf.length < 10) return null; len = Number(buf.readBigUInt64BE(2)); off = 10; }
+  if (len > MAX_FRAME) return { trop: true };   // refusé dès l'en-tête, AVANT d'attendre (et de stocker) la suite
   let mask;
   if (masked) { if (buf.length < off + 4) return null; mask = buf.subarray(off, off + 4); off += 4; }
   if (buf.length < off + len) return null;
@@ -51,11 +60,15 @@ function makeConn(socket) {
     buf = Buffer.concat([buf, d]);
     let r;
     while ((r = decodeFrame(buf))) {
+      if (r.trop) { buf = Buffer.alloc(0); socket.destroy(); return; }
       buf = r.rest;
       if (r.opcode === 0x8) { socket.end(); break; }
       if (r.opcode === 0x9) { socket.write(Buffer.from([0x8a, 0])); continue; }
       if (r.opcode === 0x1 && conn._msg) conn._msg(r.payload);
     }
+    // Défense en profondeur : une fois les trames complètes consommées, le reliquat est au plus UNE
+    // trame en cours de réception, donc jamais plus grand que le plafond + son en-tête.
+    if (buf.length > MAX_FRAME + MAX_ENTETE) { buf = Buffer.alloc(0); socket.destroy(); }
   });
   const close = () => { if (conn.readyState !== 3) { conn.readyState = 3; conn._close && conn._close(); } };
   socket.on('close', close);

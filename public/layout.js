@@ -27,5 +27,18 @@ export function arenaSize(o) {
     }
   }
   const h = playing ? (o.hPlay || 0.82) : (o.hLobby || 0.62);
+  // Téléphone en partie : on déduit la hauteur RÉELLE des commandes (manette ou joystick, carte du
+  // joueur, bandeau des boutons du haut). Une fraction fixe de l'écran ne suffisait plus : le joystick
+  // (189 px) faisait déborder Pong sous l'écran d'un iPhone SE (relevé par la revue du 23/09).
+  // Plancher abaissé à 200 px : un plateau un peu plus petit vaut mieux qu'une manette coupée.
+  if (playing && window.innerWidth <= 600) {
+    const racine = document.querySelector('.game-root:not(.hidden)');
+    let hCmd = 0;
+    if (racine) racine.querySelectorAll('.gpad, .stage > .joyzone, .stage > div:not(.canvas-wrap)').forEach(el => {
+      if (el.offsetHeight > hCmd) hCmd = el.offsetHeight;
+    });
+    const hLibre = window.innerHeight - 54 - hCmd - 44 - 20;   // bandeau haut · commandes · sa carte · marges
+    return Math.max(200, Math.min(window.innerWidth * 0.96, window.innerHeight * h, hLibre, max));
+  }
   return Math.max(280, Math.min(window.innerWidth * 0.96 - side, window.innerHeight * h, max));
 }

@@ -1,5 +1,6 @@
 // SHELL client de la plateforme : réseau (WS + token), pseudo, menu de jeux, accessibilité partagée,
 // gestion des panneaux modaux, et délégation du rendu/inputs au module du jeu actif (games/<id>/client.js).
+import { initJoystick, joystickPour } from './joystick.js';   // manette tactile des 5 jeux (téléphone)
 
 let ws = null;
 let you = { id: null, name: '', token: localStorage.getItem('pong-lan-token') || '' };
@@ -20,9 +21,10 @@ const setTheme = document.getElementById('setTheme'), setMusic = document.getEle
 const setPalette = document.getElementById('setPalette'), setContrast = document.getElementById('setContrast'), setFx = document.getElementById('setFx');
 const setSfx = document.getElementById('setSfx'), setFull = document.getElementById('setFull');
 const setMvol = document.getElementById('setMvol');
+const setPad = document.getElementById('setPad');
 
 /* ---------- accessibilité (partagée, persistée) ---------- */
-const a11y = Object.assign({ palette: 'normal', contrast: false, reduceFx: false, theme: 'neon', music: false, sfx: 1, mvol: 0.7 },
+const a11y = Object.assign({ palette: 'normal', contrast: false, reduceFx: false, theme: 'neon', music: false, sfx: 1, mvol: 0.7, pad: 'joy' },
   JSON.parse(localStorage.getItem('pong-lan-a11y') || localStorage.getItem('pong-a11y') || '{}'));
 function applyA11y() {
   document.body.classList.toggle('flat', a11y.reduceFx);
@@ -32,6 +34,8 @@ function applyA11y() {
   setPalette.value = a11y.palette; setContrast.checked = a11y.contrast; setFx.checked = a11y.reduceFx;
   if (setSfx) setSfx.value = Math.round((a11y.sfx == null ? 1 : a11y.sfx) * 100);
   if (setMvol) setMvol.value = Math.round((a11y.mvol == null ? 0.7 : a11y.mvol) * 100);
+  document.body.classList.toggle('pad-croix', a11y.pad === 'croix');   // téléphone : joystick (défaut) ou croix d'origine
+  if (setPad) setPad.value = a11y.pad === 'croix' ? 'croix' : 'joy';
   localStorage.setItem('pong-lan-a11y', JSON.stringify(a11y));
   if (mod && mod.onA11y) mod.onA11y();
 }
@@ -42,6 +46,8 @@ setTheme.onchange = () => { a11y.theme = setTheme.value; applyA11y(); };
 setMusic.onchange = () => { a11y.music = setMusic.checked; applyA11y(); };
 if (setSfx) setSfx.oninput = () => { a11y.sfx = (parseInt(setSfx.value, 10) || 0) / 100; applyA11y(); };
 if (setMvol) setMvol.oninput = () => { a11y.mvol = (parseInt(setMvol.value, 10) || 0) / 100; applyA11y(); };
+if (setPad) setPad.onchange = () => { a11y.pad = setPad.value; applyA11y(); };
+initJoystick();
 if (setFull) setFull.onclick = () => { if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen(); else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); };
 /* vibration tactile (mobile) sur les boutons de contrôle .touch */
 document.addEventListener('pointerdown', e => { if (e.target.closest && e.target.closest('.touch')) { try { navigator.vibrate && navigator.vibrate(8); } catch {} } }, { passive: true });
@@ -456,6 +462,7 @@ async function loadModule(id) {
     if (loadingId !== id) return;                 // un chargement plus récent a pris le relais
     mod = m.default;
     mod.init({ root: rootEl || document.body, send: gameSend, a11y, togglePanel, closePanels: closeGamePanels });
+    joystickPour(id, mod.joy);                    // table de boutons du jeu (Pong fournit sa propre projection)
     modId = id; modReady = true; loadingId = null;
     if (mod.onA11y) mod.onA11y();
     const p = pend[id];                           // vider le tampon de ce jeu
