@@ -184,8 +184,10 @@ async function protections() {
   //    SMOKE_FAULT fait lever une erreur au message __panne ; le hub doit relancer la partie et prévenir.
   const v = client('Victime'); await v.ouvert; await wait(300);
   let notes = 0; v.ws.addEventListener('message', e => { if (/"t":"note"/.test(e.data)) notes++; });
-  v.jeu({ t: '__panne' }); await wait(500);
-  const avant = v.msgs; await wait(600);
+  // Compté depuis AVANT la panne : le lobby n'émet plus rien quand rien ne change (quota Render), donc le
+  // seul état attendu est l'instantané complet de relance, qui part dans les ~250 ms.
+  const avant = v.msgs;
+  v.jeu({ t: '__panne' }); await wait(1100);
   ok('une exception de jeu ne tue plus le serveur', serveurVivant());
   ok('la partie est relancée et les joueurs prévenus', notes >= 1 && v.msgs > avant, notes + ' note(s), ' + (v.msgs - avant) + ' état(s) après');
   v.ws.close(); await wait(300);

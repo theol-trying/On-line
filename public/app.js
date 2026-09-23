@@ -566,6 +566,28 @@ function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
 function gameSend(m) { send({ t: 'g', m }); }     // messages destinés au jeu actif
 function setStatus(txt, cls) { msgTxt.innerHTML = txt; statusDot.className = cls || ''; }
 
+/* Onglet CACHÉ hors partie : on coupe la connexion au bout d'une minute et on la rouvre au retour.
+   Le plan gratuit de Render est limité à 5 Go/mois (réponses WebSocket comprises, services éteints au-delà) :
+   un onglet oublié ne doit plus rien consommer. En partie, on ne coupe jamais — un joueur qui bascule d'appli
+   une seconde garde sa place ; on revérifie simplement une minute plus tard. Le game master est rendu à la
+   reconnexion (clé admin, cf. hub.js · hostId). */
+let enVeille = false, veilleT = 0;
+const VEILLE_MS = 60000;
+function armerVeille() {
+  clearTimeout(veilleT);
+  veilleT = setTimeout(() => {
+    if (!document.hidden) return;
+    if (document.body.classList.contains('playing')) { armerVeille(); return; }
+    enVeille = true;
+    if (ws) { try { ws.close(); } catch (e) {} }
+  }, VEILLE_MS);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { armerVeille(); return; }
+  clearTimeout(veilleT);
+  if (enVeille) { enVeille = false; connect(); }
+});
+
 function connect() {
   setStatus('Connexion…', '');
   const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';   // wss en ligne (HTTPS Render), ws en LAN local
@@ -658,7 +680,10 @@ function connect() {
       majHorsJeu();                                           // après onState : le jeu vient de mettre ses cartes à jour
     }
   };
-  ws.onclose = () => { setStatus('Déconnecté — reconnexion…', 'off'); setTimeout(connect, 1000); };
+  ws.onclose = () => {
+    if (enVeille) { setStatus('En veille — revenez sur l\'onglet pour reprendre', 'off'); return; }   // coupure voulue : pas de reconnexion
+    setStatus('Déconnecté — reconnexion…', 'off'); setTimeout(connect, 1000);
+  };
 }
 
 applyA11y();
