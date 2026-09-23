@@ -761,8 +761,17 @@ effets, écrans). Un agent par jeu, sur son seul `client.js`, le client du Sumo 
 pré-rendu texturé, sprites détaillés, un visuel par état et par bonus, un effet par événement, ambiance
 animée discrète, écrans titre / compte à rebours / pause / fin thématisés, pictogrammes de bonus dessinés.
 **Aucun changement de règle ni de protocole** (le serveur n'est pas touché).
-- ⚠ Les agents ont été coupés par la limite de dépense AVANT leur phase de revue adverse et avant la passe
-  CSS des fonds de page (non faite : les fonds de page restent ceux d'avant). Le travail a été récupéré et
+- **Fonds de page** (fait ensuite à la main, `style.css` · section « D. Fonds de page ») : même recette que
+  le dohyō — une matière, des sources de lumière, un bandeau identitaire, des animations d'opacité ou de
+  transformation seulement. Pong : nuit synthwave, soleil rayé, sol quadrillé en vraie perspective qui
+  défile (thème CRT en phosphore vert). Tron : cœur de données, colonnes de lumière, sol cyan en
+  perspective. Tanks : désert en trois plans de dunes + bandeau d'acier riveté à rayures de danger.
+  Snake : rais de soleil, pelouse, haies ; lumière qui respire. Bomberman : papier peint de confiserie +
+  store festonné. Le sol en perspective est mis en pause pendant la partie (caché par le plateau).
+  Effets réduits : retour à l'aplat `--bg1`. Au passage, **les 8 `inset` du fichier sont réécrits en
+  top/right/bottom/left** : absents avant iOS 14.1, ils donnaient une taille NULLE à l'écran de fin, au
+  voile des panneaux et au fondu entre jeux sur les anciens iPhone.
+- ⚠ Les agents ont été coupés par la limite de dépense AVANT leur phase de revue adverse. Le travail a été récupéré et
   vérifié à la main : parties réelles contre bots dans les 5 jeux (compte à rebours, jeu, palette
   daltonienne, contraste, effets réduits, pause/reprise, changements de jeu répétés) → **0 erreur** ;
   écrans de fin atteints en vrai pour Pong, Tron, Snake, relus au code pour Tanks et Bomberman ; API
