@@ -190,8 +190,12 @@ function step() {
     if (frameNo % stride === 0) {
       const full = { t: 'state', g: activeId, ...snap, fx: pendingFx, shz: Math.round(curHz / stride) };
       pendingFx = [];
-      const wasFull = fullNext || frameNo % (curHz * 2) < stride;
-      if (wasFull) { prevSent = {}; fullNext = false; }   // filet : instantané complet toutes les ~2 s
+      // Filet d'instantané complet : ~2 s en jeu, 30 s hors jeu. Hors jeu (lobby, pause, fin) presque rien ne
+      // bouge, et un onglet oublié dans le lobby recevait ainsi un état complet toutes les 2 s : 7,8 Mo/heure
+      // pour RIEN (mesuré le 23/09), sur un plan Render limité à 5 Go/mois. Un arrivant, lui, reçoit toujours
+      // un instantané complet immédiat (fullNext), quel que soit ce délai.
+      const wasFull = fullNext || frameNo % (curHz * (live ? 2 : 30)) < stride;
+      if (wasFull) { prevSent = {}; fullNext = false; }
       if (TRACE) console.log('[trace] f=' + frameNo + ' stride=' + stride + ' full=' + wasFull + ' membres=' + members.length);
       const out = {};
       for (const k in full) {
@@ -225,8 +229,13 @@ function step() {
         }
         prevPlayers = ps;     // les jeux reconstruisent leurs objets joueur à chaque tick : garder la référence est sûr
       }
-      const buf = wsFrame(JSON.stringify(out));            // encodée une seule fois pour tous les clients
-      for (const m of members) if (m.conn.readyState === 1) m.conn.sendRaw(buf);
+      // Hors jeu, un message qui n'apporte RIEN (ni clé changée, ni joueur modifié, ni effet) n'est pas envoyé.
+      // (Pas de `return` : les classements et le défi du jour, diffusés juste après, doivent toujours partir.)
+      const vide = !live && !wasFull && !out.pd && !(out.fx && out.fx.length) && Object.keys(out).every(k => ALWAYS.has(k));
+      if (!vide) {
+        const buf = wsFrame(JSON.stringify(out));          // encodée une seule fois pour tous les clients
+        for (const m of members) if (m.conn.readyState === 1) m.conn.sendRaw(buf);
+      }
     }
   }
   if (anyDirty()) { for (const gid of dirtyGames()) { const s = lbMsg(gid); for (const m of members) if (m.conn.readyState === 1) m.conn.send(s); } clearDirty(); }

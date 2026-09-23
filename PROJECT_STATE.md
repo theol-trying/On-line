@@ -824,6 +824,26 @@ teinté pendant les tremblements, etc.).
   les 9 éléments du lobby, sur PC (1440×860) comme sur téléphone (375×812). Seule la hauteur de la barre de
   commandes varie, son haut étant commun : chaque jeu n'a pas le même nombre d'options.
 
+## Quota de bande passante Render (23/09)
+Plan Hobby (gratuit) : **5 Go/mois de bande passante sortante PAR ESPACE DE TRAVAIL** (les deux sites s'ils le
+partagent), réponses WebSocket comprises ; au-delà et sans moyen de paiement, **Render éteint les services
+jusqu'au mois suivant** (docs Render « Outbound Bandwidth »). Relevé utilisateur : 586 Mo au 23/09.
+Mesuré par onglet (sonde `debit.mjs`, serveur local) :
+| situation | avant | après |
+|---|---|---|
+| lobby, personne ne joue | 2,2 Ko/s · 4 msg/s · **7,8 Mo/h** | **~0** (rien quand rien ne change) |
+| lobby Tanks, bots réglés | 1,7 Ko/s | 0,4 Ko/s (filet de 30 s) |
+| en jeu Pong / Tanks / Sumo | 10,1 / 8,3 / 11,6 Ko/s | inchangé (~30-40 Mo/h par joueur) |
+- **Lobby** (`hub.js`) : hors jeu, un message qui n'apporte rien n'est plus envoyé, et le filet d'instantané
+  complet passe de 2 s à 30 s. Un changement (réglage, arrivée) part toujours tout de suite (42 ms mesurés),
+  un arrivant reçoit toujours un instantané complet immédiat.
+- **Onglet caché** (`app.js · armerVeille`) : hors partie, connexion coupée après 1 min cachée, rouverte au
+  retour (statut « En veille »). Jamais en partie. Game master rendu à la reconnexion (clé admin).
+- **Ordre de grandeur restant** : ~35 Mo par joueur et par heure de jeu → 5 Go ≈ 140 heures-joueur par mois
+  (ex. 4 à 5 soirées de 3 h à 10). Leviers en réserve, non faits : diffusion de Pong à 30 Hz (−50 % sur Pong ;
+  la prédiction locale couvre sa propre raquette), permessage-deflate via zlib natif (≈ −50 % partout, mais
+  touche au WebSocket écrit à la main et dépend du proxy Render).
+
 ## Filet de sécurité du hub (23/09)
 `game.tick()` et `game.onMessage()` n'étaient protégés nulle part : une exception dans n'importe lequel
 des 6 jeux tuait le processus Node, donc le site pour tout le monde (c'est la panne du 21/09,
