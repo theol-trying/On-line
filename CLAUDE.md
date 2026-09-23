@@ -24,6 +24,11 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
   mémoire** → une seule instance Render.
 - **Ajouter un jeu** = `games/<id>/server.js` + `public/games/<id>/{client.js,shared.js}`,
   puis l'enregistrer dans l'objet `GAMES` de `hub.js`. Rien d'autre.
+- **Taille du plateau** : jamais de formule maison dans un jeu → `arenaSize()` de `public/layout.js`.
+  En partie sur grand écran (`body.playing.dock`, posé par `layoutArena()` dans `app.js`) elle **mesure**
+  la colonne centrale `.stage` ; sinon elle applique la formule en fractions de fenêtre. Un jeu avec des
+  commandes **latérales** (les flèches ▲▼ de Pong) doit être déclaré dans `SIDE_JEU` d'`app.js`, sinon
+  les colonnes lui volent cette largeur.
 - Le snapshot renvoyé par `tick()` **doit** contenir `gs` (utilisé par le throttle du hub).
 
 ## Lancer et tester

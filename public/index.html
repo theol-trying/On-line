@@ -152,11 +152,11 @@
 
   <!-- ===== racine du jeu TRON ===== -->
   <div id="tron-root" class="game-root hidden">
-    <div class="canvas-wrap">
+    <div class="stage"><div class="canvas-wrap">
       <canvas id="trc" width="500" height="500"></canvas>
       <div id="trBanner" class="banner-mid"></div>
       <div id="trEnd" class="endscreen hidden"></div>
-    </div>
+    </div></div>
     <div id="trHud" class="hud"></div>
     <div class="bar">
       <button id="trStart" class="primary" disabled>▶ Démarrer</button>
@@ -204,11 +204,11 @@
 
   <!-- ===== racine du jeu TANKS ===== -->
   <div id="tank-root" class="game-root hidden">
-    <div class="canvas-wrap">
+    <div class="stage"><div class="canvas-wrap">
       <canvas id="tkc" width="600" height="600"></canvas>
       <div id="tkBanner" class="banner-mid"></div>
       <div id="tkEnd" class="endscreen hidden"></div>
-    </div>
+    </div></div>
     <div id="tkHud" class="hud"></div>
     <div class="bar">
       <button id="tkStart" class="primary" disabled>▶ Démarrer</button>
@@ -271,11 +271,11 @@
 
   <!-- ===== racine du jeu BOMBERMAN ===== -->
   <div id="bomb-root" class="game-root hidden">
-    <div class="canvas-wrap">
+    <div class="stage"><div class="canvas-wrap">
       <canvas id="bmc" width="520" height="520"></canvas>
       <div id="bmBanner" class="banner-mid"></div>
       <div id="bmEnd" class="endscreen hidden"></div>
-    </div>
+    </div></div>
     <div id="bmHud" class="hud"></div>
     <div class="bar">
       <button id="bmStart" class="primary" disabled>▶ Démarrer</button>
@@ -338,11 +338,11 @@
 
   <!-- ===== racine du jeu SNAKE ===== -->
   <div id="snake-root" class="game-root hidden">
-    <div class="canvas-wrap">
+    <div class="stage"><div class="canvas-wrap">
       <canvas id="snc" width="510" height="510"></canvas>
       <div id="snBanner" class="banner-mid"></div>
       <div id="snEnd" class="endscreen hidden"></div>
-    </div>
+    </div></div>
     <div id="snHud" class="hud"></div>
     <div class="bar">
       <button id="snStart" class="primary" disabled>▶ Démarrer</button>
@@ -398,7 +398,9 @@
 
   <!-- ===== mini-chat de salon (masqué en jeu : les contrôles tactiles priment) ===== -->
   <button id="chatFloat" aria-label="chat du salon">💬<span id="chatDot" class="chatdot hidden"></span></button>
-  <div id="chatPanel" class="settings hidden" style="width:min(94vw,400px);">
+  <!-- téléphone, une fois éliminé : affiche la liste des joueurs (masquée pendant qu'on joue) -->
+  <button id="hudFloat" aria-label="liste des joueurs">👥</button>
+  <div id="chatPanel" class="settings hidden">
     <div class="shead"><h3>💬 Chat du salon</h3><button class="sclose" aria-label="fermer">✕</button></div>
     <div class="sbody">
       <div id="chatLog" class="chatlog"></div>

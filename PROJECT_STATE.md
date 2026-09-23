@@ -568,6 +568,81 @@ l'exception attendue : les champs de saisie restent sélectionnables, sinon le c
 > `user-select:text` conservé sur le champ de chat, `touchstart` bien annulé sur les `.touch`, appui et
 > relâchement toujours transmis (pas de double envoi), shim inerte quand `PointerEvent` existe.
 
+## Plateau plein écran (23/09) — `body.playing.dock`
+
+Retour utilisateur, capture à l'appui : le plateau occupait à peine le tiers d'un écran 1600×900, la
+liste des joueurs était **sous** le plateau et le chat flottait par-dessus. Deux causes cumulées, l'une
+de mise en page, l'autre **propre à Pong**.
+
+### 1. La largeur était perdue
+Sur un 16:9, le plateau est limité par la **hauteur** ; toute la largeur en trop ne servait qu'à afficher
+le fond animé. On la convertit donc en deux colonnes fixes — **chat à gauche, joueurs à droite** — et le
+plateau prend enfin toute la hauteur utile.
+
+- `app.js · layoutArena()` pose la classe `dock` et calcule `--sidew` = **ce qui resterait perdu**,
+  divisé en deux, plafonné à 320 px. Pas de media query fixe : sur un 4:3 (1024×768) la largeur manque,
+  `dock` reste absent et l'empilement vertical historique s'applique tel quel.
+- La largeur des **commandes latérales du jeu actif** (`SIDE_JEU`, 200 px pour les flèches ▲▼ de Pong)
+  est déduite **avant** le partage. Sans ça les colonnes les lui volaient : mesuré, le canvas de Pong
+  tombait à 704 px contre 774 avant la refonte — une régression.
+- `public/layout.js` (nouveau) porte `arenaSize()`, partagée par les 5 jeux : en mode `dock` elle
+  **mesure la colonne centrale** (`.stage`, posée en `fixed`) ; sinon elle applique la formule
+  historique en fractions de fenêtre. Les 4 jeux non-Pong ont reçu un `<div class="stage">` autour de
+  leur `canvas-wrap` pour offrir la même prise au CSS.
+- Le chat docké n'est plus une fenêtre modale mais une **colonne repliable** (`body.nochat`, mémorisée) :
+  le bouton 💬 et sa croix la replient, le plateau récupère alors la place. Tant qu'elle est ouverte,
+  les messages n'émettent **ni bulle ni pastille** — ils sont déjà sous les yeux. `Entrée` rend le focus
+  au jeu (`chatInput.blur()`), sinon le champ avalait les flèches.
+
+### 2. Pong dessinait son terrain dans 66 % du canvas
+Le serveur bâtit un **polygone régulier inscrit dans un cercle**. Sur un carré (duel, ou 4 joueurs) le
+côté vaut `R√2` : le terrain ne mesurait que **66 % du canvas**, le tiers restant n'étant que du fond
+étoilé. C'est exactement l'« effet espace qui prend de la place pour rien » signalé.
+`client.js · geoFit()` recadre donc le polygone sur le canvas (marge haute un peu plus large pour les
+bandeaux de bonus), via deux repères explicites dans `draw()` : `base()` pour le canvas (fonds, voiles,
+écrans de titre) et `world()` pour le terrain.
+
+> ⚠ **Le recadrage est FIGÉ pendant la manche** (`gs` = play/paused/over). La mort subite rétrécit le
+> terrain : un recadrage permanent aurait compensé pile ce rétrécissement et on ne l'aurait plus vu du
+> tout. Il est recalculé au `countdown`, terrain à sa taille pleine.
+
+### Mesuré (navigateur, 5 jeux, parties réelles)
+| écran | avant | après | terrain Pong réellement visible |
+|---|---|---|---|
+| 1600×900 | 774 px | **822 px** | 514 → **~775 px** (+50 %) |
+| 1920×1080 (10 joueurs) | 928 px | **1002 px** | décagone plein cadre |
+| 1024×768 (4:3) | 660 px | 660 px (`dock` inactif, inchangé) | recadrage actif quand même |
+| 375×812 (mobile) | inchangé | inchangé | le recadrage profite aussi au mobile |
+
+`npm test` : 48/48, cadences nominales (pong 60/s · tron 15/s · snake 12/s · tank 30/s · bomb 30/s).
+
+### Téléphone en partie : le plateau et la manette, rien d'autre
+Demande utilisateur : sur téléphone, ni liste des joueurs ni chat pendant qu'on joue ; les deux
+redeviennent accessibles **à l'élimination**, à la demande.
+- Tant qu'on joue : seule **sa propre carte** reste, réduite (vies de Pong, bonus actifs, équipement de
+  Bomberman — rien d'autre ne les affiche) ; bouton 💬 masqué ; **pas de bulle de chat** sur le plateau,
+  la pastille « non lu » attend sur le bouton.
+- `body.out` (posé par `app.js · majHorsJeu()` après chaque `onState`) = éliminé ou spectateur : 💬 et
+  👥 apparaissent dans le bandeau haut, la liste s'ouvre en surimpression. Les deux s'excluent (même
+  emplacement). De retour en jeu (nouvelle manche, résurrection), l'écran est libéré sur-le-champ.
+- **Aucun jeu modifié** : l'élimination est lue sur les cartes que les 5 jeux tiennent déjà (`.pc.me`,
+  `.pc.dead`). Bomberman en revanche n'est pas marqué éliminé tant qu'il joue depuis le bord — il garde
+  donc sa manette, c'est voulu.
+- Limite connue : un joueur arrivé **en cours de manche** (siège attribué, pas encore en jeu) n'est
+  marqué ni éliminé ni spectateur dans le DOM — il n'a le chat qu'à la fin de la manche.
+- Seuil : `innerWidth <= 600`, le même que le bloc mobile de `style.css`. PC et tablettes inchangés.
+
+### Page de test `/manette.html` — TEMPORAIRE
+Prototype des commandes tactiles, **lié nulle part** (`noindex`), pour que l'utilisateur essaie au
+pouce sur son ancien iPhone : 4 dispositions (actuelle · pouces · joystick flottant · Pong au glisser),
+curseur de taille, compteur de ratés. Événements tactiles bruts : fonctionne sous iOS 12.
+**À supprimer** une fois la disposition choisie et câblée dans les 5 jeux.
+
+Constat fait en la construisant, qui pèse sur le choix : **en portrait, c'est la largeur qui plafonne la
+taille des touches**, pas le réglage. Une croix de 3 touches + une colonne d'actions ne tiennent côte à
+côte qu'à ~77 px sur 375 px de large (iPhone 8) et ~64 px sur 320 px (iPhone SE) — à 82 px elles se
+chevauchaient. Le joystick flottant n'a pas cette contrainte (78 px sur SE).
+
 ## Limites connues (assumées)
 - **Reste à gagner, non fait** : **prédiction locale** de sa propre raquette — le seul levier qui retire vraiment
   l'aller-retour réseau du *ressenti* de contrôle (le débit, lui, n'est plus un sujet).

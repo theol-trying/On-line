@@ -5,6 +5,7 @@ let GW = GW0, GH = GH0, CELL = CELL0;
 import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (daltonisme / jusqu'à 10 joueurs)
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // bandeaux « ce que tu viens de ramasser »
+import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux 5 jeux (mode plein écran compris)
 
 // musique : synthwave sombre — nappe en quintes, basse pulsée, arpège néon ; climax (duel final) = arp rapide + charley + tempo
 const MUSIC_THEME = { bpm: 122, bpmBoost: 14, vol: 0.5, root: 82.41, len: 32,
@@ -71,8 +72,7 @@ export default (function () {
 
   function resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
-    const playing = document.body.classList.contains('playing');
-    const size = Math.max(280, Math.min(window.innerWidth * 0.96, window.innerHeight * (playing ? 0.82 : 0.62), 760));
+    const size = arenaSize({ max: 760 });
     cv.style.width = size + 'px'; cv.style.height = size + 'px';
     cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr);
   }

@@ -56,7 +56,7 @@ body.flat canvas{ box-shadow:0 0 0 1px var(--border) inset; }
    ne l'était que SANS préfixe — or les Safari antérieurs à 12.1 ignorent la version non préfixée.
    On couvre ici tout ce qui se touche, pas seulement les flèches. */
 .touch, .gpad, .gpad *, .bar > button, .rbtn, .ghosttab, .gtab, .emo, .sclose, .cyc, .ghostbtn,
-#emoteFloat, #chatFloat, #setFloat, #pauseFloat, .pauseFloat, #quitFloat, #avBtn, .avgrid button, canvas {
+#emoteFloat, #chatFloat, #hudFloat, #setFloat, #pauseFloat, .pauseFloat, #quitFloat, #avBtn, .avgrid button, canvas {
   -webkit-touch-callout:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none; user-select:none;
 }
 /* En partie, rien n'est sélectionnable — sauf les champs de saisie, sinon le chat devient inutilisable. */
@@ -252,6 +252,46 @@ body.flat .theme-crt .canvas-wrap::after, body.flat.theme-crt .canvas-wrap::afte
 /* en partie : on masque le superflu pour laisser un maximum de place au plateau */
 body.playing > header, body.playing .namebar, body.playing .shellrow, body.playing .help, body.playing .bar, body.playing #msg { display:none; }
 body.playing { gap:8px; padding-top:8px; }
+
+/* ============================================================================
+   MODE PLATEAU PLEIN ÉCRAN (body.playing.dock)
+   ----------------------------------------------------------------------------
+   La classe `dock` est posée par app.js UNIQUEMENT quand l'écran est assez large
+   pour que les deux colonnes ne coûtent RIEN au plateau : sur un 16:9, le plateau
+   est limité par la HAUTEUR, toute la largeur en trop était perdue en fond animé.
+   On y installe donc le chat à gauche et la liste des joueurs à droite, et le
+   plateau prend enfin toute la hauteur utile. En dessous de ce seuil (portables
+   4:3, tablettes, téléphones) rien ne change : empilement vertical historique.
+   Largeur des colonnes : --sidew, calculée par app.js d'après la place réellement
+   disponible — jamais au détriment du plateau.
+   ============================================================================ */
+body.playing.dock{ display:block; padding:0; gap:0; overflow:hidden; --gap:14px; --band:64px; }
+body.playing.dock .stage{
+  position:fixed; z-index:2; top:var(--band); bottom:var(--gap);
+  left:calc(var(--sidew,260px) + var(--gap) * 2); right:calc(var(--sidew,260px) + var(--gap) * 2);
+  display:flex; align-items:center; justify-content:center; margin:0; }
+body.playing.dock.nochat .stage{ left:var(--gap); }          /* chat replié : le plateau récupère la colonne */
+/* colonne de droite : les joueurs, en liste verticale (la grille du lobby ne convient plus) */
+body.playing.dock #hud, body.playing.dock .hud{
+  position:fixed; z-index:2; top:var(--band); bottom:var(--gap); right:var(--gap);
+  width:var(--sidew,260px); display:flex; flex-direction:column; gap:8px;
+  overflow-y:auto; overflow-x:hidden; align-content:flex-start; }
+body.playing.dock .pc{ flex:0 0 auto; }
+/* colonne de gauche : le chat, docké et ouvert par défaut (le bouton 💬 le replie) */
+body.playing.dock #chatPanel{
+  display:flex; top:var(--band); bottom:var(--gap); left:var(--gap); right:auto;
+  width:var(--sidew,260px); max-height:none; transform:none; }
+body.playing.dock.nochat #chatPanel{ display:none; }
+body.playing.dock #chatPanel .sbody{ flex:1 1 auto; min-height:0; overflow:hidden; }
+body.playing.dock #chatPanel .chatlog{ flex:1 1 auto; max-height:none; }
+body.playing.dock #chatPanel .note{ display:none; }          /* la colonne est étroite : on garde le journal et la saisie */
+/* bandeau du haut : quitter · chat · émotes à gauche, pause · réglages à droite */
+body.playing.dock #chatFloat{ top:12px; left:116px; bottom:auto; }
+body.playing.dock #emoteFloat{ top:12px; left:168px; bottom:auto; }
+body.playing.dock #emoteBar{ top:62px; left:116px; bottom:auto; }
+body.playing.dock #tourBar{ position:fixed; z-index:11; top:14px; left:50%; transform:translateX(-50%); }
+/* flèches de Pong : autant de place que le plateau, elles deviennent de vraies cibles */
+body.playing.dock .stage > div:not(.canvas-wrap) .touch{ width:76px; height:38vh; font-size:32px; }
 /* bouton pause flottant (visible seulement en partie, surtout utile au tactile) */
 #pauseFloat, .pauseFloat{ position:fixed; top:12px; right:12px; z-index:11; display:none; }
 body.playing #pauseFloat, body.playing .pauseFloat{ display:block; }
@@ -366,7 +406,7 @@ body.not-gm #tourBtn{ opacity:.5; filter:grayscale(.5); }
 /* Le chat est la SEULE fenêtre non modale : elle doit rester utilisable pendant une manche.
    Au-dessus des boutons flottants (z-11) et des confettis (z-12), et ancrée dans un coin en
    partie plutôt que centrée sur le plateau. */
-#chatPanel{ z-index:14; }
+#chatPanel{ z-index:14; width:min(94vw,400px); }   /* largeur en CSS (plus en style inline) : le mode docké la remplace par --sidew */
 body.playing #chatPanel{ top:auto; bottom:64px; left:12px; transform:none; width:min(92vw,360px); }
 body.playing #chatPanel .chatlog{ max-height:150px; }
 .chatdot{ position:absolute; top:4px; right:4px; width:9px; height:9px; border-radius:50%; background:#ff5a4e; box-shadow:0 0 6px rgba(255,90,78,.9); }
@@ -531,7 +571,24 @@ body.game-bomb:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.5),0 0 0 3p
   body.playing #chatPanel{ top:58px; bottom:auto; left:9px; right:9px; width:auto; }
   body.playing #chatPanel .chatlog{ max-height:120px; }
   #xfade{ font-size:26px; }
+
+  /* TÉLÉPHONE EN PARTIE : le plateau et la manette, rien d'autre (demande utilisateur, 23/09).
+     Tant qu'on joue, ni liste des joueurs ni chat. On garde SA PROPRE carte, réduite à une ligne :
+     elle porte les vies (Pong), les bonus actifs et l'équipement (Bomberman), qu'aucun autre
+     affichage ne donne. `body.out` (posé par app.js) = éliminé ou spectateur : le chat et la liste
+     redeviennent accessibles, mais à la demande seulement (boutons 💬 et 👥 du bandeau haut). */
+  body.playing #hud .pc:not(.me), body.playing .hud .pc:not(.me){ display:none; }
+  body.playing:not(.out) #chatFloat, body.playing:not(.out) #chatPanel{ display:none; }
+  body.playing.out #hudFloat{ display:flex; }
+  body.playing.hudon #hud .pc:not(.me):not(.hidden), body.playing.hudon .hud .pc:not(.me):not(.hidden){ display:flex; }
+  body.playing.hudon #hud, body.playing.hudon .hud{
+    position:fixed; z-index:13; top:58px; left:9px; right:9px; width:auto; max-height:62vh; overflow-y:auto;
+    padding:8px; background:var(--panel); border:1px solid var(--border2); border-radius:14px;
+    -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); -webkit-overflow-scrolling:touch; }
 }
+#hudFloat{ display:none; position:fixed; z-index:11; top:9px; left:107px; width:42px; height:42px; padding:0; font-size:17px;
+  align-items:center; justify-content:center; opacity:.75; }
+body.hudon #hudFloat{ opacity:1; border-color:var(--accent); }
 @media (max-width:370px){                               /* très petits écrans (ancien iPhone) : on réduit pour tout faire tenir sans chevauchement */
   .gpad .touch{ width:54px; height:54px; font-size:22px; }
   .gpad .acts .touch{ width:60px; height:60px; }

@@ -73,6 +73,35 @@ if (typeof window.PointerEvent === 'undefined') {
   document.addEventListener('touchcancel', e => relais('pointercancel', e), { passive: false });
 }
 
+/* ---------- mode « plateau plein écran » (body.playing.dock) ----------
+   Sur un écran 16:9 le plateau est limité par la HAUTEUR : toute la largeur en trop ne servait
+   à rien (fond animé). On la convertit en deux colonnes — chat à gauche, joueurs à droite — mais
+   UNIQUEMENT quand elles ne rognent pas le plateau. D'où ce calcul plutôt qu'une media query
+   fixe : sur un 4:3 (1024×768) la largeur manque, on garde alors l'empilement vertical.
+   `--sidew` = largeur réellement disponible, plafonnée : au-delà, ce serait du vide en plus. */
+const BANDE = 64, MARGE = 14;
+const SIDE_JEU = { pong: 200 };          // Pong encadre son plateau des flèches ▲▼ : cette largeur-là n'est pas négociable
+let sideJeu = 0;
+function layoutArena() {
+  const W = window.innerWidth, H = window.innerHeight;
+  const hUtile = H - BANDE - MARGE;                              // hauteur offerte au plateau
+  // Les colonnes ne prennent QUE le surplus : le plateau garde sa hauteur utile, et les
+  // commandes latérales du jeu actif sont déduites avant le partage (sinon on les lui volait).
+  let side = Math.floor((W - hUtile - sideJeu - MARGE * 4) / 2);
+  if (side > 320) side = 320;
+  const dock = W >= 1000 && H >= 520 && side >= 168;
+  document.body.classList.toggle('dock', dock);
+  if (dock) document.documentElement.style.setProperty('--sidew', side + 'px');
+}
+function majTaille() {                                           // fait recalculer la taille du plateau aux jeux
+  try { window.dispatchEvent(new Event('resize')); }
+  catch (e) { const ev = document.createEvent('Event'); ev.initEvent('resize', true, false); window.dispatchEvent(ev); }
+}
+// Enregistré AVANT le module de jeu (importé plus tard) : la classe et --sidew sont donc à jour
+// quand le jeu mesure la colonne centrale.
+window.addEventListener('resize', layoutArena);
+layoutArena();
+
 /* ---------- panneaux modaux (partagés shell + jeu) ---------- */
 function closePanels() { document.querySelectorAll('.settings').forEach(p => p.classList.add('hidden')); scrim.classList.add('hidden'); }
 function togglePanel(p) { const show = p.classList.contains('hidden'); closePanels(); if (show) { p.classList.remove('hidden'); scrim.classList.remove('hidden'); } }
@@ -237,8 +266,14 @@ function pushChat(rec, silent) {
   while (chatLogEl.children.length > 40) chatLogEl.removeChild(chatLogEl.firstChild);
   chatLogEl.scrollTop = chatLogEl.scrollHeight;
   if (!silent && rec.id !== you.id) {
-    chatToast(rec.name || 'Joueur', rec.m);
-    if (chatDot && chatPanel && chatPanel.classList.contains('hidden')) chatDot.classList.remove('hidden');
+    // Chat docké en colonne : le message est déjà sous les yeux — ni bulle ni pastille « non lu ».
+    if (chatOuvert()) { if (chatDot) chatDot.classList.add('hidden'); }
+    else {
+      // Téléphone, joueur encore en vie : pas de bulle sur le plateau. La pastille « non lu »
+      // l'attend sur le bouton 💬, qui réapparaît dès l'élimination.
+      if (!enJeuTelephone()) chatToast(rec.name || 'Joueur', rec.m);
+      if (chatDot) chatDot.classList.remove('hidden');
+    }
   }
 }
 function sendChat() {
@@ -246,11 +281,53 @@ function sendChat() {
   const v = chatInput.value.trim().slice(0, 140);
   if (!v) return;
   send({ t: 'chat', m: v }); chatInput.value = '';
+  // En partie, le champ garde le focus et avale les flèches (stopPropagation) : on rend la main au jeu.
+  if (document.body.classList.contains('playing')) chatInput.blur();
 }
+/* Chat docké (colonne de gauche en plein écran) : il n'est plus une fenêtre modale qu'on ouvre et
+   ferme, mais une colonne qu'on replie. Deux états distincts, d'où ces deux aides. */
+const chatDocke = () => document.body.classList.contains('dock') && document.body.classList.contains('playing');
+const chatOuvert = () => chatDocke()
+  ? !document.body.classList.contains('nochat')
+  : !!(chatPanel && !chatPanel.classList.contains('hidden'));
+function replierChat(off) {
+  document.body.classList.toggle('nochat', off);
+  try { localStorage.setItem('pong-lan-nochat', off ? '1' : ''); } catch (e) {}
+  if (!off && chatDot) chatDot.classList.add('hidden');
+  majTaille();                                    // le plateau récupère (ou rend) la colonne
+}
+try { if (localStorage.getItem('pong-lan-nochat')) document.body.classList.add('nochat'); } catch (e) {}
+
+/* Téléphone en partie : tant qu'on joue, ni chat ni liste des joueurs (style.css). Une fois
+   ÉLIMINÉ — ou spectateur — les deux redeviennent accessibles à la demande. L'élimination est lue
+   sur les cartes que chaque jeu tient déjà à jour (`.pc.me`, `.pc.dead`) : aucun des 5 jeux n'est
+   modifié, et la nuance de Bomberman est respectée (en mode revanche, un mort qui joue depuis le bord
+   n'est PAS marqué éliminé : il garde sa manette). */
+const estTelephone = () => window.innerWidth <= 600;              // même seuil que le bloc mobile de style.css
+const enJeuTelephone = () => estTelephone() && document.body.classList.contains('playing') && !document.body.classList.contains('out');
+const hudFloat = document.getElementById('hudFloat');
+function majHorsJeu() {
+  const b = document.body;
+  if (!b.classList.contains('playing')) { b.classList.remove('out'); b.classList.remove('hudon'); return; }
+  const racine = document.querySelector('.game-root:not(.hidden)');
+  const moi = racine && racine.querySelector('.pc.me');
+  const out = !moi || moi.classList.contains('dead');
+  if (out === b.classList.contains('out')) return;
+  b.classList.toggle('out', out);
+  // De retour en jeu (nouvelle manche, résurrection en revanche) : on libère l'écran sur-le-champ.
+  if (!out && estTelephone()) { b.classList.remove('hudon'); if (chatPanel) chatPanel.classList.add('hidden'); }
+}
+if (hudFloat) hudFloat.onclick = () => {
+  const on = !document.body.classList.contains('hudon');
+  document.body.classList.toggle('hudon', on);
+  if (on && chatPanel && !chatDocke()) chatPanel.classList.add('hidden');   // les deux s'ouvrent au même endroit
+};
 // Le chat s'ouvre SANS voile modal : en pleine partie, il ne doit ni masquer le plateau
 // ni intercepter les clics. C'est la seule fenêtre du site dans ce cas.
 if (chatFloat) chatFloat.onclick = () => {
   if (!chatPanel) return;
+  if (chatDocke()) { replierChat(!document.body.classList.contains('nochat')); return; }
+  document.body.classList.remove('hudon');        // liste des joueurs et chat s'ouvrent au même endroit sur téléphone
   const ouvrir = chatPanel.classList.contains('hidden');
   closePanels();                                  // referme le reste (et le voile), puis…
   if (ouvrir) {
@@ -261,6 +338,9 @@ if (chatFloat) chatFloat.onclick = () => {
   }
 };
 if (chatSend) chatSend.onclick = sendChat;
+// La croix du panneau : en colonne elle replie la colonne — `closePanels()` n'y ferait rien de visible.
+const chatClose = chatPanel && chatPanel.querySelector('.sclose');
+if (chatClose) chatClose.onclick = () => { if (chatDocke()) replierChat(true); else closePanels(); };
 // stopPropagation : sans ça, Espace/flèches tapés dans le champ atteindraient les raccourcis du jeu (lancer, se déplacer…)
 if (chatInput) chatInput.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); sendChat(); } };
 
@@ -362,6 +442,7 @@ function setGameSkin(id) {
 
 /* ---------- chargement dynamique du module de jeu actif ---------- */
 async function loadModule(id) {
+  sideJeu = SIDE_JEU[id] || 0; layoutArena();     // largeur des colonnes : elle dépend du jeu affiché
   if (modId === id || loadingId === id) return;
   loadingId = id; setGameSkin(id);
   xfadeShow(GAME_TITLE[id] || '', false);          // fondu plein écran + balayage aux couleurs du nouveau jeu
@@ -562,6 +643,7 @@ function connect() {
       }
       if (modId !== g) loadModule(g);
       if (modReady && modId === g) { if (mod.onState) mod.onState(s); } else pfor(g).state = s;
+      majHorsJeu();                                           // après onState : le jeu vient de mettre ses cartes à jour
     }
   };
   ws.onclose = () => { setStatus('Déconnecté — reconnexion…', 'off'); setTimeout(connect, 1000); };
