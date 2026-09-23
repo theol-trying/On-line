@@ -437,11 +437,11 @@ function renderMenu() {
 }
 
 /* ---------- identité visuelle de la page selon le jeu actif ---------- */
-const GAME_SUB = { pong: 'Arcade néon · duel de raquettes', tron: 'Cyber-grid · light cycles', tank: 'Combat blindé · zone désertique', snake: 'Jardin · serpents gourmands', bomb: 'Labyrinthe explosif · cartoon' };
-const GAME_TITLE = { pong: 'PONG', tron: 'TRON', tank: 'TANKS', snake: 'SNAKE', bomb: 'BOMBERMAN' };
+const GAME_SUB = { pong: 'Arcade néon · duel de raquettes', tron: 'Cyber-grid · light cycles', tank: 'Combat blindé · zone désertique', snake: 'Jardin · serpents gourmands', bomb: 'Labyrinthe explosif · cartoon', sumo: 'Dohyō · pousse-les hors du cercle' };
+const GAME_TITLE = { pong: 'PONG', tron: 'TRON', tank: 'TANKS', snake: 'SNAKE', bomb: 'BOMBERMAN', sumo: 'SUMO' };
 function setGameSkin(id) {
   const b = document.body;
-  ['pong', 'tron', 'tank', 'bomb', 'snake'].forEach(g => b.classList.toggle('game-' + g, g === id));
+  ['pong', 'tron', 'tank', 'bomb', 'snake', 'sumo'].forEach(g => b.classList.toggle('game-' + g, g === id));
   const sub = document.getElementById('sub'); if (sub && GAME_SUB[id]) sub.textContent = GAME_SUB[id];
   const lg = document.querySelector('.logo'); if (lg && GAME_TITLE[id]) lg.textContent = GAME_TITLE[id];   // l'en-tête porte le titre du jeu actif
 }
@@ -508,6 +508,7 @@ const CELEB = {
   tank:  { n: 130, mode: 'burst', shape: 'spark',  glow: 0, cols: ['#e0a92e', '#fff1c4', '#d6b878', '#ff8a3d'] },              // feu d'artifice dans le désert
   snake: { n: 96,  mode: 'rise',  shape: 'petal',  glow: 0, cols: ['#8fe06a', '#e268b0', '#ffd36e', '#ffffff'] },              // envolée de papillons et de pétales
   bomb:  { n: 150, mode: 'fall',  shape: 'dot',    glow: 0, cols: ['#ff5a4e', '#ffd24a', '#4ad6ff', '#7bff7b', '#ff9be0'] },   // gros confettis cartoon
+  sumo:  { n: 110, mode: 'fall',  shape: 'petal',  glow: 0, cols: ['#f7b8c8', '#ffd9e2', '#ffffff', '#e0452f'] },              // pétales de sakura sur le dohyō
 };
 function fireConfetti(gid) {
   if (!confettiCv || a11y.reduceFx) return;                       // respecte « réduire les effets »

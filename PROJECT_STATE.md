@@ -3,7 +3,7 @@
 > Dossier : `C:\Users\theoi\Documents\PONG\pong-line\` (source unique de vérité).
 > **Plateforme multijeux** : un hub Node.js **autoritatif** sert plusieurs jeux sélectionnables ;
 > **une seule partie active à la fois** (jeu choisi dans un lobby commun).
-> **Jeux : Pong · Tron · Tanks · Bomberman · Snake.** **Zéro dépendance** (WebSocket implémenté à la main). Un appareil par joueur.
+> **Jeux : Pong · Tron · Tanks · Bomberman · Snake · Sumo.** **Zéro dépendance** (WebSocket implémenté à la main). Un appareil par joueur.
 > **En production** : GitHub `theol-trying/On-line` → **Render** (HTTPS/`wss://`) + **Upstash Redis** (classement + avatars).
 > Consignes projet permanentes : **zéro dépendance npm, zéro build, aucun fichier binaire** ; secrets via `process.env` uniquement.
 > L'assistant gère **git** (commit + push) depuis septembre 2026, et **Node est installé depuis le 21/09/2026** :
@@ -132,6 +132,48 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
 - Commandes : ↑↓←→ / WASD (pas de demi-tour), **Espace** lancer, **P/Échap** pause ; tactile : dpad. Pas de bonus/boost (pur classique).
 - Snapshot : `food[{x,y,t}]`, `rocks[]`, `variant`, `players[{head,path(corners),len,score,ghost,…}]`. Messages C→S : dir{d}, start, pause, abort, mode, variant, lbreset.
 - Leaderboard : games, wins, kills, K/D, **meilleur score** 🍎, meilleure survie.
+
+## Jeu : SUMO  (`sumo`, 2–10, tickHz 30)
+- **Dohyō vu de dessus**, 2 à 10 lutteurs (humains + bots), FFA ou équipes (⚔). On **pousse les autres hors du cercle** :
+  un lutteur dont le **centre** sort du cercle (distance au centre > rayon ACTUEL) est éliminé. Dernier lutteur (ou dernière
+  équipe) dans le cercle gagne la manche. Compte à rebours 3 s comme Tron. Modèle de code : Tron (structure) + Tanks (mouvement continu).
+- **Arène à l'échelle** (`public/games/sumo/shared.js` : `AR0=600`, `RING0=240`, `PR=22`) : `k = 1 + 0.1 × (N − 2)` →
+  côté `ar = round(AR0·k)`, rayon initial `ring0 = RING0·k`, centre `(ar/2, ar/2)`. Placement : répartis sur un cercle de
+  `0.55 × rayon`, face au centre.
+- **Mort subite** : le cercle rétrécit après **25 s**, plus vite après **90 s**, jusqu'à un plancher de **45 %** du rayon initial
+  **calculé pour le nombre de lutteurs encore en lice** (`ringFloor`) : il s'abaisse à chaque sortie (108 u en duel) et le
+  cordon repart (nouvel événement `shrink`). Avec un plancher fixe à 45 % du rayon de départ, un duel de bots issu d'une
+  mêlée à 10 ne finissait jamais (mesuré). Filet de sécurité : égalité à **3 min** (`TIME_CAP`).
+- **Physique** (serveur) : entrées tenues {up,down,left,right} → accélération `0.95` u/tick² (diagonales normalisées), vitesse max
+  `6.5`, frottement `v *= 0.86`/tick. Masse 1, rayon `PR`. Collisions disque-disque : séparation au prorata des masses,
+  impulsion élastique (restitution `0.9`) + **poussée minimale `2.2`** pour qu'un contact pousse toujours.
+- **Charge** 💨 (`dash`, Espace) : impulsion `+11` u/tick dans la direction tenue (sinon l'orientation), état « dashing » 9 ticks,
+  recharge 66 ticks (2,2 s) ; un choc reçu d'un lutteur en charge est **× 1.7**.
+  **Ancrage** ⚓ (`brace`, Maj/E) : 30 ticks de masse × 3 et accélération × 0.3, recharge 90 ticks — le contre de la charge.
+- **Crédit de sortie** : dernier toucheur (seat + tick) mémorisé ; s'il a touché l'éliminé dans les **90 derniers ticks**, il est
+  crédité (`kills++`, `outBy`), sauf coéquipier.
+- **Bonus au sol** (toutes les 5 s, 2 au plus, dans `0.7 × rayon`, ramassés au contact) : **lourd** (masse × 1.7, rayon × 1.25, 8 s),
+  **élan** (recharge de charge remise à zéro, impulsion × 1.4, 6 s), **onde de choc** (immédiate : repousse tout lutteur à < 130 u),
+  **pieds collés** (frottement 0.78, chocs subis × 0.5, 6 s).
+- **Bots** (🤖, IA Facile/Normale/Difficile via 🎯) : visent l'adversaire vivant le plus proche (jamais un coéquipier), distance
+  **diminuée de la moitié de son éloignement au centre** (sinon, en mêlée, tout le monde pousse vers l'intérieur et personne ne sort) ; reviennent vers
+  le centre au-delà de `0.7 × rayon` ; chargent si la cible est à < 130 u, alignée (cos > 0.9) **et plus proche du bord qu'eux** ;
+  s'ancrent si un adversaire charge vers eux près du bord (sauf Facile) ; Facile = accélération × 0.75 et hésitations.
+- **Snapshot** : `gs, count, round, winner, fx[], connected, botCount, maxBots, botDiff, mode, nteams, ar, ring` (rayon actuel),
+  `ring0, sd` (rétrécit), `pickups[{x,y,t}]`, `stats` (en `over`), `players` = **toujours les 10 sièges** `{seat,name,team,connected,
+  playing,alive,bot,x,y,vx,vy,a,r,dcd,dashing,brace,bcd,heavy,grip,boost,kills,place,elimTick,outBy}`.
+  Événements `fx` : hit · dash · brace · out · pickup · shock · shrink · salt (jet de sel au compte à rebours).
+- Commandes : ↑↓←→ / WASD (8 directions), **Espace** charge, **Maj/E** ancrage, **P/Échap** pause ; tactile : joystick en **mode 8**
+  (`CARTES.sumo` de `joystick.js` → `smUp/smDown/smLeft/smRight`) + 💨 + ⚓.
+- Messages C→S : input{up,down,left,right} (à chaque changement), dash, brace, start, pause, abort, mode, bots, botdiff, lbreset.
+- **Identité « Dohyō »** (tournoi traditionnel japonais) : bois laqué `#1a120e`, vermillon `#e0452f`, argile `#c9a36b`, paille
+  `#d9c27a`, washi `#f1e6d0`, encre `#1c1a17`, or `#e0b23c` ; police **Dela Gothic One** (graisse 400 seule → les titres du
+  skin sont forcés en 400, sinon faux gras). Page (`body.game-sumo`) : planches laquées + lueurs de lanternes qui vacillent
+  (opacité seule, coupée par « Réduire les effets »), coins à 6 px, bouton principal vermillon, cartes HUD à liseré vermillon
+  supérieur, états ON en **or** (un ON rouge se lirait comme une erreur), fond plein écran `body.playing.dock.game-sumo .stage`.
+  Canvas : plate-forme d'argile, cordon de paille segmenté au rayon actuel (pulse au rétrécissement), shikiri-sen, 4 pompons
+  du tsuriyane, lutteurs à mawashi aux couleurs/motif du siège (`seatPattern`), chonmage orienté ; sortie = envol en tournoyant
+  + « OUT ». Écran titre : « SUMO » devant un ensō. Musique in-sen (0,1,5,7,8), taiko, flûte. Victoire : **pétales de sakura** (`CELEB.sumo`).
 
 ---
 
@@ -712,6 +754,16 @@ d'interpolation. Elle est maintenant **prédite** (`client.js · predireMoi`), l
   avance à l'écran rattrapait des balles que le serveur jugeait ratées.
 - Mesuré avec 80 ms de latence simulée : la raquette réagit en **26 ms** (une image) au lieu de 135 ms ;
   déplacement identique au serveur (123 unités), **écart final 0** — aucun effet élastique.
+
+## Filet de sécurité du hub (23/09)
+`game.tick()` et `game.onMessage()` n'étaient protégés nulle part : une exception dans n'importe lequel
+des 6 jeux tuait le processus Node, donc le site pour tout le monde (c'est la panne du 21/09,
+`CELL is not defined`). `hub.js · incident()` journalise l'erreur, **relance une partie neuve du même
+jeu**, y fait rejoindre tout le monde et prévient les joueurs (note « Incident de jeu »). On perd la
+manche en cours, plus le site. Journal et note limités à une fois par 5 s (un jeu qui planterait à
+chaque tick se relancerait en boucle sans tomber). Création de partie comprise dans le filet.
+Test permanent : `SMOKE_FAULT=1` (posé par `npm test` seulement) fait lever une erreur au message
+`__panne` ; le test vérifie que le serveur survit, relance la partie et prévient.
 
 ## Protections du serveur (23/09) — le site est public, l'instance unique
 - **Plafond de trame** (`ws.js · MAX_FRAME` = 64 Ko, le plus gros message légitime — l'avatar — fait

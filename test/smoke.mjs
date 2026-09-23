@@ -3,7 +3,7 @@
 //    node test/smoke.mjs          (ou : npm test)
 //
 // Démarre le serveur sur un port dédié, ouvre de VRAIS clients WebSocket, joue une manche
-// dans chacun des 5 jeux et vérifie que rien ne casse. Sort en code 1 au moindre échec.
+// dans chacun des 6 jeux et vérifie que rien ne casse. Sort en code 1 au moindre échec.
 //
 // Pourquoi ce fichier existe : `node --check` ne voit que la syntaxe. Les deux pannes de
 // production du 21/09/2026 étaient invisibles pour lui —
@@ -30,7 +30,7 @@ const ok = (nom, cond, detail) => {
 /* ---------- serveur ---------- */
 let srv = null, srvSorti = null, srvLog = '';
 async function demarrerServeur() {
-  srv = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT) } });
+  srv = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT), SMOKE_FAULT: '1' } });
   srv.stdout.on('data', d => { srvLog += d; });
   srv.stderr.on('data', d => { srvLog += d; });
   srv.on('exit', code => { srvSorti = code; });
@@ -93,6 +93,10 @@ async function jouer(id, participants, attentes = {}) {
   const boucle = setInterval(() => {
     if (id === 'pong') c.jeu({ t: 'input', up: Math.random() < 0.5, dn: Math.random() < 0.5 });
     else if (id === 'tron' || id === 'snake') c.jeu({ t: 'dir', d: ['up', 'down', 'left', 'right'][(Math.random() * 4) | 0] });
+    else if (id === 'sumo') {                          // état tenu des 4 directions + une charge de temps en temps
+      c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });
+      if (Math.random() < 0.15) c.jeu({ t: 'dash' });
+    }
     else c.jeu({ t: 'input', left: Math.random() < 0.4, right: Math.random() < 0.4, fwd: true, fire: Math.random() < 0.3 });
   }, 150);
   await wait(3000);
@@ -175,6 +179,16 @@ async function protections() {
   ok('les autres joueurs restent connectés', legit.ws.readyState === 1);
   ok('le serveur a encaissé', serveurVivant());
   legit.ws.close(); await wait(300);
+
+  // 5. filet du hub : une exception dans le code d'un jeu ne doit plus tuer le processus (panne du 21/09).
+  //    SMOKE_FAULT fait lever une erreur au message __panne ; le hub doit relancer la partie et prévenir.
+  const v = client('Victime'); await v.ouvert; await wait(300);
+  let notes = 0; v.ws.addEventListener('message', e => { if (/"t":"note"/.test(e.data)) notes++; });
+  v.jeu({ t: '__panne' }); await wait(500);
+  const avant = v.msgs; await wait(600);
+  ok('une exception de jeu ne tue plus le serveur', serveurVivant());
+  ok('la partie est relancée et les joueurs prévenus', notes >= 1 && v.msgs > avant, notes + ' note(s), ' + (v.msgs - avant) + ' état(s) après');
+  v.ws.close(); await wait(300);
 }
 
 /* ---------- déroulé ---------- */
@@ -192,12 +206,13 @@ cadences.tron = await jouer('tron', 10, { arene: { lire: s => 'grille ' + s.gw, 
 cadences.snake = await jouer('snake', 10, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 58' } });
 cadences.tank = await jouer('tank', 8, { arene: { lire: s => 'grille ' + s.ag, valeur: 'grille 19' } });
 cadences.bomb = await jouer('bomb', 8, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 17' } });
+cadences.sumo = await jouer('sumo', 10, { arene: { lire: s => 'arène ' + s.ar, valeur: 'arène 1080' } });   // k = 1.8 → 600 × 1.8
 await arriveeEnCours();
 await protections();
 
 console.log('\n▶ état final du serveur');
 ok('le serveur a survécu à tous les jeux', serveurVivant(), srvSorti !== null ? 'sorti avec le code ' + srvSorti : '');
-const traces = srvLog.split('\n').filter(l => /Error|error|ReferenceError|TypeError/.test(l));
+const traces = srvLog.split('\n').filter(l => /Error|error|ReferenceError|TypeError/.test(l) && !/panne simulée/.test(l));   // la panne simulée (point 5 des protections) est attendue
 ok('aucune erreur dans le journal du serveur', traces.length === 0, traces.slice(0, 2).join(' | '));
 
 if (srv) srv.kill();

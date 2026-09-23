@@ -1,10 +1,10 @@
-// Joystick tactile flottant — partagé par les 5 jeux, sur téléphone (≤ 600 px).
+// Joystick tactile flottant — partagé par les 6 jeux, sur téléphone (≤ 600 px).
 //
 // Choix utilisateur du 23/09, après essai au pouce sur /manette.html : joystick à 82 px (Pixel 7 Pro).
 // Le stick naît SOUS LE POUCE, où qu'il se pose dans sa zone : plus rien à viser.
 //
 // Il ne réimplémente aucune commande : il ACTIONNE les boutons tactiles existants de chaque jeu
-// (événements pointerdown/pointerup synthétiques, comme le relais vieil-iOS d'app.js). Les 5 jeux
+// (événements pointerdown/pointerup synthétiques, comme le relais vieil-iOS d'app.js). Les 6 jeux
 // gardent donc leur logique d'entrée intacte, et la croix reste disponible en réglage.
 //
 // Compatibilité vieil iOS : événements tactiles bruts (Pointer Events n'existe qu'à partir d'iOS 13),
@@ -21,6 +21,9 @@ const CARTES = {
   snake: { mode: 4, haut: 'snUp', bas: 'snDown', gauche: 'snLeft', droite: 'snRight' },
   bomb:  { mode: 4, haut: 'bmUp', bas: 'bmDown', gauche: 'bmLeft', droite: 'bmRight' },
   tank:  { mode: 8, haut: 'tkFwd', bas: 'tkBack', gauche: 'tkLeft', droite: 'tkRight' },
+  // Sumo : mouvement continu en 8 directions (diagonales normalisées côté serveur) — un joystick 4 voies
+  // interdirait de contourner un adversaire en biais, geste de base pour le déborder vers le bord.
+  sumo:  { mode: 8, haut: 'smUp', bas: 'smDown', gauche: 'smLeft', droite: 'smRight' },
 };
 
 let jeu = null, projeteur = null;                      // projeteur(dx, dy) → id | null (Pong : dépend du bord)

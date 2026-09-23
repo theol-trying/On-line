@@ -7,8 +7,9 @@ import tron from './games/tron/server.js';
 import tank from './games/tank/server.js';
 import bomb from './games/bomb/server.js';
 import snake from './games/snake/server.js';
+import sumo from './games/sumo/server.js';
 
-const GAMES = { [pong.meta.id]: pong, [tron.meta.id]: tron, [tank.meta.id]: tank, [bomb.meta.id]: bomb, [snake.meta.id]: snake };   // registre : ajouter un jeu = l'importer et l'ajouter ici
+const GAMES = { [pong.meta.id]: pong, [tron.meta.id]: tron, [tank.meta.id]: tank, [bomb.meta.id]: bomb, [snake.meta.id]: snake, [sumo.meta.id]: sumo };   // registre : ajouter un jeu = l'importer et l'ajouter ici
 const META = Object.values(GAMES).map(g => g.meta);
 const DEFAULT_ID = pong.meta.id;
 
@@ -138,10 +139,31 @@ function pick(id) {
   setLoop(); broadcastRoom();
 }
 
+// FILET DE SÉCURITÉ. Une exception dans le code d'un jeu (tick ou message) remontait jusqu'à la boucle
+// et tuait le processus Node — donc le site entier, pour tout le monde. C'est la panne du 21/09
+// (`CELL is not defined` dans Bomberman). On la journalise et on repart d'une partie NEUVE du même
+// jeu : la manche en cours est perdue, pas le site. Journal et note limités à une fois par 5 s, au cas
+// où un jeu planterait à chaque tick (il ne ferait alors que se relancer en boucle, sans tomber).
+let incidentT = 0;
+function incident(ou, e) {
+  const now = Date.now();
+  if (now - incidentT > 5000) {
+    console.error('[hub] ' + activeId + ' · ' + ou + ' a levé une exception : partie relancée\n' + ((e && e.stack) || e));
+    for (const m of members) room.send(m, { t: 'note', m: '⚠ Incident de jeu : la manche a été relancée' });
+  }
+  incidentT = now;
+  try { if (game && game.dispose) game.dispose(); } catch (e2) {}
+  game = null;
+  try { ensureGame(); for (const m of members) joinGame(m); }
+  catch (e3) { console.error('[hub] relance impossible : ' + ((e3 && e3.stack) || e3)); game = null; }
+  fullNext = true; pendingFx = []; prevPlayers = null;
+  broadcastRoom();
+}
+
 function step() {
   if (members.length === 0) return;                 // personne connecté : rien à simuler/diffuser
-  ensureGame();
-  const snap = game.tick();
+  let snap;
+  try { ensureGame(); snap = game.tick(); } catch (e) { incident('tick', e); return; }   // création comprise
   const idleNow = game.isIdle();
   if (wasIdle && !idleNow) { let ch = false; for (const m of members) if (m.ready) { m.ready = false; ch = true; } if (ch) broadcastRoom(); } // manche lancée : on réarme les « Prêt »
   if (tour && !wasIdle && idleNow && snap && snap.gs === 'over') {                 // manche de tournoi terminée : points selon le classement (bots exclus)
@@ -272,7 +294,11 @@ function wire(member) {                          // (re)branche les handlers d'u
       if (m.m && PLAYER_ONLY.has(m.m.t) && member.role === 'spectator') { room.send(member, { t: 'denied', why: 'spec' }); return; } // lancer/pause/abandon : joueurs seulement
       if (m.m && m.m.t === 'start' && tour && tour.wait > 0) return;                        // transition de tournoi : pas de relance de l'ancien jeu
       if (m.m && m.m.t === 'start' && game.isIdle() && !allReady()) { room.send(member, { t: 'notready' }); return; } // gate « Prêt » : démarrage seulement si tous les joueurs sont prêts
-      game.onMessage(member, m.m);
+      try {
+        // Panne SIMULÉE, pour le test de fumée seulement (variable absente en production) : vérifie le filet.
+        if (process.env.SMOKE_FAULT && m.m && m.m.t === '__panne') throw new Error('panne simulée (test de fumée)');
+        game.onMessage(member, m.m);
+      } catch (e) { incident('message « ' + (m.m && m.m.t) + ' »', e); }
     } else if (m.t === 'avatar') {
       const a = (m.a === null || m.a === undefined || m.a === '') ? '' : m.a;
       if (a !== '' && !AV_OK(a)) return;            // format refusé : on ignore silencieusement
