@@ -11,6 +11,12 @@ import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux 5 jeux (mode plein écran compris)
+// couche partagée (par-dessus la refonte « Confiserie ») : avatar sur le visage du bombeur, lueurs des
+// flammes / mèches / téléporteurs sur le glaçage, crépuscule pendant la mort subite, courbe de fin de manche
+import { dessinerAvatar } from '../../avatar-sprite.js';
+import { lumiere, creerLumieres } from '../../lumiere.js';
+import { crepuscule } from '../../crepuscule.js';
+import { creerJournal, blocFin } from '../../finpartie.js';
 
 // musique : cartoon enjoué — basse bondissante, mélodie espiègle, célesta sucré, woodblock + caisse claire ;
 // climax (mort subite) = motif chromatique + grosse caisse + tempo
@@ -195,7 +201,16 @@ export default (function () {
   const cpx = c => (c + 0.5) * CELL;
   function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; FX = A.reduceFx ? 0 : 1; sprKey = ''; bgKey = ''; terrainKey = ''; seatCache = {}; overlayG = null; }
   function addP(p) { if (parts.length >= MAXP) parts.splice(0, parts.length - MAXP + 1); parts.push(p); }
-  function clearFx() { parts.length = 0; rings.length = 0; poofs.length = 0; wallAnims.length = 0; dropAnims.length = 0; scorch.length = 0; bombEnt.clear(); blastBorn.clear(); blastSet = new Set(); for (const k in anim) delete anim[k]; lastDrop = { i: -1, t: 0 }; }
+  function clearFx() { parts.length = 0; rings.length = 0; poofs.length = 0; wallAnims.length = 0; dropAnims.length = 0; scorch.length = 0; bombEnt.clear(); blastBorn.clear(); blastSet = new Set(); for (const k in anim) delete anim[k]; lastDrop = { i: -1, t: 0 }; flashes.vider(); dusk = 0; playMs = 0; }
+  // ── éclairage dynamique : flashs d'explosion éphémères (plafonnés) + lueurs continues recalculées à chaque image
+  const flashes = creerLumieres(18);
+  let dusk = 0, playMs = 0;                          // crépuscule affiché (lissé) et temps de jeu vu par ce client
+  let PXU = 1;                                       // pixels écran par unité d'arène (netteté des avatars)
+  const nomAvatar = p => (p && !p.bot && p.name) ? p.name : null;   // les bots n'ont pas d'avatar
+  // ── journal de manche (écran de fin enrichi) : puissance = bombes + flammes (0 une fois éliminé)
+  const J = creerJournal();
+  let jKills = {}, jTot = {}, jLast = 0, jSd = false;
+  const nomSeat = s => { const p = snap && snap.players[s]; return p ? (p.name || ('P' + (s + 1))) : 'P' + (s + 1); };
 
   function resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
@@ -249,7 +264,36 @@ export default (function () {
     }).join('');
     const mvpLine = mvp ? `<div class="emeta">⭐ MVP : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.kills} élimination${mvp.kills > 1 ? 's' : ''}</div>` : '';
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : '#fff'}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} bombeur${m.stats.nParts > 1 ? 's' : ''}</div>${mvpLine}<div class="elist">${rows}</div><div class="ehint">Espace / clic pour rejouer</div>`;
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} bombeur${m.stats.nParts > 1 ? 's' : ''}</div>${mvpLine}<div class="elist">${rows}</div>${blocFin(J, { titre: 'Puissance 💣 + 🔥 au fil de la manche', couleur: colSeat, nom: nomSeat })}<div class="ehint">Espace / clic pour rejouer</div>`;
+  }
+  // Journal tenu à chaque état reçu (aucune donnée serveur en plus) : puissance par bombeur + faits marquants.
+  // Le serveur ne dit pas qui a tué qui : on le déduit de la hausse des éliminations (⚡) d'un état à l'autre.
+  function jVals(m) { const v = {}; m.players.forEach(p => { if (p.playing) v[p.seat] = p.alive ? (p.bombs | 0) + (p.power | 0) : 0; }); return v; }
+  function journal(m, now) {
+    if (m.gs === 'lobby' || m.gs === 'countdown') { if (J.actif()) J.fin(); return; }
+    if (m.gs === 'play' && !J.actif()) { J.debut(now); jKills = {}; jTot = {}; jLast = 0; jSd = false; }
+    if (!J.actif()) return;
+    if (m.sd) jSd = true;
+    let ev = false; const victims = [];
+    (m.fx || []).forEach(f => {
+      if (!f) return;
+      if (f.type === 'boom') { victims.push(f.seat); ev = true; }
+      else if (f.type === 'spawn') { ev = true; J.moment(now, f.seat, 'revient de la revanche', 6); }
+      else if (f.type === 'guard') J.moment(now, f.seat, 'encaisse une explosion grâce au bouclier', 2.5);
+    });
+    m.players.forEach(p => {
+      const k = p.kills | 0, k0 = jKills[p.seat]; jKills[p.seat] = k;
+      if (k0 == null || k <= k0) return;                 // première vue (arrivée en cours) ou remise à zéro : simple ligne de base
+      const d = k - k0, tot = (jTot[p.seat] || 0) + d; jTot[p.seat] = tot;
+      if (d >= 2) J.moment(now, p.seat, 'fait sauter ' + d + ' bombeurs d\'un coup', 5 + 2 * d);
+      else if (tot === 3) J.moment(now, p.seat, 'signe un triplé : 3 éliminations', 7);
+      else { const vs = victims.filter(s => s !== p.seat); J.moment(now, p.seat, vs.length === 1 ? 'fait sauter ' + nomSeat(vs[0]) : 'fait sauter un adversaire', 3); }
+    });
+    if (ev || now - jLast >= 1000 || m.gs === 'over') { jLast = now; J.echantillon(now, jVals(m), true); }
+    if (m.gs === 'over') {
+      if (jSd && m.stats && !m.stats.solo) m.players.forEach(p => { if (p.playing && p.alive) J.moment(now, p.seat, 'tient jusqu\'au bout de la mort subite', 4); });
+      J.fin();
+    }
   }
 
   // ───────────────────────── état réseau ─────────────────────────
@@ -292,6 +336,11 @@ export default (function () {
     const now = performance.now();
     const booms = trackBombs(m, now);
     booms.forEach(k => explodeFx(k % GW, (k / GW) | 0, booms.length));
+    if (!A.reduceFx) {                                // un flash par bombe (pas par case) ; une réaction en chaîne partage l'intensité
+      const fa = booms.length > 1 ? 0.95 / Math.sqrt(booms.length) : 0.95;
+      for (let i = 0; i < booms.length && i < 6; i++) flashes.ajouter(cpx(booms[i] % GW), cpx((booms[i] / GW) | 0), CELL * 3.2, '#ffc864', 560, fa);
+    }
+    journal(m, now);
     (m.fx || []).forEach(playFx);
     if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); confettiRain(); }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte musical 3·2·1
@@ -420,6 +469,7 @@ export default (function () {
       const from = anim[f.seat], x = cpx(f.x), y = cpx(f.y);
       if (from && Math.abs(from.x - x) + Math.abs(from.y - y) > CELL) { ring(from.x, from.y, CELL * 0.6, 3, 260, '197,139,255', 3); if (anim[f.seat]) { anim[f.seat].x = x; anim[f.seat].y = y; } }
       ring(x, y, 3, CELL * 0.75, 380, '197,139,255', 3);
+      flashes.ajouter(x, y, CELL * 2.2, '#b07cff', 420, 0.6);
       burst(x, y, 8, 2.2, '200,150,255', 'glow', 420, 6);
       return;
     }
@@ -428,6 +478,7 @@ export default (function () {
       psound('guard', f.x);
       if (A.reduceFx) return;
       ring(x, y, 14, 26, 300, '160,215,255', 3);
+      flashes.ajouter(x, y, CELL * 1.8, '#8fd0ff', 360, 0.5);
       burst(x, y, 10, 2.6, '150,210,255', 'glow', 360, 4);
       return;
     }
@@ -436,6 +487,7 @@ export default (function () {
       if (A.reduceFx) return;
       const x = cpx(f.x), y = cpx(f.y), col = colSeat(f.seat);
       ring(x, y, 4, CELL * 0.8, 420, rgbKey(col), 3);
+      flashes.ajouter(x, y, CELL * 2.4, col, 520, 0.55);
       bits(x, y, 12, [col, K.cream, K.lemon], 2.2, 800);
       burst(x, y, 6, 1.6, '255,246,200', 'glow', 420, 5);
       return;
@@ -459,7 +511,7 @@ export default (function () {
     if (f.type === 'boom') {                           // élimination : « pouf » cartoon
       const [x, y] = seatPos(f.seat, f.x, f.y);
       psound('pouf', f.x); music.sting('kill');
-      poofs.push({ x, y, seat: f.seat, born: now, an: anim[f.seat] ? { dir: anim[f.seat].dir, ph: 0, mv: false } : null }); if (poofs.length > 12) poofs.shift();
+      poofs.push({ x, y, seat: f.seat, name: snap ? nomAvatar(snap.players[f.seat]) : null, born: now, an: anim[f.seat] ? { dir: anim[f.seat].dir, ph: 0, mv: false } : null }); if (poofs.length > 12) poofs.shift();
       if (A.reduceFx) return;
       shake(f.seat === mySeat ? 9 : 5);
       const col = colSeat(f.seat);
@@ -755,7 +807,11 @@ export default (function () {
     if (pat) { ctx.fillStyle = pat; ctx.fill(); }
     ctx.strokeStyle = K.ink; ctx.lineWidth = 1.6; ctx.stroke();
     ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); oval(ctx, -3.6, hy - 5.2, 3.2, 1.6); ctx.fill();
-    if (dir !== 3) {
+    // avatar du joueur (lobby) à la place du visage, tourné comme la visière ; de dos, en écusson sur le casque.
+    // Le casque (couleur + motif du siège) reste visible tout autour : l'identification du siège ne change pas.
+    const avOk = !!o.name && dessinerAvatar(ctx, o.name, dir === 0 ? 2.6 : dir === 2 ? -2.6 : 0, dir === 3 ? hy - 0.6 : hy + 1.6, dir === 3 ? 10 : dir === 1 ? 12.6 : 11.6,
+      PXU * (o.scale || 1), A.contrast ? '#ffffff' : K.ink);
+    if (dir !== 3 && !avOk) {
       const f0 = dir === 0 ? 3.2 : dir === 2 ? -3.2 : 0, fw = dir === 1 ? 7.2 : 5.8, ey = hy + 1.4;
       ctx.fillStyle = o.skull ? '#e2f5cf' : '#fff1dc'; ctx.beginPath(); oval(ctx, f0, hy + 1.8, fw, 5.4); ctx.fill(); ctx.strokeStyle = K.ink; ctx.lineWidth = 1.1; ctx.stroke();
       const ex = f0 + (dir === 0 ? 0.8 : dir === 2 ? -0.8 : 0), sp = dir === 1 ? 2.7 : 2.1;
@@ -799,7 +855,7 @@ export default (function () {
     ctx.restore();
   }
   // revenant (mode revanche) : fantôme de guimauve à la couleur du siège, qui flotte sur la bordure
-  function drawRevenant(seat, x, y, me, now) {
+  function drawRevenant(seat, x, y, me, now, name) {
     const col = colSeat(seat), bob = FX ? Math.sin(now / 300 + seat) * 2 : 0, wv = FX ? Math.sin(now / 150 + seat) * 1.2 : 0;
     ctx.save(); ctx.translate(x, y + bob);
     ctx.fillStyle = 'rgba(16,8,28,0.25)'; ctx.beginPath(); oval(ctx, 0, 13 - bob, 8, 2.6); ctx.fill();
@@ -811,15 +867,17 @@ export default (function () {
     const pat = seatPattern(ctx, seat, { size: 8, ink: 'rgba(255,255,255,0.36)' }); if (pat) { ctx.fillStyle = pat; ctx.fill(); }
     ctx.strokeStyle = me ? '#fff' : K.ink; ctx.lineWidth = me ? 2 : 1.5; ctx.stroke();
     ctx.globalAlpha = 1;
-    ctx.fillStyle = K.ink; ctx.beginPath(); oval(ctx, -3.6, -3, 2, 2.8); oval(ctx, 3.6, -3, 2, 2.8); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-3.1, -4, 0.7, 0, TAU); ctx.arc(4.1, -4, 0.7, 0, TAU); ctx.fill();
-    ctx.fillStyle = K.ink; ctx.beginPath(); ctx.arc(0, 2.6, 1.4, 0, TAU); ctx.fill();
+    if (!(name && dessinerAvatar(ctx, name, 0, -2.2, 11, PXU, A.contrast ? '#ffffff' : K.ink))) {   // avatar à la place du visage du fantôme
+      ctx.fillStyle = K.ink; ctx.beginPath(); oval(ctx, -3.6, -3, 2, 2.8); oval(ctx, 3.6, -3, 2, 2.8); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-3.1, -4, 0.7, 0, TAU); ctx.arc(4.1, -4, 0.7, 0, TAU); ctx.fill();
+      ctx.fillStyle = K.ink; ctx.beginPath(); ctx.arc(0, 2.6, 1.4, 0, TAU); ctx.fill();
+    }
     ctx.restore();
   }
   function drawPoof(pf, now) {                        // élimination : le personnage gonfle et part en nuage
     const T = FX ? 700 : 400, t = (now - pf.born) / T;
     if (t >= 1) return false;
-    if (FX && t < 0.22) drawBomber(pf.seat, pf.x, pf.y, { an: pf.an, scale: 1 + t * 2.2, alpha: 1 - t / 0.22, shadow: false }, now);
+    if (FX && t < 0.22) drawBomber(pf.seat, pf.x, pf.y, { an: pf.an, name: pf.name, scale: 1 + t * 2.2, alpha: 1 - t / 0.22, shadow: false }, now);
     const e = FX ? 1 - (1 - t) * (1 - t) : 0.6, al = FX ? Math.min(1, (1 - t) * 1.6) : 1 - t, seed = pf.seat * 1.7;
     ctx.save(); ctx.globalAlpha = al;
     const circles = (grow) => { ctx.beginPath(); for (let i = 0; i < 7; i++) { const a = seed + i * TAU / 7, d = 3 + 11 * e, r = (4 + 8 * e) * (0.8 + 0.3 * hash2(i, pf.seat)) + grow; ctx.moveTo(pf.x + Math.cos(a) * d + r, pf.y + Math.sin(a) * d * 0.8); ctx.arc(pf.x + Math.cos(a) * d, pf.y + Math.sin(a) * d * 0.8, r, 0, TAU); } };
@@ -852,6 +910,39 @@ export default (function () {
     }
     for (let i = scorch.length - 1; i >= 0; i--) { const s = scorch[i], t = (now - s.born) / 2600; if (t >= 1) { scorch.splice(i, 1); continue; } ctx.globalAlpha = 0.4 * (1 - t); ctx.drawImage(spr.scorch, s.x - CELL * 0.6, s.y - CELL * 0.6, CELL * 1.2, CELL * 1.2); }   // traces de caramel brûlé
     ctx.globalAlpha = 1;
+  }
+  // Éclairage dynamique, posé sur le sol AVANT les pièces : lueur des téléporteurs, étincelle de chaque mèche,
+  // flammes regroupées par paquets de 3 × 3 cases (une lueur par foyer, jamais une par case), puis les flashs.
+  // Pas de dégradé créé ici (sprites pré-rendus de lumiere.js), tableaux réutilisés, nombre de lueurs plafonné.
+  // La nuit tombante (mort subite) les rend plus présentes ; contraste élevé : plus discrètes.
+  let fb = null, fbW = 0, fbH = 0;
+  function drawLights(now) {
+    if (!FX) return;
+    const k = (A.contrast ? 0.6 : 1) * (1 + 0.7 * dusk);
+    for (let i = 0; i < warpCells.length; i++) { const w = warpCells[i]; lumiere(ctx, cpx(w[0]), cpx(w[1]), CELL * 1.5, '#b07cff', (0.26 + 0.08 * Math.sin(now / 260 + w[0])) * k); }
+    const bombs = snap.bombs || [];
+    for (let i = 0; i < bombs.length && i < 20; i++) {
+      const b = bombs[i], x = cpx(b.x), y = cpx(b.y);
+      if (b.r) lumiere(ctx, x + 9.5, y - 19.5, CELL * 0.55, '#ff4040', ((now % 700) < 380 ? 0.3 : 0.08) * k);                       // LED du détonateur
+      else lumiere(ctx, x + 7.5, y - 15, CELL * (0.7 + 0.25 * (1 - b.f / BOMB_FUSE)), '#ffb04a', (0.26 + 0.07 * Math.sin(now / 45 + b.x * 7 + b.y) + (b.f <= 30 ? 0.12 : 0)) * k);
+    }
+    const B = snap.blasts || [];
+    if (B.length) {
+      const nx = Math.ceil(GW / 3), ny = Math.ceil(GH / 3);
+      if (!fb || fbW !== nx || fbH !== ny) { fb = new Float32Array(nx * ny * 4); fbW = nx; fbH = ny; }
+      fb.fill(0);
+      for (let i = 0; i < B.length; i++) {
+        const bl = B[i], j = (((bl.y / 3) | 0) * nx + ((bl.x / 3) | 0)) * 4, b0 = blastBorn.get(bl.y * GW + bl.x), age = b0 == null ? 200 : now - b0;
+        fb[j] += cpx(bl.x); fb[j + 1] += cpx(bl.y); if (fb[j + 2] === 0 || age < fb[j + 3]) fb[j + 3] = age; fb[j + 2]++;
+      }
+      const fl = 0.92 + 0.08 * Math.sin(now / 35);
+      for (let j = 0; j < fb.length; j += 4) {
+        const n = fb[j + 2]; if (!n) continue;
+        const fade = 1 - Math.max(0, Math.min(1, (fb[j + 3] - 160) / (BLAST_MS - 160)));
+        lumiere(ctx, fb[j] / n, fb[j + 1] / n, CELL * (1.4 + 0.28 * Math.min(6, n)), '#ff8a2a', 0.5 * fade * fl * k);
+      }
+    }
+    flashes.dessiner(ctx, now);
   }
   function drawRange(now) {                          // prévisualisation de portée des bombes
     (snap.bombs || []).forEach(b => {
@@ -974,10 +1065,10 @@ export default (function () {
           ctx.beginPath(); rr(ctx, ix * CELL + 3, iy * CELL + 3, CELL - 6, CELL - 6, 7); ctx.stroke(); ctx.setLineDash([]);
           ctx.beginPath(); ctx.moveTo(cpx(ix) - 5, cpx(iy)); ctx.lineTo(cpx(ix) + 5, cpx(iy)); ctx.moveTo(cpx(ix), cpx(iy) - 5); ctx.lineTo(cpx(ix), cpx(iy) + 5); ctx.stroke(); ctx.restore();   // viseur
         }
-        drawRevenant(p.seat, t.x, t.y, p.seat === mySeat, now);
+        drawRevenant(p.seat, t.x, t.y, p.seat === mySeat, now, nomAvatar(p));
         continue;
       }
-      drawBomber(p.seat, t.x, t.y, { an: e.an, me: p.seat === mySeat && !over, crown: over, ghost: p.ghost, invuln: p.invuln, shield: p.shield > 0, kick: p.kick, throw: p.throw, remote: p.remote, line: p.line, rev: p.rev, slow: p.slow, auto: p.auto, skull: p.skull, speed: p.speed | 0 }, now);
+      drawBomber(p.seat, t.x, t.y, { an: e.an, name: nomAvatar(p), me: p.seat === mySeat && !over, crown: over, ghost: p.ghost, invuln: p.invuln, shield: p.shield > 0, kick: p.kick, throw: p.throw, remote: p.remote, line: p.line, rev: p.rev, slow: p.slow, auto: p.auto, skull: p.skull, speed: p.speed | 0 }, now);
       if (FX && (p.skull || p.ghost) && Math.random() < 0.05) addP({ k: 'bub', x: t.x + (Math.random() - 0.5) * 16, y: t.y - 4, vx: 0, vy: -0.5, z: 0, vz: 0, born: now, life: 700, r: 1.5 + Math.random() * 1.5, col: p.skull ? '192,112,240' : '220,215,255', rot: 0, vr: 0 });
     }
     for (let i = poofs.length - 1; i >= 0; i--) if (!drawPoof(poofs[i], now)) poofs.splice(i, 1);
@@ -1132,8 +1223,21 @@ export default (function () {
 
   function draw() {
     if (destroyed) return;
-    const now = performance.now(), kdt = Math.min(3, Math.max(0.25, (now - (lastFrame || now - 16.7)) / 16.7)); lastFrame = now;
-    const sc = cv.width / ARENA;
+    const now = performance.now(), dtMs = Math.min(100, Math.max(0, now - (lastFrame || now - 16.7))), kdt = Math.min(3, Math.max(0.25, dtMs / 16.7)); lastFrame = now;
+    const sc = cv.width / ARENA; PXU = sc;
+    // Arène qui évolue : l'après-midi dore à l'approche de la mort subite (dès 45 s de jeu, elle tombe à 65 s),
+    // puis la nuit gagne à mesure que la spirale de blocs se referme. Lissé ; figé sur l'écran de fin.
+    if (snap) {
+      if (snap.gs === 'play') playMs += dtMs;
+      else if (snap.gs === 'lobby' || snap.gs === 'countdown') playMs = 0;
+      let tgt = dusk;
+      if (snap.gs === 'lobby' || snap.gs === 'countdown') tgt = 0;
+      else if (snap.gs === 'play' || snap.gs === 'paused') {
+        const pre = Math.max(0, Math.min(1, (playMs - 45000) / 20000));
+        tgt = snap.sd ? 0.34 + 0.52 * (spiral && lastDrop.i >= 0 ? Math.min(1, (lastDrop.i + 1) / spiral.length) : 0) : 0.3 * pre * pre * (3 - 2 * pre);
+      }
+      dusk += (tgt - dusk) * Math.min(1, dtMs / 900);
+    }
     let ox = 0, oy = 0;
     if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= Math.pow(0.86, kdt); } else shakeMag = 0;
     ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
@@ -1142,6 +1246,7 @@ export default (function () {
     if (snap && snap.grid) {
       ensureTerrain(); ctx.drawImage(terrainCv, 0, 0, ARENA, ARENA);   // décor statique pré-rendu (1 drawImage au lieu de ~340 tracés)
       drawAmbient(now);
+      drawLights(now);                                // lueurs sur le sol, sous les pièces
       drawWarps(now);
       drawRange(now);
       drawDropWarn(now);
@@ -1151,9 +1256,12 @@ export default (function () {
       drawBlasts(now, kdt);
       drawPlayers(now);
       drawDrops(now);
-      if (snap.sd && snap.gs === 'play') { ctx.strokeStyle = `rgba(255,60,60,${FX ? 0.3 + 0.25 * Math.sin(now / 160) : 0.45})`; ctx.lineWidth = 6; ctx.strokeRect(3, 3, ARENA - 6, ARENA - 6); }   // mort subite : cadre qui palpite
     }
     drawParticles(now, kdt);
+    // étalonnage jour → crépuscule par-dessus l'arène (sol, pièces, particules), sous les écrans ; plafonné
+    // loin du noir. « Réduire les effets » l'atténue sans soleil rasant (il reste une information : la manche s'achève).
+    if (snap && snap.grid && dusk > 0.01) crepuscule(ctx, -12, -12, ARENA + 24, ARENA + 24, Math.min(0.86, dusk), { soleil: FX ? 'haut' : false, force: A.contrast ? 0.55 : (FX ? 1 : 0.7) });
+    if (snap && snap.grid && snap.sd && snap.gs === 'play') { ctx.strokeStyle = `rgba(255,60,60,${FX ? 0.3 + 0.25 * Math.sin(now / 160) : 0.45})`; ctx.lineWidth = 6; ctx.strokeRect(3, 3, ARENA - 6, ARENA - 6); }   // mort subite : cadre qui palpite (au-dessus du crépuscule : reste vif)
     if (snap && snap.gs === 'play') drawGoBurst(now);
     if (snap && snap.gs === 'countdown') drawCountdown(now);
     if (snap && snap.gs === 'paused') drawPause(now);
@@ -1190,6 +1298,7 @@ export default (function () {
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('bmc'); ctx = cv.getContext('2d'); hud = $('bmHud'); endEl = $('bmEnd');
     seatCache = {}; sprKey = ''; overlayG = null;   // les dégradés en cache appartiennent au contexte : on repart propre
+    J.fin(); flashes.vider(); dusk = 0; playMs = 0; lastFrame = 0;   // singleton réutilisé : pas de journal / crépuscule hérités d'une visite précédente
     const wrap = cv.parentElement;   // conteneur .canvas-wrap : accueille les bandeaux bonus/malus
     initGameMsg(wrap && wrap.classList.contains('canvas-wrap') ? wrap : null);
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)

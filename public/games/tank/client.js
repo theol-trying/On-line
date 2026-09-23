@@ -8,6 +8,11 @@ import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
+// couche partagée : avatar sur la trappe de tourelle, lueurs au sol, crépuscule de fin de manche, écran de fin enrichi
+import { dessinerAvatar } from '../../avatar-sprite.js';
+import { lumiere, creerLumieres } from '../../lumiere.js';
+import { crepuscule } from '../../crepuscule.js';
+import { creerJournal, blocFin } from '../../finpartie.js';
 // arène dimensionnée au nombre de participants : la taille des BLOCS ne bouge pas (BLK), c'est le NOMBRE
 // de blocs qui augmente (15 / 17 / 19). Le serveur envoie `ag` (côté de la grille) et le client se recale.
 let G = G0, ARENA = ARENA0;
@@ -71,6 +76,11 @@ const TITLE_FONT = '"Black Ops One",Impact,sans-serif';   // police Google charg
 // fond animé : volutes de sable portées par le vent (identité désert) — coupées par reduceFx
 const AMB_WISP = Array.from({ length: 16 }, () => ({ y: Math.random(), v: 16 + Math.random() * 30, ph: Math.random() * 6.28, l: 8 + Math.random() * 16, a: 4 + Math.random() * 10 }));
 const INTERP_MS = 55;
+// Crépuscule : Tanks n'a pas de mort subite côté serveur -> la nuit tombe d'après le temps de manche écoulé
+// (mesuré côté client, pauses exclues) : rien avant 60 s, nuit « pleine » (plafonnée par crepuscule.js) à 150 s.
+const DUSK_T0 = 60, DUSK_LEN = 90;
+const STREAK_MS = 5000;                                   // deux chars détruits en moins de 5 s = doublé
+const SHELL_MATCH2 = 32 * 32;                             // appariement d'un obus d'un état à l'autre (6,5 px/tick)
 const KEYMAP = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowUp: 'fwd', KeyW: 'fwd', ArrowDown: 'back', KeyS: 'back' };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -110,6 +120,11 @@ export default (function () {
   const parts = [], rings = [], scorch = [], prints = [], wrecks = [];   // effets ; cratères (manche) ; empreintes de chenilles ; épaves qui brûlent
   const recoil = {}, tread = {};                                         // siège -> heure du dernier tir ; siège -> odomètre des chenilles
   let scorchVer = 0;
+  const LUM = creerLumieres(24);                        // flashs de lumière au sol (départs de tir, impacts, explosions, EMP)
+  const J = creerJournal();                             // journal de manche : vies par siège + moments marquants (écran de fin)
+  let roundMs = 0, lastPlayT = 0, livesKey = '', prevShells = null;
+  let msgKilled = {}, msgBarrels = [];                  // contexte du message réseau en cours (destructions déjà comptées, barils sautés)
+  const streak = {};                                    // siège -> heures de ses dernières destructions (doublé, triplé…)
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0;
   const music = createMusic(() => actx, () => A, MUSIC_THEME);
   const input = { left: false, right: false, fwd: false, back: false, fire: false };
@@ -187,7 +202,11 @@ export default (function () {
     const mvpLine = mvp ? `<div class="emeta">⭐ As du canon : <b style="color:${colSeat(mvp.seat)}">${esc(nameOf(mvp))}</b> — ${mvp.kills} char${mvp.kills > 1 ? 's' : ''} détruit${mvp.kills > 1 ? 's' : ''}, ${mvp.dmg | 0} touche${(mvp.dmg | 0) > 1 ? 's' : ''}</div>` : '';
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : K.sand}">${title}</div>
       <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} équipages · objectif ${m.winTarget} manche(s)</div>${mvpLine}
-      <div class="elist">${rows}</div><div class="ehint">Espace / clic pour rejouer</div>`;
+      <div class="elist">${rows}</div>${finBloc(m)}<div class="ehint">Espace / clic pour rejouer</div>`;
+  }
+  // courbe des vies de la manche + meilleure action (finpartie.js échappe les noms et filtre les couleurs)
+  function finBloc(m) {
+    return blocFin(J, { titre: 'Vies au fil de la manche', couleur: s => colSeat(s), nom: s => { const p = m.players[s]; return p ? nameOf(p) : 'P' + (s + 1); } });
   }
 
   // ───────────────────────── état réseau ─────────────────────────
@@ -195,6 +214,47 @@ export default (function () {
     parts.length = 0; rings.length = 0; scorch.length = 0; prints.length = 0; wrecks.length = 0; scorchVer++;
     for (const k in tread) delete tread[k];
     for (const k in recoil) delete recoil[k];
+    for (const k in streak) delete streak[k];
+    LUM.vider(); roundMs = 0; lastPlayT = 0;
+    J.fin(); prevShells = null;                         // nouvelle manche (ou retour après teardown) : le journal repart au prochain 'play'
+  }
+  // Obus ayant ricoché : le snapshot ne dit pas combien de rebonds un obus a faits. On apparie chaque obus
+  // à celui de l'état précédent (même tireur, le plus proche) : une composante de vitesse qui change de signe
+  // = rebond sur un mur. Les missiles guidés virent d'eux-mêmes : exclus.
+  function markBounces(shells) {
+    if (!shells) return;
+    for (const s of shells) {
+      let best = null, bd = SHELL_MATCH2;
+      if (prevShells) for (const q of prevShells) { if (q.o !== s.o) continue; const d = (q.x - s.x) * (q.x - s.x) + (q.y - s.y) * (q.y - s.y); if (d < bd) { bd = d; best = q; } }
+      s.__b = !!(best && (best.__b || (!s.h && ((best.vx || 0) * (s.vx || 0) < 0 || (best.vy || 0) * (s.vy || 0) < 0))));
+    }
+  }
+  function lastShellOf(o, x, y, r2) {                   // l'obus (de l'état précédent) qui vient de disparaître en (x, y)
+    let best = null, bd = r2 || SHELL_MATCH2;
+    if (prevShells) for (const q of prevShells) { if (o >= 0 && q.o !== o) continue; const d = (q.x - x) * (q.x - x) + (q.y - y) * (q.y - y); if (d < bd) { bd = d; best = q; } }
+    return best;
+  }
+  // Touche ennemie -> journal : destruction (plain, ricochet, baril, mine, à une vie), doublé/triplé, touche en ricochet.
+  function noteHit(f, victim) {
+    const by = f.by;
+    if (!snap || !victim || !(by >= 0) || by === f.seat) return;
+    const kp = snap.players[by]; if (!kp) return;
+    if (teamMode && kp.team === victim.team) return;     // tir allié : pas un exploit
+    const now = performance.now(), vn = nameOf(victim);
+    const atBarrel = msgBarrels.some(b => b.x === f.x && b.y === f.y);
+    const atMine = !atBarrel && !!(minesBefore && minesBefore.some(mm => mm.x === f.x && mm.y === f.y));
+    const sh = atBarrel || atMine ? null : lastShellOf(by, f.x, f.y), rico = !!(sh && sh.__b);
+    if (victim.alive) { if (rico) J.moment(now, by, 'a touché ' + vn + ' par ricochet', 4); return; }
+    if (msgKilled[f.seat]) return; msgKilled[f.seat] = 1;
+    let txt = 'a détruit ' + vn, w = 3;
+    if (rico) { txt = 'a détruit ' + vn + ' par ricochet'; w = 6; }
+    else if (atBarrel) { txt = 'a fait sauter ' + vn + ' avec un baril'; w = 5; }
+    else if (atMine) { txt = 'a piégé ' + vn + ' avec une mine'; w = 5; }
+    if (kp.alive && kp.lives === 1) { txt += ', à une seule vie'; w += 1; }
+    J.moment(now, by, txt, w);
+    const st = streak[by] || (streak[by] = []);
+    st.push(now); while (st.length && now - st[0] > STREAK_MS) st.shift();
+    if (st.length >= 2) J.moment(now, by, st.length === 2 ? 'a signé un doublé' : st.length === 3 ? 'a signé un triplé' : 'a détruit ' + st.length + ' chars en quelques secondes', 5 + st.length * 3);
   }
   function onMessage(m) { if (m && m.t === 'welcome') mySeat = m.seat; }
   function onLb(d) { board = (d && d.board) || []; renderLB(); }
@@ -202,6 +262,8 @@ export default (function () {
     if (m.ag && m.ag !== G) { G = m.ag; ARENA = G * BLK; }   // grille redimensionnée par le serveur : tout le rendu lit G / ARENA
     gridBefore = snap ? snap.grid : null;                    // grille AVANT les murs cassés de ce message : bois ou métal ?
     minesBefore = snap ? snap.mines : null;                  // mines AVANT : une explosion à leur place = mine (souffle de terre)
+    prevShells = snap ? snap.shells : null;                  // obus AVANT : ricochets, obus qui vient de frapper
+    markBounces(m.shells);
     if (m.grid === undefined && snap) m.grid = snap.grid;    // delta réseau : grille absente = inchangée
     const mk = (m.mud || []).join(',');
     if (mk !== mudKey) { mudKey = mk; mudSet = new Set(m.mud || []); }
@@ -213,7 +275,26 @@ export default (function () {
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     wallSnd = 0;
+    const tNow = performance.now();
+    // temps de manche écoulé (pauses exclues) : pilote le crépuscule
+    if (m.gs === 'countdown' || m.gs === 'lobby') { roundMs = 0; lastPlayT = 0; }
+    else if (m.gs === 'play') { if (lastPlayT) roundMs += Math.min(250, tNow - lastPlayT); lastPlayT = tNow; }
+    else lastPlayT = 0;
+    if (m.gs === 'play' && !J.actif()) { J.debut(tNow); livesKey = ''; }   // début de manche (ou arrivée en cours de manche)
+    msgKilled = {}; msgBarrels = [];
     (m.fx || []).forEach(playFx);
+    if (msgBarrels.length >= 2) {                            // chaîne de barils : attribuée au tireur de l'obus qui l'a déclenchée
+      const b0 = msgBarrels[0], sh = lastShellOf(-1, b0.x, b0.y, 60 * 60);
+      if (sh && m.players[sh.o]) J.moment(tNow, sh.o, 'a fait sauter ' + msgBarrels.length + ' barils en chaîne', 3 + msgBarrels.length);
+    }
+    if (J.actif()) {                                         // courbe : vies de chaque équipage (0 = détruit), à chaque changement
+      const v = {}; let key = '';
+      for (const p of m.players) if (p.playing) { v[p.seat] = p.alive ? (p.lives | 0) : 0; key += p.seat + ':' + v[p.seat] + ','; }
+      if (m.gs === 'play' || m.gs === 'over') J.echantillon(tNow, v, key !== livesKey || m.gs === 'over');
+      livesKey = key;
+      if (m.gs === 'over' && m.winner >= 0) for (const p of m.players) if (p.playing && p.alive && p.team === m.winner && p.lives === 1) J.moment(tNow, p.seat, teamMode ? 'a tenu jusqu\'au bout avec une seule vie' : 'a gagné la manche avec une seule vie', 6);
+      if (m.gs !== 'play' && m.gs !== 'paused') J.fin();
+    }
     const me = mySeat >= 0 ? m.players[mySeat] : null;
     if (me && me.playing && me.alive && m.gs === 'play' && me.lives === 1 && prevMyLives > 1) music.sting('alert');   // dernière vie : alerte
     prevMyLives = me && me.playing && me.alive ? me.lives : -1;
@@ -345,12 +426,15 @@ export default (function () {
       const a = tp.angle || 0, mx = f.x + Math.cos(a) * TANK_R * 2, my = f.y + Math.sin(a) * TANK_R * 2;
       smokeAt(mx, my, 3, '150,140,120', 3, 700, 0.7, a);
       sparksAt(mx, my, 3, 3, '255,220,150', a, 0.5);
+      LUM.ajouter(mx, my, 60, '#ffc877', 170, 0.6);   // départ de tir : le sable s'éclaire devant la bouche
       return;
     }
     if (t === 'hit') {
       psound('hit', f.x);
       if (f.seat === mySeat) shakeMag = Math.max(shakeMag, 5);
+      noteHit(f, tp);                                // journal de fin : tenu même en « réduire les effets »
       if (!fx) return;
+      if (!hid) LUM.ajouter(f.x, f.y, 44, '#ffd9a0', 220, 0.5);   // camouflé : aucune lueur à sa position
       sparksAt(f.x, f.y, hid ? 4 : 10, 4, '255,226,160'); flashAt(f.x, f.y, 12, 90);
       if (!hid) { debrisAt(f.x, f.y, 4, 2.4, METAL, 2.4, 1.6); smokeAt(f.x, f.y, 2, '90,86,80', 3, 600, 0.4); }
       return;
@@ -360,6 +444,7 @@ export default (function () {
       if (f.seat === mySeat) msgPerso(PU.shield.i, 'Bouclier : tir encaissé', { color: PU.shield.c });   // explique ce que le ⛉ vient d'absorber
       if (!fx || hid) return;
       ringAt(f.x, f.y, TANK_R, TANK_R + 20, 360, '127,209,255', 3); sparksAt(f.x, f.y, 8, 3, '180,235,255');
+      LUM.ajouter(f.x, f.y, 46, '#7fd1ff', 300, 0.45);
       return;
     }
     if (t === 'wall') {                              // mur cassé : cratère persistant + éclats (planches ou tôles)
@@ -368,7 +453,7 @@ export default (function () {
       addScorch(cx0, cy0, BLK * 0.55, metal ? 'metal' : 'wall');
       if (wallSnd < 2) { wallSnd++; psound(metal ? 'metal' : 'wood', cx0); }   // une chaîne de barils casse 5 murs d'un coup : 2 sons suffisent
       if (!fx) return;
-      if (metal) { sparksAt(cx0, cy0, 12, 4.5, '255,210,140'); debrisAt(cx0, cy0, 8, 3, METAL, 3.5, 2); flashAt(cx0, cy0, 22, 120); }
+      if (metal) { sparksAt(cx0, cy0, 12, 4.5, '255,210,140'); debrisAt(cx0, cy0, 8, 3, METAL, 3.5, 2); flashAt(cx0, cy0, 22, 120); LUM.ajouter(cx0, cy0, 52, '#ffd08a', 220, 0.45); }
       else { debrisAt(cx0, cy0, 10, 2.8, WOOD, 5, 1.6); dustAt(cx0, cy0, 8, 1.4, '170,140,96', 5); }
       smokeAt(cx0, cy0, 3, '120,108,90', 5, 900, 0.5);
       return;
@@ -378,6 +463,7 @@ export default (function () {
       if (!fx) return;
       const d = PU[f.kind], rgb = d && d.c ? rgbOf(d.c) : '255,255,255';
       ringAt(f.x, f.y, 8, 30, 400, rgb, 3); embersAt(f.x, f.y, 8, 1.6, rgb);
+      if (!hid) LUM.ajouter(f.x, f.y, f.kind === 'emp' ? EMP_R : 42, d && d.c ? d.c : '#ffffff', f.kind === 'emp' ? 650 : 380, f.kind === 'emp' ? 0.5 : 0.35);   // décharge EMP : tout le rayon s'illumine
       if (f.kind === 'emp') { ringAt(f.x, f.y, 12, EMP_R, 560, '159,230,255', 5); ringAt(f.x, f.y, 8, EMP_R * 0.9, 560, '230,250,255', 2, 80); }   // portée réelle de l'EMP
       else if (f.kind === 'radar') ringAt(f.x, f.y, 10, BLK * 3.2, 700, '127,240,189', 2);
       return;
@@ -388,12 +474,15 @@ export default (function () {
       if (f.seat === mySeat) msgPerso(PU.emp.i, 'Étourdi : ni tir ni marche', { bad: true });
       if (!fx || hid) return;
       ringAt(f.x, f.y, 4, TANK_R + 16, 300, '159,230,255', 2.5); sparksAt(f.x, f.y, 8, 3, '190,240,255');
+      LUM.ajouter(f.x, f.y, 40, '#bff3ff', 300, 0.45);
       return;
     }
     if (t === 'barrel') {                            // baril : boule de feu orange, fumée noire huileuse, flammes au sol
       psound('barrel', f.x); addScorch(f.x, f.y, 30, 'barrel');
+      msgBarrels.push(f);                            // journal : chaîne de barils, destruction « avec un baril »
       if (!fx) return;
       shakeMag = Math.max(shakeMag, 9); explosion(f.x, f.y, 1.25, null, true); wreckAt(f.x, f.y, 3500);
+      LUM.ajouter(f.x, f.y, 170, '#ff8a3a', 1000, 0.9); LUM.ajouter(f.x, f.y, 70, '#fff0d0', 200, 0.8);
       return;
     }
     if (t === 'boom') {
@@ -403,6 +492,8 @@ export default (function () {
       if (!fx) return;
       shakeMag = Math.max(shakeMag, isMine ? 6 : f.seat === mySeat ? (f.small ? 7 : 12) : (f.small ? 3 : 7));
       explosion(f.x, f.y, f.small ? 0.7 : 1, colSeat(f.seat), false);
+      LUM.ajouter(f.x, f.y, isMine ? 90 : f.small ? 85 : 135, isMine ? '#ff7a5a' : '#ff9a48', f.small ? 550 : 850, 0.8);   // l'explosion embrase le sable alentour
+      LUM.ajouter(f.x, f.y, f.small ? 36 : 56, '#fff0d0', 160, 0.7);
       if (isMine) { dustAt(f.x, f.y, 14, 3, '150,120,80', 6); ringAt(f.x, f.y, 4, MINE_R, 360, '255,120,90', 3); }   // mine : geyser de sable
       else if (!f.small) wreckAt(f.x, f.y, 5000);
     }
@@ -1041,6 +1132,28 @@ export default (function () {
     }
     ctx.restore();
   }
+  // crépuscule : 0 avant 60 s de manche, 1 à 150 s ; figé en pause et sur l'écran de fin
+  function duskT(now) {
+    if (!snap || snap.gs === 'lobby' || snap.gs === 'countdown') return 0;
+    let ms = roundMs; if (snap.gs === 'play' && lastPlayT) ms += Math.min(250, now - lastPlayT);
+    const t = (ms / 1000 - DUSK_T0) / DUSK_LEN;
+    return t <= 0 ? 0 : t > 1 ? 1 : t;
+  }
+  // Éclairage dynamique (lumiere.js : sprites additifs, zéro dégradé par image). Sous les pièces.
+  // CAMOUFLAGE : un char invisible sur cet écran n'émet rien (ni phares ni lueur) ; ses obus, si.
+  function drawGroundLights(now, tv, dusk) {
+    for (const s of (snap.shells || [])) lumiere(ctx, s.x, s.y, s.h ? 40 : 30, s.h ? '#ff8a50' : (s.p ? '#ff9be0' : colSeat(s.o)), 0.2 + 0.14 * dusk);   // traçantes
+    for (const pk of (snap.pickups || [])) lumiere(ctx, pk.x, pk.y, 30, (PU[pk.t] || { c: '#ffffff' }).c, 0.1 + 0.12 * dusk);
+    for (const mn of (snap.mines || [])) if (mn.armed && Math.sin(now / 120) > 0) lumiere(ctx, mn.x, mn.y, 24, '#ff4a3a', 0.22 + 0.12 * dusk);   // voyant rouge qui clignote
+    if (dusk > 0.05) {                               // à la tombée du jour, les chars allument leurs phares
+      for (const p of snap.players) {
+        if (!p.playing || !p.alive || hiddenFor(p)) continue;
+        const t = (tv && tv[p.seat]) || p, ca = Math.cos(t.angle || 0), sa = Math.sin(t.angle || 0);
+        lumiere(ctx, t.x + ca * TANK_R * 2.6, t.y + sa * TANK_R * 2.6, TANK_R * 2.3, '#ffeec0', 0.32 * dusk);
+      }
+    }
+    LUM.dessiner(ctx, now);                          // flashs : départs de tir, impacts, explosions, barils, EMP
+  }
   const vis = [];                                     // chars visibles de cette image (réutilisé : pas d'allocation)
   function draw() {
     if (destroyed) return;
@@ -1054,14 +1167,18 @@ export default (function () {
     if (snap && snap.grid) { ensureWalls(); ctx.drawImage(wallsCv, 0, 0, ARENA, ARENA); }   // décor statique pré-rendu : 1 drawImage
     else ctx.drawImage(groundCv, 0, 0, ARENA, ARENA);
     if (fx) drawAmbient(now);
+    const dusk = duskT(now), tv = snap ? viewTanks(now) : null;
     if (snap) {
       if (fx) drawPrints(now); else prints.length = 0;
+      if (fx) drawGroundLights(now, tv, dusk); else LUM.vider();   // lueurs sur le sol, sous les pièces
       // épaves / flaques de carburant qui brûlent encore quelques secondes
       if (fx && wrecks.length) {
         ctx.save(); ctx.globalCompositeOperation = 'lighter';
         for (let i = wrecks.length - 1; i >= 0; i--) {
           const w = wrecks[i], tt = (now - w.born) / w.life; if (tt >= 1) { wrecks.splice(i, 1); continue; }
-          const r = 9 + 3 * Math.sin(now / 60 + w.s) + 2 * Math.sin(now / 37 + w.s * 2); ctx.globalAlpha = 0.75 * (1 - tt);
+          const r = 9 + 3 * Math.sin(now / 60 + w.s) + 2 * Math.sin(now / 37 + w.s * 2);
+          lumiere(ctx, w.x, w.y, 58 + r * 1.5, '#ff7a2a', (0.26 + 0.1 * dusk) * (1 - tt));   // l'épave en feu éclaire le sable (vacille avec la flamme)
+          ctx.globalAlpha = 0.75 * (1 - tt);
           ctx.drawImage(glow('255,140,50'), w.x - r * 1.6, w.y - r * 1.6, r * 3.2, r * 3.2);
           if (Math.random() < 0.22 * kdt) smokeAt(w.x, w.y, 1, '40,36,32', 4, 1400, 0.3);
         }
@@ -1102,7 +1219,7 @@ export default (function () {
       });
       drawParts(0, now, kdt);                          // poussière, éclats, mottes : au sol, sous les chars
       // chars — passe 1 : chenilles au sol + ombres ; passe 2 : caisses ; passe 3 : états, barres, repères
-      const tv = viewTanks(now), me = mySeat >= 0 ? snap.players[mySeat] : null, myRadar = !!(me && me.radar), over = snap.gs === 'over';
+      const me = mySeat >= 0 ? snap.players[mySeat] : null, myRadar = !!(me && me.radar), over = snap.gs === 'over';
       vis.length = 0;
       for (const p of snap.players) {
         if (!p.playing || !p.alive) continue;
@@ -1121,6 +1238,13 @@ export default (function () {
         TO.alpha = tr.alpha; TO.trL = A.reduceFx ? 0 : tr.l; TO.trR = A.reduceFx ? 0 : tr.r; TO.rc = A.reduceFx || age > 170 ? 0 : 1 - age / 170; TO.flash = fx && age < 85 ? 1 - age / 85 : 0;
         TO.lives = p.lives; TO.rapid = !!p.rapid; TO.triple = !!p.triple; TO.pierce = !!p.pierce; TO.homing = !!p.homing; TO.radar = !!p.radar; TO.mineN = p.mineN | 0; TO.sway = A.reduceFx ? 0 : tr.sway;
         drawTank(spr, tr.vx, tr.vy, tr.va, TO, now);
+        // avatar du pilote sur la trappe de tourelle, toujours à l'endroit ; jamais pour un char invisible
+        // sur cet écran (il n'est pas dans `vis`) ; les bots n'en ont pas
+        if (!p.bot && p.name) {
+          ctx.save(); if (tr.alpha < 1) ctx.globalAlpha = tr.alpha;
+          dessinerAvatar(ctx, p.name, tr.vx - Math.cos(tr.va) * R * 0.08, tr.vy - Math.sin(tr.va) * R * 0.08, R * 0.9, sc, A.contrast ? '#ffffff' : col);
+          ctx.restore();
+        }
         if (fx) {                                     // émis par le CHAR (donc jamais pour un char invisible sur cet écran)
           const ca = Math.cos(tr.va), sa = Math.sin(tr.va);
           if (tr.mv > 0.3 && Math.random() < 0.1 * kdt) smokeAt(tr.vx - ca * R * 1.05 - sa * R * 0.35, tr.vy - sa * R * 1.05 + ca * R * 0.35, 1, '110,104,94', 2, 650, 0.3, tr.va + Math.PI);   // échappement
@@ -1204,6 +1328,8 @@ export default (function () {
         for (let i = rings.length - 1; i >= 0; i--) { const q = rings[i], tt = (now - q.born) / q.life; if (tt >= 1) { rings.splice(i, 1); continue; } if (tt < 0) continue; const e = 1 - (1 - tt) * (1 - tt); ctx.globalAlpha = 0.7 * (1 - tt); ctx.strokeStyle = q.col; ctx.lineWidth = q.lw * (1 - tt * 0.6); ctx.beginPath(); ctx.arc(q.x, q.y, q.r0 + (q.r1 - q.r0) * e, 0, 6.283); ctx.stroke(); }
         ctx.restore();
       } else if (!fx) { rings.length = 0; parts.length = 0; }
+      // la manche s'étire : le soleil se couche sur le désert (étalonnage par-dessus l'arène, sous la jauge et les écrans)
+      if (dusk > 0) crepuscule(ctx, -20, -20, ARENA + 40, ARENA + 40, dusk, { soleil: 'gauche', force: (A.reduceFx ? 0.55 : 1) * (A.contrast ? 0.6 : 1) });
       if (me && me.playing && me.alive && snap.gs === 'play') drawHudBar(me, now);
     }
 

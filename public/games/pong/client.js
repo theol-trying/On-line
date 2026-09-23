@@ -20,6 +20,11 @@ import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège : lisibles même à 10 ou en mode équipe
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // messages de ramassage : l'icône seule ne parle pas
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux jeux (mode plein écran compris)
+// Couche graphique commune aux 6 jeux, posée PAR-DESSUS la refonte (rien de ce qui précède n'est retiré) :
+import { avatarSprite } from '../../avatar-sprite.js';          // avatar du lobby en pastille sur l'étiquette de la raquette
+import { lumiere, creerLumieres } from '../../lumiere.js';       // balles qui éclairent le sol, éclairs aux renvois / bumpers / vies perdues
+import { crepuscule } from '../../crepuscule.js';               // mort subite : l'arène glisse du jour au crépuscule
+import { creerJournal, blocFin } from '../../finpartie.js';      // écran de fin : courbe des vies + meilleure action
 
 const SHAPE = { 2: 'Face à face', 3: 'Triangle', 4: 'Carré', 5: 'Pentagone', 6: 'Hexagone', 7: 'Heptagone', 8: 'Octogone', 9: 'Ennéagone', 10: 'Décagone' };
 // Glyphes TEXTE : uniquement pour les messages DOM (gamemsg) — le canvas dessine ses propres pictogrammes (picto()).
@@ -205,6 +210,11 @@ export default (function () {
   let shakeMag = 0, ballPopUntil = 0, bannerTimer = null, curWinMode = 'survivor';
   let rafId = 0, destroyed = false, resizeH = null, lastFrame = 0, curInten = 0, countT = 0, lastFw = 0;
   let geo0 = null;                                         // sommets du terrain en début de manche : fantôme du rétrécissement
+  const flashes = creerLumieres(16);                       // éclairs éphémères sur le sol (plafonnés)
+  let sdAcc = 0;                                           // ms de mort subite JOUÉES (la pause fige le crépuscule)
+  // Journal de la manche (côté client) : vies de chaque joueur + faits marquants pour l'écran de fin
+  const J = creerJournal();
+  let rally = 0, bestRally = 0, lastHit = -1, saves1 = {}, lastKill = {};
   const input = { up: false, dn: false };
   // Prédiction locale de SA raquette : elle bouge dès l'appui au lieu d'attendre l'aller-retour réseau
   // puis le tampon d'interpolation (~100 ms au total). `pred` est recalé sur le serveur au repos.
@@ -219,6 +229,8 @@ export default (function () {
   function colOf(p) { return teamMode ? TEAMCC[p.team] : CC[p.seat]; }
   function nameOf(s) { const p = snap && snap.players[s]; return p ? (p.name || ('P' + (s + 1))) : ('P' + (s + 1)); }
   const ADD = () => TH.add ? 'lighter' : 'source-over';
+  // intensité de l'éclairage dynamique : l'additif blanchirait le thème Clair, et le contraste renforcé veut un sol calme
+  const lightK = () => (TH.add ? 1 : 0.4) * (A.contrast ? 0.6 : 1);
 
   function applyColors() {
     CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal;
@@ -330,11 +342,13 @@ export default (function () {
       const boulet = losers.length ? losers.reduce((a, b) => (b.place > a.place || (b.place === a.place && b.hits < a.hits)) ? b : a) : null;
       mvpLine = `<div class="emeta">🏅 MVP <b style="color:${colOf(mvp)}">${nm(mvp.seat)}</b> (${mvp.kills}💀 · ${mvp.dmg}⚔)${boulet && boulet !== mvp ? ` · 🐔 <b style="color:${colOf(boulet)}">${nm(boulet.seat)}</b>` : ''}</div>`;
     }
+    // courbe des vies de la manche + meilleure action (journal client ; noms échappés et couleurs filtrées par blocFin)
+    const finHtml = blocFin(J, { titre: 'Vies au fil de la manche', couleur: s => colSeat(s), nom: s => nm(s) });
     // habillage borne d'arcade : bandeau « GAME OVER » au-dessus du titre, « CONTINUE ? » sous le podium
     es.innerHTML = `<div class="emeta" style="font-family:Orbitron,'Segoe UI',sans-serif;font-weight:800;letter-spacing:.32em;color:#ff5db4">GAME OVER</div>
       <div class="etitle" style="color:${champ ? colOf(champ) : '#fff'}">${title}</div>
       <div class="emeta">⏱ ${m.stats.durationSec}s · 🏓 ${m.stats.bounces} rebonds · ${m.stats.nParts} joueurs</div>
-      ${mvpLine}<div class="elist">${rows}</div>${podHtml}<div class="ehint"><b style="font-family:Orbitron,'Segoe UI',sans-serif;letter-spacing:.12em;color:#6ff0ff">CONTINUE ?</b> Espace / clic pour rejouer</div>`;
+      ${mvpLine}<div class="elist">${rows}</div>${finHtml}${podHtml}<div class="ehint"><b style="font-family:Orbitron,'Segoe UI',sans-serif;letter-spacing:.12em;color:#6ff0ff">CONTINUE ?</b> Espace / clic pour rejouer</div>`;
   }
 
   /* ---- entrées réseau (appelées par le shell) ---- */
@@ -367,13 +381,14 @@ export default (function () {
     if (ge && ge.length && ((m.gs !== 'play' && m.gs !== 'paused' && m.gs !== 'over') || !geo0 || geo0.length !== ge.length * 2)) {
       geo0 = []; for (const e of ge) geo0.push(e.ax, e.ay);
     }
-    if (m.gs === 'countdown' && prevGs !== 'countdown') { breaks.length = 0; shards.length = 0; }   // nouvelle manche : bords réparés
+    if (m.gs === 'countdown' && prevGs !== 'countdown') { breaks.length = 0; shards.length = 0; flashes.vider(); sdAcc = 0; }   // nouvelle manche : bords réparés, retour au jour
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     (m.fx || []).forEach(f => {
       if (f.type === 'death') { music.sting('kill'); if (f.elim) addKill(f.by, f.side); }
       else if (f.type === 'powerup') msgPowerup(f);   // remplace l'ancien banner() des malus : il s'affichait au centre, pour tout le monde, même quand le malus ne touchait que le ramasseur
     });
+    journal(prev, m, performance.now());               // AVANT l'écran de fin (plus bas) : il lit ce journal
     detectBanners(prev, m);
     if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== _lastCount) { music.sting('count'); sound('count'); countT = performance.now(); }   // décompte 3·2·1 : bip de borne
@@ -492,6 +507,16 @@ export default (function () {
     sound(f.type === 'powerup' ? (f.bad ? 'bad' : 'powerup') : f.type, f.type === 'hit' ? musicIntensity() : f.type === 'death' ? !!f.elim : undefined);
     sndPan = 0;
     if (A.reduceFx) return;
+    if (f.x != null) {                                       // éclair sur le sol (dessiné sous les pièces, cf. drawLights)
+      const k = lightK(), t = f.type;
+      if (t === 'hit') flashes.ajouter(f.x, f.y, 70, colSeat(f.side), 260, 0.5 * k);
+      else if (t === 'bump') flashes.ajouter(f.x, f.y, 64, '#b8c2ff', 300, 0.55 * k);
+      else if (t === 'wallboost') flashes.ajouter(f.x, f.y, 78, '#ffb545', 340, 0.6 * k);
+      else if (t === 'shield') flashes.ajouter(f.x, f.y, 70, '#7fd1ff', 380, 0.5 * k);
+      else if (t === 'ghost') flashes.ajouter(f.x, f.y, 56, '#cbb3ff', 420, 0.35 * k);
+      else if (t === 'powerup') flashes.ajouter(f.x, f.y, 60, f.bad ? '#ff5a5a' : (PU_COL[f.pu] || '#ffffff'), 420, 0.45 * k);
+      else if (t === 'death') flashes.ajouter(f.x, f.y, f.elim ? 150 : 110, colSeat(f.side), f.elim ? 800 : 600, (f.elim ? 0.8 : 0.65) * k);
+    }
     const e = f.side >= 0 ? edgeOf(f.side) : null, inA = e ? Math.atan2(e.ny, e.nx) : Math.random() * Math.PI * 2;
     ballPopUntil = now + 90;
     if (f.type === 'hit') {                                  // renvoi : flash du tube, onde, gerbe vers le terrain
@@ -583,6 +608,52 @@ export default (function () {
     for (let i = 0; i < m.players.length; i++) {
       const p = m.players[i], q = prev.players[i];
       if (p.playing && p.alive && p.lives === 1 && q && q.lives > 1) { banner('DERNIÈRE VIE — ' + (p.name || ('P' + (i + 1)))); break; }
+    }
+  }
+  // Journal de la manche : vies de chaque participant (courbe en escalier) + faits marquants pondérés, dont le
+  // plus lourd devient la « meilleure action » de l'écran de fin. Lu uniquement à partir des `fx` et du snapshot.
+  function journal(prev, m, now) {
+    if (m.gs === 'play' && (prevGs === 'countdown' || !J.actif())) {   // manche qui démarre (ou arrivée en cours de manche)
+      J.debut(now); rally = 0; bestRally = 0; lastHit = -1; saves1 = {}; lastKill = {};
+    }
+    if (!J.actif()) return;
+    const P = m.players, pp = prev && prev.players;
+    for (const f of (m.fx || [])) {
+      if (!f) continue;
+      if (f.type === 'hit' && f.side >= 0) {
+        rally++; lastHit = f.side;
+        const p = P[f.side];
+        if (p && p.playing && p.lives === 1 && maxLives > 1) {           // sauvetages à une seule vie : comptés, annoncés par paliers
+          const n = (saves1[f.side] || 0) + 1; saves1[f.side] = n;
+          if (n === 3 || n === 6 || n === 10 || n === 15 || n === 25) J.moment(now, f.side, 'a renvoyé ' + n + ' balles avec une seule vie', 2 + n * 0.45);
+        }
+      } else if (f.type === 'shield' && f.side >= 0) J.moment(now, f.side, 'a été sauvé par son bouclier', 1.5);
+      else if (f.type === 'death') {
+        const by = f.by >= 0 && f.by !== f.side ? f.by : -1;
+        if (rally >= 8 && rally > bestRally) {                           // plus long échange de la manche
+          bestRally = rally; const who = by >= 0 ? by : lastHit;
+          if (who >= 0 && who !== f.side) J.moment(now, who, 'a conclu un échange de ' + rally + ' renvois', Math.min(7, 1 + rally * 0.3));
+        }
+        rally = 0;
+        if (f.elim && by >= 0) {
+          const q = P[by], seul = !!(q && q.lives === 1 && maxLives > 1), dbl = lastKill[by] && now - lastKill[by] < 4000;
+          lastKill[by] = now;
+          if (dbl) J.moment(now, by, 'double élimination (dont ' + nameOf(f.side) + ')', 10);
+          else J.moment(now, by, 'a éliminé ' + nameOf(f.side) + (seul ? ' avec une seule vie' : ''), seul ? 8 : 6);
+        }
+      }
+    }
+    const vals = {}; let chg = false;
+    for (let i = 0; i < P.length; i++) {
+      const p = P[i]; if (!p || !p.playing) continue;
+      vals[i] = Math.max(0, p.lives);
+      const q = pp && pp[i]; if (q && q.lives !== p.lives) chg = true;   // une vie tombe : échantillon immédiat (marche nette)
+    }
+    J.echantillon(now, vals, chg);
+    if (m.gs === 'over') {
+      const nP = P.filter(p => p && p.playing).length;
+      if (nP > 1 && maxLives > 1) for (const p of P) if (p && p.playing && p.alive && p.lives >= maxLives) J.moment(now, p.seat, 'a gagné sans perdre une seule vie', 9);
+      J.echantillon(now, vals, true); J.fin();
     }
   }
 
@@ -1004,16 +1075,22 @@ export default (function () {
     ctx.moveTo(x - 5, y - 2); ctx.lineTo(x + 4.5, y - 2); ctx.moveTo(x + 2.4, y - 4.2); ctx.lineTo(x + 4.8, y - 2); ctx.lineTo(x + 2.4, y + 0.2);
     ctx.moveTo(x + 5, y + 2.4); ctx.lineTo(x - 4.5, y + 2.4); ctx.moveTo(x - 2.4, y + 0.2); ctx.lineTo(x - 4.8, y + 2.4); ctx.lineTo(x - 2.4, y + 4.6); ctx.stroke();
   }
+  const AV_D = 18;                                                       // diamètre de la pastille d'avatar (unités terrain)
   function drawLabel(p, e) {
     const isMe = p.seat === mySeat, col = colOf(p), [lx, ly] = pt(e, e.len / 2, PAD_OFF + PAD_W + 14);
     const txt = isMe ? 'VOUS' : ((p.name || ('P' + (p.seat + 1))).slice(0, 8) + (p.bot ? '*' : ''));
     const icons = (p.lead ? 1 : 0) + (p.inv ? 1 : 0);
+    // avatar choisi au lobby (humains seulement) : pastille ronde cerclée à la couleur du siège, en tête d'étiquette.
+    // Sprite pré-rendu et mis en cache par avatar-sprite.js ; null (pas d'avatar / image en décodage) = étiquette d'avant.
+    const av = p.bot ? null : avatarSprite(p.name, AV_D * (cv.width / W) * ((fitCache && fitCache.s) || 1), col);
+    const aw = av ? AV_D - 1 : 0;
     ctx.font = UI(isMe ? 12 : 11); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const tw = ctx.measureText(txt).width, tot = tw + icons * 13, x0 = lx - tot / 2, alive = p.playing ? p.alive : true;
+    const tw = ctx.measureText(txt).width, tot = aw + tw + icons * 13, x0 = lx - tot / 2, alive = p.playing ? p.alive : true;
     ctx.globalAlpha = alive ? 1 : 0.35; ctx.fillStyle = TH.label; ctx.beginPath(); rrect(ctx, x0 - 5, ly - 8, tot + 10, 16, 6); ctx.fill();   // pastille : lisible sur la grille
     if (isMe) { ctx.strokeStyle = rgba(col, 0.8); ctx.lineWidth = 1; ctx.stroke(); }
-    ctx.globalAlpha = alive ? (A.contrast ? 1 : 0.88) : 0.3; ctx.fillStyle = col; ctx.fillText(txt, x0 + tw / 2, ly + 0.5);
-    let ix = x0 + tw + 8;
+    if (av) { ctx.globalAlpha = alive ? 1 : 0.4; ctx.drawImage(av, x0 - 5, ly - AV_D / 2, AV_D, AV_D); }   // collée au bord gauche arrondi de l'étiquette
+    ctx.globalAlpha = alive ? (A.contrast ? 1 : 0.88) : 0.3; ctx.fillStyle = col; ctx.fillText(txt, x0 + aw + tw / 2, ly + 0.5);
+    let ix = x0 + aw + tw + 8;
     if (p.lead) { crown(ix, ly); ix += 13; }
     if (p.inv) invIcon(ix, ly);
     ctx.globalAlpha = 1;
@@ -1264,9 +1341,46 @@ export default (function () {
     ctx.globalAlpha = 1;
   }
 
+  /* ---- éclairage dynamique et crépuscule (couche commune, par-dessus la refonte) ---- */
+  // Lumière tombée sur le SOL : après drawField, avant les bords et les pièces, prise dans le polygone
+  // (hors terrain le canvas est transparent en plein écran : une lueur additive y ferait une tache).
+  function drawLights(E, vballs, now, live) {
+    if (A.reduceFx) return;
+    const k = lightK();
+    ctx.save(); polyPath(E); ctx.clip();
+    if (live) for (const b of vballs) {
+      if (b.iv) continue;                                                // balle invisible : sa lumière la trahirait
+      const hot = Math.min(1, Math.max(0, ((b.sp || 0) - 5) / 7));
+      const col = b.gh ? '#cbb3ff' : b.o >= 0 ? colSeat(b.o) : (TH.add ? '#ffffff' : TH.A);   // couleur du dernier toucheur
+      lumiere(ctx, b.x, b.y, 62 + 34 * hot, col, (b.gh ? 0.12 : 0.2 + 0.12 * hot) * k);
+    }
+    for (const pu of (snap.powerups || [])) lumiere(ctx, pu.x, pu.y, 36, pu.bad ? '#ff5a5a' : (PU_COL[pu.type] || '#ffffff'), 0.1 * k);   // les jetons rayonnent un peu
+    flashes.dessiner(ctx, now);
+    ctx.restore(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  }
+  // Mort subite : l'arène passe du jour au crépuscule, au fil du temps JOUÉ depuis son déclenchement.
+  // Pris dans le terrain d'origine (geo0) : la zone déjà mangée par le rétrécissement s'assombrit avec le reste.
+  const SD_RAMP = 26000;                                                 // ms pour atteindre le crépuscule complet (plafonné par la brique)
+  function drawDusk(E) {
+    if (!(sdAcc > 0) || !fbox) return;
+    const t = Math.min(1, sdAcc / SD_RAMP);
+    const force = (TH.add ? 0.85 : 0.55) * (A.contrast ? 0.7 : 1) * (A.reduceFx ? 0.5 : 1);   // les raquettes vivent sur les BORDS, là où la vignette mord : on reste en deçà
+    ctx.save(); ctx.beginPath();
+    if (geo0 && geo0.length === E.length * 2) { ctx.moveTo(geo0[0], geo0[1]); for (let i = 2; i < geo0.length; i += 2) ctx.lineTo(geo0[i], geo0[i + 1]); ctx.closePath(); }
+    else polyPath(E);
+    ctx.clip();
+    crepuscule(ctx, fbox.x, fbox.y, fbox.w, fbox.h, t, { soleil: 'haut', force });
+    ctx.restore(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  }
+
   function draw() {
     if (destroyed) return;
     const now = performance.now(), kdt = Math.min(3, Math.max(0.25, (now - (lastFrame || now - 16.7)) / 16.7)); lastFrame = now;
+    if (snap) {                                        // horloge du crépuscule : avance en mort subite jouée, figée en pause / à la fin
+      const g0 = snap.gs;
+      if (snap.sd && g0 === 'play') sdAcc += kdt * 16.7;
+      else if (g0 === 'lobby' || g0 === 'countdown' || (g0 === 'play' && !snap.sd)) sdAcc = 0;
+    }
     const sc = cv.width / W;
     let ox = 0, oy = 0;
     if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.86; }
@@ -1294,6 +1408,7 @@ export default (function () {
       world();
       const E = geo.edges, gs = snap.gs, over = gs === 'over';
       drawField(E, fit, now);
+      drawLights(E, vballs, now, gs === 'play' || gs === 'paused' || gs === 'countdown');
       drawEdges(E, now, (gs === 'play' || gs === 'paused') ? vballs : null);
       drawPowerups(now);
       snap.players.forEach(p => {
@@ -1312,6 +1427,7 @@ export default (function () {
         motes(W / 2 + (Math.random() - 0.5) * bw * 0.6, H / 2 + (Math.random() - 0.5) * bh * 0.5, 22, 1.2, 3.2, c, 1100, 2.2, now, 0.03);
       }
       drawFx(now, kdt);
+      drawDusk(E);                               // étalonnage PAR-DESSUS sol + pièces, sous les écrans / voiles
     } else trails = [];
     vbase();                                     // les voiles et écrans qui suivent couvrent tout le CANVAS
     if (snap.gs === 'countdown') { drawCountdown(now); drawServeArrow(now, world); }
@@ -1442,6 +1558,7 @@ export default (function () {
   function onA11y() { applyColors(); }
   function teardown() {
     destroyed = true; cancelAnimationFrame(rafId); music.stop();
+    J.fin(); flashes.vider(); sdAcc = 0;   // singleton : un retour en cours de manche ne doit pas prolonger l'ancien journal
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
   }
 

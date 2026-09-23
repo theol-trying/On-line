@@ -781,6 +781,31 @@ animée discrète, écrans titre / compte à rebours / pause / fin thématisés,
   tank 0,59 · bomb 0,63 — dans l'enveloppe du Sumo (0,63 ms).
 - Non vérifiable d'ici : les sons, le ressenti sur vieux iPhone.
 
+## Améliorations graphiques transverses (23/09)
+Cinq chantiers, AJOUTÉS par-dessus la refonte (condition de l'utilisateur : ne rien rendre inutile) —
+diff additif (+848 / −56). Briques partagées écrites d'abord (et testées, injection comprise), puis
+intégrées par un agent par jeu + un pour la vitrine, chacun relu par un agent adverse (qui a trouvé et
+corrigé un défaut réel dans chaque chantier : journal de manche conservé après un départ, bord non
+teinté pendant les tremblements, etc.).
+- **Vitrine** (`vitrine.js`) : les onglets deviennent 6 cartes à mini-scène animée (une seule boucle,
+  ~30 i/s, en pause en partie et page cachée, image fixe en effets réduits) — toujours des
+  `button.gtab[data-id]`, donc sélection, jeu actif et grisage non-game-master inchangés. PC : 6 en
+  ligne ; téléphone : 3 × 2.
+- **Avatars sur les pièces** (`avatar-sprite.js`, source `window.__AVSRC` d'`app.js`, emoji ou image
+  validée) : pastille à l'étiquette de la raquette (Pong — pas sur la raquette, pour garder le motif du
+  siège), sur la moto, la tourelle, la tête du serpent, le bombeur, le lutteur. Char camouflé caché :
+  pas d'avatar.
+- **Éclairage dynamique** (`lumiere.js`) : balles, phares et traînées, tirs, traçantes, explosions,
+  flammes, ondes de choc éclairent le sol. Un char caché n'émet aucune lueur (ses obus, si).
+- **Crépuscule** (`crepuscule.js`) : Pong d'après `sd`, Tron d'après `shrink`, Sumo d'après ring/ring0,
+  les autres d'après le temps de manche (côté client). Plafonné bien avant le noir.
+- **Écran de fin enrichi** (`finpartie.js`) : courbe de la manche (vies, distance, longueur…) + meilleure
+  action repérée sur la courbe. Journal tenu côté client : un arrivant en cours de manche n'a que la fin.
+- Au passage : sur téléphone, ✕ / ⏸ / ⚙ s'affichaient AUSSI dans le lobby (défaut présent depuis juin,
+  `display:flex` sans condition) → limités à la partie.
+- Vérifié en navigateur : 0 erreur dans les 6 jeux, avatar sur la tourelle, lueurs des traçantes, écran
+  de fin de Tron avec courbe et meilleure action, vitrine PC et téléphone. `npm test` 63/63.
+
 ## Filet de sécurité du hub (23/09)
 `game.tick()` et `game.onMessage()` n'étaient protégés nulle part : une exception dans n'importe lequel
 des 6 jeux tuait le processus Node, donc le site pour tout le monde (c'est la panne du 21/09,

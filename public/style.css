@@ -82,6 +82,15 @@ body.flat .etitle{ text-shadow:none; }
 .eres{ flex:1 1 100%; order:5; color:var(--txt2); font-size:11px; }
 .estat{ font-size:11px; color:var(--txt); white-space:nowrap; }
 .ehint{ color:var(--txt2); font-size:12px; margin-top:6px; }
+/* écran de fin enrichi (public/finpartie.js) : courbe de la manche + meilleure action */
+.efin{ width:100%; max-width:440px; margin-top:6px; color:var(--txt); }
+.efin-titre{ font-size:10.5px; color:var(--txt2); font-weight:700; letter-spacing:.08em; text-transform:uppercase; margin:0 0 3px; }
+.ecourbe{ display:block; width:100%; height:92px; background:var(--panel); border:1px solid var(--border); border-radius:9px; }
+.emoment{ margin-top:6px; padding:6px 10px; border-radius:9px; font-size:12px; line-height:1.4; color:var(--txt);
+  background:linear-gradient(90deg, rgba(255,215,107,.16), rgba(255,215,107,.04)); border:1px solid rgba(255,215,107,.35); }
+.emoment-l{ font-weight:800; letter-spacing:.04em; }
+.emoment small{ color:var(--txt2); }
+@media (max-height:640px){ .ecourbe{ height:64px; } }   /* petit téléphone : l'écran de fin doit tenir sans défiler */
 .podlabel{ color:var(--txt2); font-size:11px; margin-top:8px; letter-spacing:.05em; text-transform:uppercase; }
 .podium{ display:flex; align-items:flex-end; justify-content:center; gap:8px; height:150px; }
 .pcol{ display:flex; flex-direction:column; align-items:center; justify-content:flex-end; width:80px; }
@@ -622,9 +631,12 @@ body.game-sumo:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.6),0 0 0 3p
   /* boutons flottants : petits, translucides, dans une bande en haut qui ne couvre plus le plateau */
   body.playing{ padding-top:54px; }
   #pauseFloat, .pauseFloat, #setFloat{ top:9px; width:42px; height:42px; padding:0; font-size:17px;
-    display:flex; align-items:center; justify-content:center; opacity:.6; }
+    align-items:center; justify-content:center; opacity:.6; }
   #quitFloat{ top:9px; left:9px; width:42px; height:42px; padding:0; font-size:0;
-    display:flex; align-items:center; justify-content:center; opacity:.6; }
+    align-items:center; justify-content:center; opacity:.6; }
+  /* Visibles seulement là où ils servent, comme sur PC. Avant, `display:flex` posé ici sans condition les
+     affichait AUSSI dans le lobby des téléphones (défaut présent depuis juin). */
+  body.playing #pauseFloat, body.playing .pauseFloat, body.playing #quitFloat, body.paused #setFloat{ display:flex; }
   #quitFloat::before{ content:'✕'; font-size:17px; }
   #pauseFloat:active, .pauseFloat:active, #quitFloat:active, #setFloat:active{ opacity:1; }
   #emoteFloat{ width:40px; height:40px; font-size:18px; opacity:.55; }
@@ -889,3 +901,47 @@ body.game-tank canvas{ cursor:crosshair; }
   font-family:var(--display-font,inherit); font-size:clamp(28px,8vw,64px); font-weight:800;
   letter-spacing:.12em; color:var(--accent); text-shadow:0 0 28px currentColor; }
 body.flat #xfade{ text-shadow:none; }
+
+/* ============================================================================
+   VITRINE — l'accueil présente les 6 jeux en cartes animées (public/vitrine.js).
+   Chaque carte reste un .gtab : police, couleur, rayon et état .on par jeu viennent
+   des règles « A. Onglets multi-identités » ci-dessus ; le grisage non-game-master
+   (body.not-gm) aussi. Grille avec grid-gap (pas de gap en flex : vieux iOS).
+   PC : 6 en ligne · fenêtre étroite : 3 × 2 · téléphone : 3 × 2 compact.
+   ============================================================================ */
+.shellrow.avitrine{ width:100%; max-width:1080px; }
+#gamemenu.vitrine{ display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); grid-gap:8px; gap:8px;
+  -webkit-box-flex:1; -ms-flex:1 1 100%; flex:1 1 100%; width:100%; padding:8px; }
+#gamemenu .vcard{ display:block; position:relative; min-width:0; padding:5px 5px 7px; text-align:center; line-height:1.15;
+  background:rgba(8,10,22,.5); border:1px solid var(--border2); overflow:hidden;
+  -webkit-transition:transform .18s, box-shadow .18s, background .15s; transition:transform .18s, box-shadow .18s, background .15s; }
+#gamemenu .vcard:hover{ background:rgba(34,38,62,.72); }
+body:not(.flat) #gamemenu .vcard:hover{ -webkit-transform:translateY(-3px); transform:translateY(-3px); box-shadow:0 10px 22px -12px rgba(0,0,0,.8); }
+#gamemenu .vcard.on{ border-color:transparent; background:linear-gradient(92deg,#3f8bff,#7c5cff); color:#fff; }   /* repli .gtab.on (jeu sans règle dédiée) : le fond de .vcard l'écrasait */
+body:not(.flat) #gamemenu .vcard.on{ -webkit-transform:translateY(-2px); transform:translateY(-2px); }
+body.not-gm #gamemenu .vcard:not(.on):hover{ -webkit-transform:none; transform:none; box-shadow:none; }
+body.flat #gamemenu .vcard{ -webkit-transition:none; transition:none; }
+.vscene{ display:block; width:100%; height:68px; border-radius:7px; background:#0c0e1c; }
+#gamemenu .vcard[data-id="tron"] .vscene{ border-radius:1px; }
+#gamemenu .vcard[data-id="tank"] .vscene, #gamemenu .vcard[data-id="sumo"] .vscene{ border-radius:3px; }
+#gamemenu .vcard[data-id="snake"] .vscene, #gamemenu .vcard[data-id="bomb"] .vscene{ border-radius:11px; }
+.vname{ display:block; margin-top:6px; font-size:15px; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.vsub{ display:block; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; min-height:2.5em; margin-top:3px;
+  font:500 10.5px/1.25 system-ui,-apple-system,"Segoe UI",sans-serif; letter-spacing:normal; text-transform:none; opacity:.8; }
+.vnb{ display:inline-block; margin-top:5px; padding:3px 8px; border-radius:20px; background:rgba(0,0,0,.2);
+  font:600 10px/1 system-ui,-apple-system,"Segoe UI",sans-serif; letter-spacing:normal; text-transform:none; }
+@media (max-width:900px){
+  .shellrow.avitrine{ max-width:660px; }
+  #gamemenu.vitrine{ grid-template-columns:repeat(3, minmax(0,1fr)); }
+  .vscene{ height:74px; }
+}
+@media (max-width:600px){                          /* téléphone : 3 × 2 compact, l'accroche passe dans le title */
+  #gamemenu.vitrine{ grid-gap:6px; gap:6px; padding:6px; }
+  #gamemenu .vcard{ padding:4px 4px 5px; }
+  .vscene{ height:48px; }
+  .vname{ margin-top:4px; font-size:12.5px; }
+  .vsub{ display:none; }
+  .vnb{ margin-top:3px; padding:2px 6px; font-size:9px; }
+}
+@media (max-width:370px){ .vscene{ height:40px; } .vname{ font-size:11.5px; } }
+@media (prefers-reduced-motion:reduce){ #gamemenu .vcard{ -webkit-transition:none; transition:none; } }
