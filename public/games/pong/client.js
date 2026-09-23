@@ -76,6 +76,9 @@ export default (function () {
   let shakeMag = 0, ballPopUntil = 0, bannerTimer = null, curWinMode = 'survivor';
   let rafId = 0, destroyed = false, resizeH = null;
   const input = { up: false, dn: false };
+  // Prédiction locale de SA raquette : elle bouge dès l'appui au lieu d'attendre l'aller-retour réseau
+  // puis le tampon d'interpolation (~100 ms au total). `pred` est recalé sur le serveur au repos.
+  let pred = null, padSpd = 5.5, dernierInputT = 0;
   // DOM refs
   let hud, cards, startBtn, pauseBtn, botsBtn, modeBtn, presetBtn, pauseFloat;
   let optBtn, optionsPanel, optLives, optSpeed, optPu, optAccel, optWin, optSudden, optServe, optHandi;
@@ -217,6 +220,7 @@ export default (function () {
     if (m.aw && m.aw !== W) { W = m.aw; H = m.ah || m.aw; }  // arène redimensionnée (nb de joueurs)
     if (m.geo === undefined && snap) m.geo = snap.geo;      // delta réseau : géométrie absente = inchangée (null = vraiment vide)
     const prev = snap; snap = m;
+    if (m.pspd) padSpd = m.pspd;                       // vitesse par tick (dépend du nombre de joueurs)
     teamMode = m.mode && m.mode !== 'ffa';
     if (typeof m.maxLives === 'number') maxLives = m.maxLives;
     const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
@@ -475,7 +479,8 @@ export default (function () {
     if (!ambiant && !A.reduceFx) { ctx.save(); ctx.fillStyle = '#9fd0ff'; for (const s of AMB_STARS) { const y = (s.y * H + now / 1000 * s.v) % H, tw = 0.5 + 0.5 * Math.sin(now / 900 + s.ph); ctx.globalAlpha = 0.05 + 0.16 * tw; ctx.beginPath(); ctx.arc(s.x * W, y, s.r, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); }   // starfield
     const view = computeView(now);
     const vballs = view ? view.balls : (snap ? snap.balls : []);
-    const vpos = s => (view && view.pos[s] != null) ? view.pos[s] : (snap ? snap.players[s].pos : 0);
+    const moiPred = predireMoi(now);                   // sa propre raquette : prédite, pas interpolée
+    const vpos = s => (s === mySeat && moiPred != null) ? moiPred : (view && view.pos[s] != null) ? view.pos[s] : (snap ? snap.players[s].pos : 0);
     const geo = snap && snap.geo;
     if (geo) {
       world();
@@ -684,7 +689,34 @@ export default (function () {
     if (['ArrowDown', 'ArrowRight', 'KeyS', 'KeyD'].includes(code)) return 'dn';
     return null;
   }
-  function setAction(a, val) { if (input[a] === val) return; input[a] = val; send({ t: 'input', up: input.up, dn: input.dn }); }
+  function setAction(a, val) { if (input[a] === val) return; input[a] = val; dernierInputT = performance.now(); send({ t: 'input', up: input.up, dn: input.dn }); }
+
+  /* ---- prédiction locale de sa raquette -------------------------------------------------------
+     Réplique EXACTE de humanMove() côté serveur : même vitesse (pspd, par tick à 60 Hz), même règle de
+     sens, même malus d'inversion (p.inv), mêmes butées (p.len). Pendant qu'on bouge, on ne corrige PAS
+     vers le serveur : il est en retard d'une latence par construction, s'y recaler ferait reculer la
+     raquette (effet élastique). Il reçoit l'appui ET le relâchement avec le même retard, donc il
+     s'arrête exactement au même endroit : au repos, on converge simplement vers lui. Grand écart
+     (nouvelle manche, changement de bord) : recalage immédiat. */
+  function predireMoi(now) {
+    const me = snap && mySeat >= 0 ? snap.players[mySeat] : null;
+    const actif = me && me.edge >= 0 && me.alive && snap.geo && (snap.gs === 'play' || snap.gs === 'countdown');
+    const e = actif ? snap.geo.edges[me.edge] : null;
+    if (!e) { pred = null; return null; }
+    if (!pred || pred.edge !== me.edge) pred = { pos: me.pos, edge: me.edge, t: now };
+    const dt = Math.min(50, now - pred.t); pred.t = now;
+    let d = (input.up ? -1 : 0) + (input.dn ? 1 : 0);
+    if (me.inv) d = -d;
+    const sign = ((Math.abs(e.ty) >= Math.abs(e.tx)) ? e.ty > 0 : e.tx > 0) ? 1 : -1;
+    pred.pos += d * sign * padSpd * dt * 0.06;        // par tick à 60 Hz → par milliseconde
+    const err = me.pos - pred.pos;
+    const rtt = window.__rtt || 80;                    // mesuré par app.js (ping)
+    if (Math.abs(err) > e.len * 0.35) pred.pos = me.pos;
+    else if (!d && now - dernierInputT > rtt + 120) pred.pos += err * Math.min(1, dt / 90);
+    const L = me.len || 0;
+    pred.pos = Math.max(L / 2, Math.min(e.len - L / 2, pred.pos));
+    return pred.pos;
+  }
   function setKey(code, val) { const a = keyToAction(code); if (a) setAction(a, val); }
   const onKeyDown = e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
