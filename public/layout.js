@@ -26,7 +26,11 @@ export function arenaSize(o) {
         return Math.max(280, Math.min(r.width - side, h, o.maxDock || 1400));
     }
   }
-  const h = playing ? (o.hPlay || 0.82) : (o.hLobby || 0.62);
+  // Lobby : MÊME taille de plateau pour les 6 jeux (fraction et plafond communs, les réglages propres à un
+  // jeu sont ignorés ici). Sinon la barre de commandes, sous le plateau, changeait de place d'un jeu à
+  // l'autre — Pong était 35 px plus haut que les autres.
+  if (!playing) return Math.max(280, Math.min(window.innerWidth * 0.96 - side, window.innerHeight * 0.62, 760));
+  const h = o.hPlay || 0.82;
   // Téléphone en partie : on déduit la hauteur RÉELLE des commandes (manette ou joystick, carte du
   // joueur, bandeau des boutons du haut). Une fraction fixe de l'écran ne suffisait plus : le joystick
   // (189 px) faisait déborder Pong sous l'écran d'un iPhone SE (relevé par la revue du 23/09).

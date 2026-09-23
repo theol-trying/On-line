@@ -10,7 +10,6 @@ import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (lisibilité daltonien / jusqu'à 10 joueurs)
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // retour de test : l'icône seule ne dit pas l'effet, on l'écrit
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
-import { dessinerAvatar, avatarSprite } from '../../avatar-sprite.js';          // avatar du lobby : sur la tête (grande) ou en pastille au-dessus (petite)
 import { lumiere, creerLumieres } from '../../lumiere.js';        // lueurs sur la pelouse : pommes spéciales, fantômes, repas, éclats de mort
 import { crepuscule } from '../../crepuscule.js';                 // le jardin passe du jour au crépuscule quand la manche s'achève
 import { creerJournal, blocFin } from '../../finpartie.js';       // écran de fin : longueur au fil de la manche + meilleure action
@@ -170,7 +169,6 @@ export default (function () {
   // crépuscule : 0 = plein jour → 1 = nuit tombante ; lissé, gelé en fin de manche
   let dusk = 0, playMs = 0;
   let SC = 1, CSC = 1;                              // pixels (écran réel / CSS) par unité d'arène, mis à jour à chaque image
-  const AVON = new Uint8Array(MAX_SEATS);           // avatar déjà posé sur la tête cette image (sinon pastille)
   // journal de manche (écran de fin) : séries, séries de pommes, festins, arrêts
   const J = creerJournal();
   let jRound = -1, jLast = -1e12;
@@ -603,9 +601,7 @@ export default (function () {
   }
   // Tête : ombre, langue fourchue, contour, motif, reflet, narines, yeux (paupière qui cligne, pupille tournée
   // vers la nourriture la plus proche). ang = orientation lissée ; (lx, ly) = direction du regard (unitaire).
-  // av = pseudo dont on pose l'avatar sur le crâne (derrière les yeux, toujours droit) ; renvoie true s'il est posé.
-  function drawHead(C, x, y, ang, col, seat, alpha, blink, tongue, lx, ly, av) {
-    let onHead = false;
+  function drawHead(C, x, y, ang, col, seat, alpha, blink, tongue, lx, ly) {
     const T = tint(col), ca = Math.cos(ang), sa = Math.sin(ang);
     ctx.save(); ctx.translate(x, y); if (alpha < 1) ctx.globalAlpha = alpha;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -620,7 +616,6 @@ export default (function () {
     ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.beginPath(); oval(ctx, C * 0.5, 0, C * 0.15, C * 0.28); ctx.fill();   // museau
     ctx.rotate(-ang); ctx.fillStyle = T.lt; ctx.globalAlpha = (alpha < 1 ? alpha : 1) * 0.45; ctx.beginPath(); oval(ctx, -C * 0.14, -C * 0.2, C * 0.2, C * 0.1); ctx.fill(); ctx.rotate(ang);
     ctx.globalAlpha = alpha < 1 ? alpha : 1;
-    if (av) { ctx.rotate(-ang); onHead = dessinerAvatar(ctx, av, -C * 0.2 * ca, -C * 0.2 * sa, C * 0.58, SC, A.contrast ? '#ffffff' : T.dk); ctx.rotate(ang); }   // les yeux restent dessinés par-dessus
     ctx.fillStyle = T.dk; ctx.beginPath(); circ(ctx, C * 0.54, -C * 0.11, C * 0.04); circ(ctx, C * 0.54, C * 0.11, C * 0.04); ctx.fill();   // narines
     const er = C * 0.17, ex = C * 0.16, ey = C * 0.26, llx = lx * ca + ly * sa, lly = -lx * sa + ly * ca;
     ctx.fillStyle = T.dk; ctx.beginPath(); circ(ctx, ex, -ey, er * 1.25); circ(ctx, ex, ey, er * 1.25); ctx.fill();
@@ -632,7 +627,6 @@ export default (function () {
       ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); circ(ctx, ex + ox - er * 0.18, -ey + oy - er * 0.18, er * 0.2); circ(ctx, ex + ox - er * 0.18, ey + oy - er * 0.18, er * 0.2); ctx.fill();
     }
     ctx.restore();
-    return onHead;
   }
   // un serpent vivant : corps de l'instantané b, tête ramenée le long du corps et queue prolongée selon al
   function drawSnake(pa, now, dtm, foods) {
@@ -670,8 +664,7 @@ export default (function () {
     const ll = Math.hypot(lx, ly) || 1, near = best < 6.25 * C * C;
     const tp = (now + seat * 1531) % (near ? 900 : 2600), tongue = soft && tp < 260 ? Math.sin(tp / 260 * Math.PI) : 0;
     const blink = soft && ((now + seat * 977) % 4300) < 130;
-    const av = !pb.bot && pb.name && C * CSC >= 23 ? pb.name : null;               // tête assez grande à l'écran : l'avatar va sur le crâne
-    AVON[seat] = drawHead(C, hx, hy, headAng[seat], col, seat, ga, blink, tongue, lx / ll, ly / ll, av) ? 1 : 0;
+    drawHead(C, hx, hy, headAng[seat], col, seat, ga, blink, tongue, lx / ll, ly / ll);
     HX[seat] = hx; HY[seat] = hy; HON[seat] = 1;
   }
   // repères : « c'est moi » (anneau pulsé + flèche au départ), couronne des vainqueurs en fin de manche
@@ -702,29 +695,6 @@ export default (function () {
       if (cd) { ctx.font = '700 12px ' + DISP; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 3; ctx.strokeStyle = '#10200e'; const ly = ty - s * (k * 1.1 + 8); ctx.strokeText('TOI', x, ly); ctx.fillStyle = '#fff4cf'; ctx.fillText('TOI', x, ly); }
     }
     ctx.restore();
-  }
-
-  // avatars en pastille pour les têtes trop petites pour les porter (10 joueurs, mobile) : posée derrière la
-  // tête, sur le cou (jamais sur la case devant ni sur celles où l'on peut tourner) ; au-dessus de la couronne en fin.
-  function drawAvatarPips(now) {
-    const C = CELL, pl = snap.players || [], over = snap.gs === 'over';
-    const d = Math.min(C * 1.8, Math.max(C * 1.05, 12 / (CSC || 1)));
-    const arrow = snap.gs === 'countdown' || (snap.gs === 'play' && now - playSince < 2500);
-    for (let s = 0; s < MAX_SEATS; s++) {
-      if (!HON[s] || AVON[s]) continue;
-      const p = pl[s]; if (!p || p.bot || !p.name) continue;
-      if (s === mySeat && arrow) continue;          // la flèche « TOI » occupe déjà cette place
-      const crown = over && snap.winner >= 0 && p.alive && p.team === snap.winner;
-      let x = HX[s], y;
-      if (crown) { y = HY[s] - C * 0.62 - d / 2 - C * 0.2 - Math.max(4.5, C * 0.55) * 1.2; if (y - d / 2 < 1) y = HY[s] + C * 0.62 + d / 2; }
-      else { const k = C * 0.55 + d / 2; x -= Math.cos(headAng[s]) * k; y = HY[s] - Math.sin(headAng[s]) * k; }   // en jeu : DERRIÈRE la tête, sur son propre cou — ni la case devant, ni celles où l'on tourne
-      x = Math.max(d / 2 + 1, Math.min(ARENA - d / 2 - 1, x)); y = Math.max(d / 2 + 1, Math.min(ARENA - d / 2 - 1, y));
-      const lis = A.contrast ? '#ffffff' : colSeat(s);
-      const spr = avatarSprite(p.name, d * SC, lis);
-      if (!spr) continue;                           // pas d'avatar (ou image pas encore décodée) : rien, pas même l'ombre
-      ctx.globalAlpha = 0.35; ctx.fillStyle = '#041204'; ctx.beginPath(); circ(ctx, x + d * 0.06, y + d * 0.1, d * 0.52); ctx.fill(); ctx.globalAlpha = 1;   // ombre : la pastille se détache
-      ctx.drawImage(spr, x - d / 2, y - d / 2, d, d);
-    }
   }
 
   // ───────────────────────── nourriture ─────────────────────────
@@ -1176,7 +1146,7 @@ export default (function () {
     const S = snap ? (VA || snap) : null;
     drawLights(now, S);                             // lumière sur le sol, avant toute pièce
     if (soft) drawAmbient(now);
-    HON.fill(0); AVON.fill(0);
+    HON.fill(0);
     if (S) {
       const foods = S.food || [], pl = S.players || [];
       drawFoods(foods, now);
@@ -1185,7 +1155,7 @@ export default (function () {
     }
     drawFx(now, kdt);
     if (dusk > 0.01) crepuscule(ctx, 0, 0, ARENA, ARENA, dusk, { soleil: 'gauche', force: A.contrast || A.reduceFx ? 0.6 : 1 });   // étalonnage sur sol + pièces
-    if (snap) { drawMarkers(now); drawAvatarPips(now); }                         // repères et pastilles au-dessus du crépuscule : toujours nets
+    if (snap) { drawMarkers(now); }                         // repères au-dessus du crépuscule : toujours nets
     if (snap && snap.rush && (snap.gs === 'play' || snap.gs === 'countdown')) drawRush();
     if (snap && snap.gs === 'countdown') drawCountdown(now);
     if (snap && snap.gs === 'lobby') drawLobby(now);

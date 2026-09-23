@@ -791,7 +791,10 @@ teinté pendant les tremblements, etc.).
   ~30 i/s, en pause en partie et page cachée, image fixe en effets réduits) — toujours des
   `button.gtab[data-id]`, donc sélection, jeu actif et grisage non-game-master inchangés. PC : 6 en
   ligne ; téléphone : 3 × 2.
-- **Avatars sur les pièces** (`avatar-sprite.js`, source `window.__AVSRC` d'`app.js`, emoji ou image
+- ~~Avatars sur les pièces~~ **RETIRÉS le jour même à la demande de l'utilisateur** (ils gâchaient les
+  visages travaillés, surtout à Bomberman) : `avatar-sprite.js` et `window.__AVSRC` supprimés. L'avatar reste
+  sur les cartes joueurs et les classements. Ne pas reproposer. Pour mémoire, la version retirée :
+  (`avatar-sprite.js`, source `window.__AVSRC` d'`app.js`, emoji ou image
   validée) : pastille à l'étiquette de la raquette (Pong — pas sur la raquette, pour garder le motif du
   siège), sur la moto, la tourelle, la tête du serpent, le bombeur, le lutteur. Char camouflé caché :
   pas d'avatar.
@@ -805,6 +808,21 @@ teinté pendant les tremblements, etc.).
   `display:flex` sans condition) → limités à la partie.
 - Vérifié en navigateur : 0 erreur dans les 6 jeux, avatar sur la tourelle, lueurs des traçantes, écran
   de fin de Tron avec courbe et meilleure action, vitrine PC et téléphone. `npm test` 63/63.
+
+## Retour du 23/09 (soir) : avatars retirés, fonds Tanks/Snake, menus alignés
+- **Avatars sur les pièces retirés** (voir la section précédente) — refus définitif.
+- **Fonds plus travaillés** pour les deux jugés fades. Tanks : mesas à l'horizon dans la brume de chaleur,
+  **mur de sacs de sable** sur deux rangées surmonté de barbelés sur piquets. Snake : **fleurs semées**
+  dans la pelouse, taches de soleil tamisé, **palissade** de bois blanchi avec traverses et fleurs au pied.
+- **Menus aux mêmes coordonnées dans les 6 jeux.** Mesuré avant : Tanks et Bomberman décalés de 30 et
+  34 px (marge sous leur bandeau), boutons et barre « Prêt » de 1 à 4 px (hauteur de ligne « normale »,
+  qui dépend de la police du jeu), plateau de Pong 35 px plus haut, cartes joueurs de 1 à 3 px. Corrigé :
+  bandeaux affinés (≤ 21 px, plus de marge spéciale), `button{line-height:1.25}` et `.readybar{line-height:1.3}`,
+  taille de plateau COMMUNE au lobby (`arenaSize`, plafond 760, 0,62 × hauteur), hauteur minimale commune
+  des cartes (66 px PC, 70 px téléphone), et sur téléphone plus de manette dans le lobby (elle revient au
+  compte à rebours ; celle de Pong décalait tout le bas de page). Mesuré après : **identique au pixel** pour
+  les 9 éléments du lobby, sur PC (1440×860) comme sur téléphone (375×812). Seule la hauteur de la barre de
+  commandes varie, son haut étant commun : chaque jeu n'a pas le même nombre d'options.
 
 ## Filet de sécurité du hub (23/09)
 `game.tick()` et `game.onMessage()` n'étaient protégés nulle part : une exception dans n'importe lequel

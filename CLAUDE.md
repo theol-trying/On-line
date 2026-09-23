@@ -37,8 +37,9 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
   `id`. Un nouveau jeu doit garder ces boutons (même masqués) et s'inscrire dans `CARTES` — ou exposer
   `joy(dx, dy)` dans son module s'il lui faut une projection propre, comme Pong.
 - **Ne pas supprimer `/manette.html`** : page d'essai permanente, demandée par l'utilisateur.
-- **Briques graphiques partagées** (à réutiliser, pas à réinventer dans un jeu) : `avatar-sprite.js`
-  (avatar du joueur dessiné sur sa pièce), `lumiere.js` (lueurs additives sur le sol), `crepuscule.js`
+- **Pas d'avatar dessiné sur les pièces de jeu** (refusé par l'utilisateur le 23/09 : il gâche les visages
+  travaillés, surtout à Bomberman). L'avatar reste sur les cartes joueurs (HUD) et les classements.
+- **Briques graphiques partagées** (à réutiliser, pas à réinventer dans un jeu) : `lumiere.js` (lueurs additives sur le sol), `crepuscule.js`
   (étalonnage jour → crépuscule en mort subite), `finpartie.js` (journal de manche → courbe + meilleure
   action, textes échappés), `vitrine.js` (accueil en cartes animées). Un nouveau jeu doit aussi avoir sa
   mini-scène dans `vitrine.js`.

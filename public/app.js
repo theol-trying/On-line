@@ -386,14 +386,6 @@ function avatarHtml(name, cls) {          // HTML sûr : l'image n'est acceptée
   return `<span class="${cls || 'av'} av-e">${esc(a)}</span>`;
 }
 window.__AV = n => avatarHtml(n);         // utilisé par les cartes HUD des 5 jeux
-// Source BRUTE de l'avatar pour le canvas (public/avatar-sprite.js) : l'emoji, ou la data URL validée par
-// AV_IMG_RE (base64 strict) — jamais une chaîne arbitraire venue du réseau.
-window.__AVSRC = n => {
-  const a = n && avatars[n];
-  if (!a) return null;
-  if (a.slice(0, 11) === 'data:image/') return AV_IMG_RE.test(a) ? a : null;
-  return a;
-};
 function avBig(a) { return a ? (a.slice(0, 11) === 'data:image/' ? (AV_IMG_RE.test(a) ? `<img src="${a}" alt="">` : '🙂') : esc(a)) : '🙂'; }
 function renderAvatarUI() {
   if (avBtn) avBtn.innerHTML = avBig(myAvatar);

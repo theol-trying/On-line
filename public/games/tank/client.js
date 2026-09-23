@@ -9,7 +9,6 @@ import { seatPattern, SEAT_GLYPH } from '../../patterns.js';
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
 // couche partagée : avatar sur la trappe de tourelle, lueurs au sol, crépuscule de fin de manche, écran de fin enrichi
-import { dessinerAvatar } from '../../avatar-sprite.js';
 import { lumiere, creerLumieres } from '../../lumiere.js';
 import { crepuscule } from '../../crepuscule.js';
 import { creerJournal, blocFin } from '../../finpartie.js';
@@ -1238,13 +1237,6 @@ export default (function () {
         TO.alpha = tr.alpha; TO.trL = A.reduceFx ? 0 : tr.l; TO.trR = A.reduceFx ? 0 : tr.r; TO.rc = A.reduceFx || age > 170 ? 0 : 1 - age / 170; TO.flash = fx && age < 85 ? 1 - age / 85 : 0;
         TO.lives = p.lives; TO.rapid = !!p.rapid; TO.triple = !!p.triple; TO.pierce = !!p.pierce; TO.homing = !!p.homing; TO.radar = !!p.radar; TO.mineN = p.mineN | 0; TO.sway = A.reduceFx ? 0 : tr.sway;
         drawTank(spr, tr.vx, tr.vy, tr.va, TO, now);
-        // avatar du pilote sur la trappe de tourelle, toujours à l'endroit ; jamais pour un char invisible
-        // sur cet écran (il n'est pas dans `vis`) ; les bots n'en ont pas
-        if (!p.bot && p.name) {
-          ctx.save(); if (tr.alpha < 1) ctx.globalAlpha = tr.alpha;
-          dessinerAvatar(ctx, p.name, tr.vx - Math.cos(tr.va) * R * 0.08, tr.vy - Math.sin(tr.va) * R * 0.08, R * 0.9, sc, A.contrast ? '#ffffff' : col);
-          ctx.restore();
-        }
         if (fx) {                                     // émis par le CHAR (donc jamais pour un char invisible sur cet écran)
           const ca = Math.cos(tr.va), sa = Math.sin(tr.va);
           if (tr.mv > 0.3 && Math.random() < 0.1 * kdt) smokeAt(tr.vx - ca * R * 1.05 - sa * R * 0.35, tr.vy - sa * R * 1.05 + ca * R * 0.35, 1, '110,104,94', 2, 650, 0.3, tr.va + Math.PI);   // échappement
