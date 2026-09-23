@@ -6,6 +6,7 @@ let W = W0, H = H0;        // espace logique : agrandi par le serveur selon le n
 import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège : lisibles même à 10 ou en mode équipe
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // messages de ramassage : l'icône seule ne parle pas
+import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux 5 jeux (mode plein écran compris)
 
 const SHAPE = { 2: 'Face à face', 3: 'Triangle', 4: 'Carré', 5: 'Pentagone', 6: 'Hexagone', 7: 'Heptagone', 8: 'Octogone', 9: 'Ennéagone', 10: 'Décagone' };
 const PU_GLYPH = { multi: '+1', grow: 'XL', shield: '⛉', ghost: '◌', invert: '⇄', shrinkT: '▭', slow: '≈', mini: '▽', flip: '✕', speed: '»', blocker: '🧱', magnet: '🧲', invis: '∅' };
@@ -93,10 +94,7 @@ export default (function () {
 
   function resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
-    const sideRoom = window.innerWidth > 600 ? 200 : 0;
-    const playing = document.body.classList.contains('playing');
-    const hFrac = playing ? 0.86 : 0.66;
-    const size = Math.max(280, Math.min(window.innerWidth * 0.96 - sideRoom, window.innerHeight * hFrac, 1100));
+    const size = arenaSize({ max: 1100, side: 200, hLobby: 0.66, hPlay: 0.86 });   // side : les flèches ▲▼ encadrent le plateau sur desktop
     cv.style.width = size + 'px'; cv.style.height = size + 'px';
     cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr);
   }
@@ -426,6 +424,36 @@ export default (function () {
     ctx.restore();
   }
 
+  /* ---- recadrage du terrain ----------------------------------------------------------------
+     Le serveur bâtit un polygone RÉGULIER INSCRIT dans un cercle : sur un carré (duel, ou 4
+     joueurs) le terrain ne mesure que R√2, soit 66 % du canvas — le tiers restant n'était que
+     du fond étoilé. On recadre donc le polygone sur le canvas. Marge haute plus généreuse :
+     c'est là que s'affichent les bandeaux de bonus (public/gamemsg.js).
+     ⚠ On FIGE le recadrage pendant la manche : la mort subite rétrécit le terrain, un recadrage
+     permanent compenserait pile ce rétrécissement et on ne le verrait plus du tout. */
+  const FIT_ID = { s: 1, tx: 0, ty: 0 };
+  let fitCache = null, fitSig = '';
+  function geoFit(geo, gs) {
+    if (!geo || !geo.edges || !geo.edges.length) { fitCache = null; fitSig = ''; return FIT_ID; }
+    const sig = '' + geo.edges.length;
+    const fige = gs === 'play' || gs === 'paused' || gs === 'over';
+    if (fitCache && fitSig === sig && fige) return fitCache;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const e of geo.edges) {
+      if (e.ax < x0) x0 = e.ax; if (e.ax > x1) x1 = e.ax;
+      if (e.bx < x0) x0 = e.bx; if (e.bx > x1) x1 = e.bx;
+      if (e.ay < y0) y0 = e.ay; if (e.ay > y1) y1 = e.ay;
+      if (e.by < y0) y0 = e.by; if (e.by > y1) y1 = e.by;
+    }
+    const bw = x1 - x0, bh = y1 - y0;
+    if (!(bw > 1 && bh > 1)) return FIT_ID;
+    const MT = 26, M = 14;                       // marge haute (bandeaux de bonus) · marges gauche/droite/bas
+    const s = Math.min((W - M * 2) / bw, (H - MT - M) / bh);
+    const res = { s, tx: M + (W - M * 2 - bw * s) / 2 - x0 * s, ty: MT + (H - MT - M - bh * s) / 2 - y0 * s };
+    fitSig = sig; fitCache = res;
+    return res;
+  }
+
   function draw() {
     if (destroyed) return;
     const now = performance.now();
@@ -433,7 +461,11 @@ export default (function () {
     let ox = 0, oy = 0;
     if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.86; }
     else shakeMag = 0;
-    ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
+    const fit = geoFit(snap && snap.geo, snap && snap.gs);
+    // `base` : repère du CANVAS (fonds, voiles, écrans de titre) · `world` : repère du TERRAIN recadré.
+    const base = () => ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
+    const world = () => ctx.setTransform(sc * fit.s, 0, 0, sc * fit.s, sc * (fit.tx + ox), sc * (fit.ty + oy));
+    base();
     ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, W, H);
     if (!A.reduceFx) { ctx.save(); ctx.fillStyle = '#9fd0ff'; for (const s of AMB_STARS) { const y = (s.y * H + now / 1000 * s.v) % H, tw = 0.5 + 0.5 * Math.sin(now / 900 + s.ph); ctx.globalAlpha = 0.05 + 0.16 * tw; ctx.beginPath(); ctx.arc(s.x * W, y, s.r, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); }   // starfield
     const view = computeView(now);
@@ -441,6 +473,7 @@ export default (function () {
     const vpos = s => (view && view.pos[s] != null) ? view.pos[s] : (snap ? snap.players[s].pos : 0);
     const geo = snap && snap.geo;
     if (geo) {
+      world();
       const E = geo.edges;
       ctx.beginPath();
       E.forEach((e, i) => { i ? ctx.lineTo(e.ax, e.ay) : ctx.moveTo(e.ax, e.ay); });
@@ -589,8 +622,9 @@ export default (function () {
           ctx.restore();
         });
       } else trails = [];
-      if (snap.slow && !A.reduceFx) { ctx.fillStyle = 'rgba(120,200,255,0.10)'; ctx.fillRect(0, 0, W, H); }
+      if (snap.slow && !A.reduceFx) { base(); ctx.fillStyle = 'rgba(120,200,255,0.10)'; ctx.fillRect(0, 0, W, H); }
     }
+    base();                                      // les voiles et écrans qui suivent couvrent tout le CANVAS
     if (snap && snap.gs === 'countdown') {
       ctx.fillStyle = 'rgba(4,5,12,0.32)'; ctx.fillRect(0, 0, W, H);
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -604,9 +638,11 @@ export default (function () {
       const sb = snap.balls && snap.balls[0];                        // flèche : sens du service
       if (sb && (sb.vx || sb.vy)) {
         const mag = Math.hypot(sb.vx, sb.vy), ux = sb.vx / mag, uy = sb.vy / mag, len = 48, hx = sb.x + ux * len, hy = sb.y + uy * len, ang = Math.atan2(uy, ux);
+        world();                                 // la flèche pointe depuis la BALLE : repère du terrain
         ctx.save(); ctx.globalAlpha = 0.75 + 0.25 * Math.sin(now / 150); ctx.strokeStyle = '#fff'; ctx.fillStyle = '#fff'; ctx.lineWidth = 3; ctx.lineCap = 'round';
         ctx.beginPath(); ctx.moveTo(sb.x, sb.y); ctx.lineTo(hx, hy); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx - Math.cos(ang - 0.4) * 11, hy - Math.sin(ang - 0.4) * 11); ctx.lineTo(hx - Math.cos(ang + 0.4) * 11, hy - Math.sin(ang + 0.4) * 11); ctx.closePath(); ctx.fill(); ctx.restore();
+        base();
       }
     }
     if (snap && (snap.gs === 'lobby' || snap.gs === 'paused')) {
