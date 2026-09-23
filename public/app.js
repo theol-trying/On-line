@@ -79,12 +79,12 @@ if (typeof window.PointerEvent === 'undefined') {
    UNIQUEMENT quand elles ne rognent pas le plateau. D'où ce calcul plutôt qu'une media query
    fixe : sur un 4:3 (1024×768) la largeur manque, on garde alors l'empilement vertical.
    `--sidew` = largeur réellement disponible, plafonnée : au-delà, ce serait du vide en plus. */
-const BANDE = 64, MARGE = 14;
+const MARGE = 14;
 const SIDE_JEU = { pong: 200 };          // Pong encadre son plateau des flèches ▲▼ : cette largeur-là n'est pas négociable
 let sideJeu = 0;
 function layoutArena() {
   const W = window.innerWidth, H = window.innerHeight;
-  const hUtile = H - BANDE - MARGE;                              // hauteur offerte au plateau
+  const hUtile = H - MARGE * 2;                                  // hauteur offerte au plateau : tout l'écran (le bandeau n'occupe que les colonnes)
   // Les colonnes ne prennent QUE le surplus : le plateau garde sa hauteur utile, et les
   // commandes latérales du jeu actif sont déduites avant le partage (sinon on les lui volait).
   let side = Math.floor((W - hUtile - sideJeu - MARGE * 4) / 2);

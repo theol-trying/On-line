@@ -18,10 +18,12 @@ export function arenaSize(o) {
   if (playing && document.body.classList.contains('dock')) {
     const el = document.querySelector('.game-root:not(.hidden) .stage');
     if (el) {
-      const r = el.getBoundingClientRect();
+      const r = el.getBoundingClientRect(), cs = window.getComputedStyle(el);
+      // La colonne va du haut au bas de l'écran ; ses marges internes gardent le plateau décollé des bords.
+      const h = r.height - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
       // Garde-fou : si la colonne n'est pas encore posée (0×0), on retombe sur la formule fenêtre.
-      if (r.width > 80 && r.height > 80)
-        return Math.max(280, Math.min(r.width - side, r.height, o.maxDock || 1200));
+      if (r.width > 80 && h > 80)
+        return Math.max(280, Math.min(r.width - side, h, o.maxDock || 1400));
     }
   }
   const h = playing ? (o.hPlay || 0.82) : (o.hLobby || 0.62);

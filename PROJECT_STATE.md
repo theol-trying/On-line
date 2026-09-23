@@ -616,6 +616,27 @@ bandeaux de bonus), via deux repères explicites dans `draw()` : `base()` pour l
 
 `npm test` : 48/48, cadences nominales (pong 60/s · tron 15/s · snake 12/s · tank 30/s · bomb 30/s).
 
+### 2e retour (capture annotée) : toute la hauteur, fond du jeu sur toute la colonne
+Le plateau restait une « carte » posée sur la page, sous un bandeau de 64 px réservé aux boutons.
+- La colonne centrale `.stage` va maintenant du **haut au bas** de l'écran (`top:0; bottom:0`, marge
+  interne de 14 px) : le bandeau des boutons flottants ne concerne que les colonnes latérales, au-dessus
+  desquelles ils sont posés. `layoutArena()` offre donc `H − 28` au plateau ; `arenaSize()` déduit la
+  marge interne de la colonne.
+- La colonne porte le **fond d'ambiance de chaque jeu** (`--amb` + motif CSS : étoiles de Pong en
+  parallaxe lente, grille de Tron, sable rayé de Tanks, pelouse de Snake, confettis de Bomberman), avec
+  les variantes CRT/clair de Pong et Tron. Motifs coupés par « Réduire les effets » et
+  `prefers-reduced-motion`.
+- **Pong** dessine alors un canvas **transparent** hors du terrain : ses coins laissent voir les étoiles
+  de la colonne, sans couture. Marges de recadrage ramenées à 8/6 unités (les bandeaux de bonus passent
+  brièvement sur le bord haut — accepté, la demande était « toute la hauteur »).
+- Bandeau de tournoi déplacé au-dessus de la liste des joueurs (le haut du centre est le plateau).
+- Mesuré en 1920×911 (la taille de la capture) : colonne 348→1572 × 0→911, plateau 519→1402 × 14→897,
+  identique pour les 5 jeux. 1024×768 inchangé.
+
+**Défaut ancien corrigé au passage** : `#confetti` héritait de la règle générale `canvas{}` et donc
+d'un fond **opaque** — à chaque victoire, l'écran de fin disparaissait ~4,5 s sous un aplat bleu nuit.
+Fond transparent explicite.
+
 ### Téléphone en partie : le plateau et la manette, rien d'autre
 Demande utilisateur : sur téléphone, ni liste des joueurs ni chat pendant qu'on joue ; les deux
 redeviennent accessibles **à l'élimination**, à la demande.
