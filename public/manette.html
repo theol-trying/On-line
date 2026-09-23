@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<!-- Page de TEST, liée nulle part : prototype des commandes tactiles (retour utilisateur du 23/09).
+     À supprimer une fois la disposition choisie et câblée dans les 5 jeux. -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0a0c16">
+<title>Manette tactile On-line</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
+<style>
+/* Écran d'arcade : parti pris mono-thème assumé, comme le site On-line lui-même. */
+:root{
+  --ground:#0a0c16; --panel:#161a2d; --panel2:#1f2440; --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.22);
+  --ink:#eef0fb; --muted:#8e96b8; --cyan:#5be4ff; --pink:#ff5db4; --ok:#4ad991; --warn:#ffb545;
+  color-scheme:dark;
+}
+*{ -webkit-box-sizing:border-box; box-sizing:border-box; }
+html,body{ height:100%; margin:0; }
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-size:14px;
+  overflow:hidden; overscroll-behavior:none; touch-action:manipulation;
+  -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none; user-select:none;
+  -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent;
+}
+#app{ height:100%; display:-webkit-box; display:-webkit-flex; display:flex;
+  -webkit-flex-direction:column; flex-direction:column; padding:0 12px; padding:env(safe-area-inset-top, 0px) 12px 0; }
+
+/* ---------- en-tête : le choix des dispositions ---------- */
+header{ padding-top:10px; -webkit-flex:0 0 auto; flex:0 0 auto; }
+h1{ font-family:'Orbitron',system-ui,sans-serif; font-weight:800; font-size:15px; letter-spacing:.08em;
+  margin:0 0 2px; text-transform:uppercase; }
+h1 .back{ float:right; font-family:system-ui,-apple-system,sans-serif; font-size:11px; font-weight:600; letter-spacing:0;
+  text-transform:none; color:var(--muted); text-decoration:none; padding:2px 0; }
+h1 em{ font-style:normal; color:var(--cyan); }
+.sub{ color:var(--muted); font-size:11.5px; line-height:1.45; margin:0 0 9px; }
+.tabs{ display:-webkit-box; display:-webkit-flex; display:flex; -webkit-flex-wrap:wrap; flex-wrap:wrap; margin:0 -3px 8px; }
+.tab{ -webkit-flex:1 1 auto; flex:1 1 auto; margin:0 3px 6px; padding:9px 6px; border-radius:10px;
+  background:var(--panel); border:1px solid var(--line); color:var(--muted);
+  font-family:inherit; font-size:11.5px; font-weight:700; line-height:1.2; text-align:center; cursor:pointer;
+  -webkit-appearance:none; appearance:none; }
+.tab b{ display:block; font-size:12.5px; color:var(--ink); }
+.tab.on{ background:var(--panel2); border-color:var(--cyan); color:var(--cyan); }
+.tab.on b{ color:var(--cyan); }
+
+/* ---------- zone de jeu simulée ---------- */
+.arena{ -webkit-flex:1 1 auto; flex:1 1 auto; position:relative; min-height:120px;
+  border-radius:14px; overflow:hidden; background:#070912; border:1px solid var(--line); }
+.arena canvas{ display:block; width:100%; height:100%; }
+.hint{ position:absolute; left:0; right:0; top:8px; text-align:center; font-size:11px; color:var(--muted);
+  pointer-events:none; padding:0 10px; }
+
+/* ---------- bandeau de mesure ---------- */
+.meter{ -webkit-flex:0 0 auto; flex:0 0 auto; display:-webkit-box; display:-webkit-flex; display:flex;
+  -webkit-align-items:center; align-items:center; margin:8px 0 0; padding:7px 10px;
+  background:var(--panel); border:1px solid var(--line); border-radius:11px; font-size:11.5px; }
+.meter .lbl{ color:var(--muted); margin-right:6px; }
+.meter .val{ white-space:nowrap; font-weight:800; font-variant-numeric:tabular-nums; margin-right:12px; }
+.meter .val.ok{ color:var(--ok); } .meter .val.bad{ color:var(--warn); }
+.meter input[type=range]{ -webkit-flex:1 1 auto; flex:1 1 auto; min-width:60px; margin:0 8px; height:22px; }
+.meter button{ -webkit-flex:0 0 auto; flex:0 0 auto; padding:6px 12px; font-size:15px !important; border-radius:8px; font-size:11px;
+  font-weight:700; font-family:inherit; background:var(--panel2); color:var(--muted);
+  border:1px solid var(--line2); cursor:pointer; -webkit-appearance:none; appearance:none; }
+
+/* ---------- zone des commandes : c'est CE qu'on compare ---------- */
+.pad{ -webkit-flex:0 0 auto; flex:0 0 auto; position:relative; margin-top:8px;
+  padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px)); }
+.key{ position:relative; display:-webkit-box; display:-webkit-flex; display:flex;
+  -webkit-align-items:center; align-items:center; -webkit-box-pack:center; -webkit-justify-content:center; justify-content:center;
+  background:var(--panel); border:1px solid var(--line2); border-radius:16px; color:var(--ink);
+  font-size:26px; line-height:1; touch-action:none; -webkit-touch-callout:none;
+  -webkit-user-select:none; user-select:none; }
+.key.fire{ background:rgba(255,93,180,.18); border-color:rgba(255,93,180,.55); }
+.key.down{ background:var(--cyan); border-color:var(--cyan); color:#05121c; }
+.key.fire.down{ background:var(--pink); border-color:var(--pink); color:#2a0416; }
+/* la cible réelle déborde le visuel : on rattrape les appuis qui frôlent le bouton */
+.key::after{ content:''; position:absolute; top:-7px; right:-7px; bottom:-7px; left:-7px; }
+
+.rows{ display:-webkit-box; display:-webkit-flex; display:flex; -webkit-box-pack:justify;
+  -webkit-justify-content:space-between; justify-content:space-between; -webkit-align-items:flex-end; align-items:flex-end; }
+.cross{ position:relative; }
+.cross .key{ position:absolute; }
+.acts{ display:-webkit-box; display:-webkit-flex; display:flex; -webkit-flex-direction:column-reverse; flex-direction:column-reverse; }
+.acts .key{ margin-top:10px; }
+.center{ -webkit-box-pack:center; -webkit-justify-content:center; justify-content:center; }
+
+/* joystick : le cercle n'existe que sous le pouce */
+.stickzone{ position:relative; }
+.ring{ position:absolute; border-radius:50%; border:2px solid rgba(91,228,255,.45);
+  background:rgba(91,228,255,.08); pointer-events:none; opacity:0; }
+.knob{ position:absolute; border-radius:50%; background:var(--cyan); pointer-events:none; opacity:0;
+  -webkit-box-shadow:0 0 18px rgba(91,228,255,.7); box-shadow:0 0 18px rgba(91,228,255,.7); }
+.ring.on,.knob.on{ opacity:1; }
+.zonehint{ position:absolute; left:0; right:0; top:50%; margin-top:-8px; text-align:center;
+  font-size:11px; color:rgba(142,150,184,.7); pointer-events:none; }
+
+.verdict{ -webkit-flex:0 0 auto; flex:0 0 auto; margin:9px 0 0; padding:9px 11px; border-radius:11px; background:var(--panel);
+  border:1px solid var(--line); border-left:3px solid var(--cyan); font-size:11.5px; line-height:1.5; color:var(--muted); }
+.verdict b{ color:var(--ink); }
+@media (min-height:760px){ .sub{ font-size:12.5px; } .verdict{ font-size:12.5px; } }
+/* Écran court (iPhone SE, ou tout iPhone une fois les barres de Safari déduites) : les explications
+   repoussaient la manette HORS de l’écran. La consigne d’une ligne reste affichée sur le plateau. */
+@media (max-height:700px){ .sub, .verdict{ display:none; } .arena{ min-height:90px; } }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <h1>Manette <em>tactile</em><a class="back" href="/">← retour au jeu</a></h1>
+    <p class="sub" id="sub">Essaie chaque disposition <b>au pouce, téléphone en main</b> — pas à l'index posé sur une table. Le compteur du bas retient les appuis tombés à côté.</p>
+    <div class="tabs" id="tabs"></div>
+  </header>
+
+  <div class="arena">
+    <canvas id="cv"></canvas>
+    <div class="hint" id="hint"></div>
+  </div>
+
+  <div class="meter">
+    <span class="lbl">Touche</span><span class="val" id="mSize">66 px</span>
+    <span class="lbl">Ratés</span><span class="val ok" id="mMiss">0</span>
+    <input id="slider" type="range" min="54" max="104" step="2" value="66" aria-label="taille des touches">
+    <button id="reset" type="button" aria-label="remettre les ratés à zéro">↺</button>
+  </div>
+
+  <p class="verdict" id="verdict"></p>
+  <div class="pad" id="pad"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var pad = document.getElementById('pad'), tabsEl = document.getElementById('tabs');
+  var cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+  var mSize = document.getElementById('mSize'), mMiss = document.getElementById('mMiss');
+  var slider = document.getElementById('slider'), hint = document.getElementById('hint');
+  var verdictEl = document.getElementById('verdict');
+
+  var SCHEMES = [
+    { id: 'actuel', nom: 'Actuelle', tag: 'aujourd’hui', size: 66,
+      hint: 'Croix et actions au milieu du bas — comme sur le site aujourd’hui.',
+      verdict: 'Ce qui est en place : touches de <b>66 px</b> (54 px sous un écran de 370 px), groupées au centre du bas. Le pouce doit quitter le coin où il repose naturellement, et la rangée du bas tombe sous la barre d’accueil de l’iPhone.' },
+    { id: 'pouces', nom: 'Pouces', tag: 'recommandé', size: 82,
+      hint: 'Croix collée au coin bas-gauche, actions au coin bas-droit.',
+      verdict: '<b>Ancrée aux coins.</b> Les deux pouces tombent sur les touches sans déplacer la main, les touches grossissent autant que la largeur le permet (<b>~77 px</b> sur un iPhone 8, ~64 px sur un SE) avec une zone de contact qui déborde de 7 px, et une marge respecte la barre d’accueil. C’est le changement le moins risqué : rien que du CSS.' },
+    { id: 'stick', nom: 'Joystick', tag: 'plus précis', size: 78,
+      hint: 'Pose le pouce N’IMPORTE OÙ dans la zone gauche : le stick apparaît là.',
+      verdict: '<b>Joystick flottant.</b> Plus rien à viser : le stick naît sous le pouce, où qu’il se pose. C’est la meilleure précision en diagonale (Tanks, Bomberman) et ça supprime les ratés par définition. Coût : un module tactile partagé à écrire et à tester sur vieil iOS.' },
+    { id: 'pong', nom: 'Pong', tag: 'glisser', size: 82,
+      hint: 'Glisse le pouce n’importe où : la raquette suit.',
+      verdict: '<b>Pong sans boutons.</b> La raquette suit le pouce sur toute la moitié basse de l’écran. Les deux flèches ▲▼ actuelles demandent de viser puis de maintenir, alors que le geste naturel est de faire glisser. Les flèches restent en secours.' }
+  ];
+
+  var cur = SCHEMES[1], size = cur.size, eff = size, miss = 0;   // size = demandé · eff = ce qui tient à l’écran
+  var dir = '', fire = false, padPos = 0.5;              // état de jeu simulé
+  var acteur = { x: 0.5, y: 0.5 };
+
+  /* ---------- onglets ---------- */
+  for (var i = 0; i < SCHEMES.length; i++) {
+    (function (s) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'tab'; b.setAttribute('data-id', s.id);
+      b.innerHTML = '<b></b><span></span>';
+      b.firstChild.textContent = s.nom; b.lastChild.textContent = s.tag;
+      b.onclick = function () { choisir(s); };
+      tabsEl.appendChild(b);
+    })(SCHEMES[i]);
+  }
+  function choisir(s) {
+    cur = s; size = s.size; miss = 0;
+    slider.value = String(size);
+    var bs = tabsEl.getElementsByTagName('button');
+    for (var k = 0; k < bs.length; k++) bs[k].className = 'tab' + (bs[k].getAttribute('data-id') === s.id ? ' on' : '');
+    hint.textContent = s.hint;
+    verdictEl.innerHTML = s.verdict;
+    construire();
+    majMesures();
+  }
+  slider.oninput = function () { size = parseInt(slider.value, 10) || 66; construire(); majMesures(); };
+  document.getElementById('reset').onclick = function () { miss = 0; majMesures(); };
+  function majMesures() {
+    mSize.textContent = eff + ' px' + (eff < size ? ' max' : '');
+    mMiss.textContent = String(miss);
+    mMiss.className = 'val ' + (miss > 2 ? 'bad' : 'ok');
+  }
+
+  /* ---------- fabrication des commandes ---------- */
+  function touche(glyphe, code, feu) {
+    var b = document.createElement('div');
+    b.className = 'key' + (feu ? ' fire' : '');
+    b.style.width = eff + 'px'; b.style.height = eff + 'px';
+    b.style.fontSize = Math.round(eff * 0.38) + 'px';
+    b.textContent = glyphe; b.setAttribute('data-code', code);
+    return b;
+  }
+  function construire() {
+    pad.innerHTML = '';
+    dir = ''; fire = false;
+    // La croix (3 touches de large) et la colonne d’actions doivent tenir côte à côte : sur un téléphone
+    // en portrait, c’est la LARGEUR qui plafonne la taille, pas le réglage (82 px chevauchaient sur 375 px).
+    var dispo = pad.clientWidth || (window.innerWidth - 24);
+    var croixSeule = cur.id === 'pouces' || cur.id === 'actuel';
+    eff = croixSeule ? Math.min(size, Math.floor((dispo - 12) / 4.4)) : size;
+    if (cur.id === 'pong') return construirePong();
+    if (cur.id === 'stick') return construireStick();
+
+    var rows = document.createElement('div');
+    rows.className = 'rows' + (cur.id === 'actuel' ? ' center' : '');
+    // croix directionnelle : 3 colonnes × 2 rangées, positionnée en absolu pour rester compacte
+    var croix = document.createElement('div');
+    croix.className = 'cross';
+    var e = Math.round(eff * 0.14);                       // écart entre les touches
+    croix.style.width = (eff * 3 + e * 2) + 'px';
+    croix.style.height = (eff * 2 + e) + 'px';
+    var haut = touche('▲', 'up'); haut.style.left = (eff + e) + 'px'; haut.style.top = '0px';
+    var gau = touche('◀', 'left'); gau.style.left = '0px'; gau.style.top = (eff + e) + 'px';
+    var bas = touche('▼', 'down'); bas.style.left = (eff + e) + 'px'; bas.style.top = (eff + e) + 'px';
+    var dro = touche('▶', 'right'); dro.style.left = (eff * 2 + e * 2) + 'px'; dro.style.top = (eff + e) + 'px';
+    croix.appendChild(haut); croix.appendChild(gau); croix.appendChild(bas); croix.appendChild(dro);
+
+    var acts = document.createElement('div');
+    acts.className = 'acts';
+    var tir = touche('💣', 'fire', true);
+    tir.style.width = Math.round(eff * 1.12) + 'px'; tir.style.height = Math.round(eff * 1.12) + 'px';
+    var sec = touche('🧤', 'act');
+    acts.appendChild(tir); acts.appendChild(sec);
+
+    rows.appendChild(croix);
+    if (cur.id === 'actuel') { var sp = document.createElement('div'); sp.style.width = '10px'; rows.appendChild(sp); }
+    rows.appendChild(acts);
+    if (cur.id === 'actuel') { rows.style.maxWidth = '480px'; rows.style.margin = '0 auto'; }
+    pad.appendChild(rows);
+  }
+  function construireStick() {
+    var rows = document.createElement('div'); rows.className = 'rows';
+    var zone = document.createElement('div');
+    zone.className = 'stickzone'; zone.setAttribute('data-code', 'stick');
+    zone.style.width = '58%'; zone.style.height = (eff * 2.3) + 'px';
+    zone.style.border = '1px dashed rgba(255,255,255,.12)'; zone.style.borderRadius = '16px';
+    var hintz = document.createElement('div'); hintz.className = 'zonehint';
+    hintz.textContent = 'zone du pouce gauche';
+    var ring = document.createElement('div'); ring.className = 'ring'; ring.id = 'ring';
+    ring.style.width = (eff * 1.7) + 'px'; ring.style.height = (eff * 1.7) + 'px';
+    var knob = document.createElement('div'); knob.className = 'knob'; knob.id = 'knob';
+    knob.style.width = (eff * 0.62) + 'px'; knob.style.height = (eff * 0.62) + 'px';
+    zone.appendChild(hintz); zone.appendChild(ring); zone.appendChild(knob);
+
+    var acts = document.createElement('div'); acts.className = 'acts';
+    var tir = touche('💣', 'fire', true);
+    tir.style.width = Math.round(eff * 1.12) + 'px'; tir.style.height = Math.round(eff * 1.12) + 'px';
+    var sec = touche('🧤', 'act');
+    acts.appendChild(tir); acts.appendChild(sec);
+    rows.appendChild(zone); rows.appendChild(acts);
+    pad.appendChild(rows);
+  }
+  function construirePong() {
+    var zone = document.createElement('div');
+    zone.className = 'stickzone'; zone.setAttribute('data-code', 'drag');
+    zone.style.width = '100%'; zone.style.height = (eff * 2.1) + 'px';
+    zone.style.border = '1px dashed rgba(255,255,255,.12)'; zone.style.borderRadius = '16px';
+    var hintz = document.createElement('div'); hintz.className = 'zonehint';
+    hintz.textContent = 'glisse ici — ou n’importe où sur le plateau';
+    zone.appendChild(hintz);
+    pad.appendChild(zone);
+  }
+
+  /* ---------- entrées tactiles (touch : Pointer Events n'existe qu'à partir d'iOS 13) ---------- */
+  var actifs = {};                                        // identifiant de doigt -> touche enfoncée
+  var stickId = null, stickX = 0, stickY = 0;
+
+  function keyAt(t) {
+    var el = document.elementFromPoint(t.clientX, t.clientY);
+    while (el && el !== document.body) {
+      if (el.getAttribute && el.getAttribute('data-code')) return el;
+      el = el.parentNode;
+    }
+    return null;
+  }
+  function presser(el, on) {
+    var code = el.getAttribute('data-code');
+    if (code === 'fire' || code === 'act') { fire = on; }
+    else if (code === 'up' || code === 'down' || code === 'left' || code === 'right') { dir = on ? code : (dir === code ? '' : dir); }
+    if (el.className.indexOf('key') === 0) el.className = el.className.replace(' down', '') + (on ? ' down' : '');
+    if (on && window.navigator && navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
+  }
+  function stick(el, t, on) {
+    var r = el.getBoundingClientRect();
+    var ring = document.getElementById('ring'), knob = document.getElementById('knob');
+    if (!ring || !knob) return;
+    if (on === 1) { stickX = t.clientX - r.left; stickY = t.clientY - r.top; ring.className = 'ring on'; knob.className = 'knob on'; }
+    if (on === 0) { ring.className = 'ring'; knob.className = 'knob'; dir = ''; return; }
+    var rw = ring.offsetWidth / 2, kw = knob.offsetWidth / 2;
+    ring.style.left = (stickX - rw) + 'px'; ring.style.top = (stickY - rw) + 'px';
+    var dx = (t.clientX - r.left) - stickX, dy = (t.clientY - r.top) - stickY;
+    var d = Math.sqrt(dx * dx + dy * dy), lim = rw * 0.9;
+    if (d > lim) { dx = dx / d * lim; dy = dy / d * lim; d = lim; }
+    knob.style.left = (stickX + dx - kw) + 'px'; knob.style.top = (stickY + dy - kw) + 'px';
+    dir = d < rw * 0.28 ? '' : (Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+  }
+  function drag(el, t) {
+    var r = el.getBoundingClientRect();
+    padPos = Math.max(0, Math.min(1, (t.clientY - r.top) / r.height));
+  }
+
+  function onStart(ev) {
+    for (var i = 0; i < ev.changedTouches.length; i++) {
+      var t = ev.changedTouches[i], el = keyAt(t);
+      if (!el) {
+        // appui dans la zone des commandes qui n'a rien touché : c'est un raté, on le compte
+        if (t.clientY > pad.getBoundingClientRect().top) { miss++; majMesures(); ev.preventDefault(); }
+        continue;
+      }
+      ev.preventDefault();
+      var code = el.getAttribute('data-code');
+      if (code === 'stick') { stickId = t.identifier; stick(el, t, 1); }
+      else if (code === 'drag') { stickId = t.identifier; drag(el, t); }
+      else { actifs[t.identifier] = el; presser(el, true); }
+    }
+  }
+  function onMove(ev) {
+    for (var i = 0; i < ev.changedTouches.length; i++) {
+      var t = ev.changedTouches[i];
+      if (t.identifier !== stickId) continue;
+      ev.preventDefault();
+      var z = pad.querySelector('[data-code="stick"]'), p = pad.querySelector('[data-code="drag"]');
+      if (z) stick(z, t, 2); else if (p) drag(p, t);
+    }
+  }
+  function onEnd(ev) {
+    for (var i = 0; i < ev.changedTouches.length; i++) {
+      var t = ev.changedTouches[i];
+      if (t.identifier === stickId) {
+        stickId = null;
+        var z = pad.querySelector('[data-code="stick"]');
+        if (z) stick(z, t, 0);
+      }
+      var el = actifs[t.identifier];
+      if (el) { presser(el, false); delete actifs[t.identifier]; }
+    }
+  }
+  document.addEventListener('touchstart', onStart, { passive: false });
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('touchend', onEnd, { passive: false });
+  document.addEventListener('touchcancel', onEnd, { passive: false });
+  // souris : pour jeter un œil sur ordinateur (le vrai test reste le pouce)
+  document.addEventListener('mousedown', function (e) {
+    var el = keyAt(e); if (!el) return;
+    var code = el.getAttribute('data-code');
+    if (code === 'stick' || code === 'drag') return;
+    presser(el, true);
+    var up = function () { presser(el, false); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mouseup', up);
+  });
+
+  /* ---------- plateau simulé : on doit SENTIR ce que la commande produit ---------- */
+  function resize() {
+    var r = cv.parentNode.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  }
+  window.addEventListener('resize', function () { resize(); construire(); majMesures(); });
+
+  function boucle() {
+    var w = cv.width, h = cv.height, dpr = window.devicePixelRatio || 1;
+    if (!w || !h) { resize(); w = cv.width; h = cv.height; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var W = w / dpr, H = h / dpr;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#070912'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,.055)'; ctx.lineWidth = 1;
+    for (var gx = 0; gx < W; gx += 34) { ctx.beginPath(); ctx.moveTo(gx + .5, 0); ctx.lineTo(gx + .5, H); ctx.stroke(); }
+    for (var gy = 0; gy < H; gy += 34) { ctx.beginPath(); ctx.moveTo(0, gy + .5); ctx.lineTo(W, gy + .5); ctx.stroke(); }
+
+    if (cur.id === 'pong') {
+      var ph = H * 0.3, py = 10 + padPos * (H - 20 - ph);
+      ctx.fillStyle = '#5be4ff';
+      ctx.fillRect(W - 18, py, 8, ph);
+      ctx.fillStyle = 'rgba(142,150,184,.85)'; ctx.font = '11px system-ui,sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('la raquette suit le pouce', W / 2, H / 2);
+    } else {
+      var v = 0.0075;
+      if (dir === 'up') acteur.y -= v; else if (dir === 'down') acteur.y += v;
+      else if (dir === 'left') acteur.x -= v; else if (dir === 'right') acteur.x += v;
+      acteur.x = Math.max(0.04, Math.min(0.96, acteur.x));
+      acteur.y = Math.max(0.06, Math.min(0.94, acteur.y));
+      var cxp = acteur.x * W, cyp = acteur.y * H, r = Math.min(W, H) * 0.045 + (fire ? 4 : 0);
+      ctx.beginPath(); ctx.arc(cxp, cyp, r, 0, 6.2832);
+      ctx.fillStyle = fire ? '#ff5db4' : '#5be4ff'; ctx.fill();
+      ctx.fillStyle = 'rgba(142,150,184,.8)'; ctx.font = '11px system-ui,sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(dir ? '→ ' + dir : 'aucune direction reçue', W / 2, H - 12);
+    }
+    requestAnimationFrame(boucle);
+  }
+
+  choisir(SCHEMES[1]);
+  resize();
+  requestAnimationFrame(boucle);
+})();
+</script>
+</body>
+</html>
