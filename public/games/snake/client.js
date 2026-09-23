@@ -10,6 +10,10 @@ import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (lisibilité daltonien / jusqu'à 10 joueurs)
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // retour de test : l'icône seule ne dit pas l'effet, on l'écrit
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
+import { dessinerAvatar, avatarSprite } from '../../avatar-sprite.js';          // avatar du lobby : sur la tête (grande) ou en pastille au-dessus (petite)
+import { lumiere, creerLumieres } from '../../lumiere.js';        // lueurs sur la pelouse : pommes spéciales, fantômes, repas, éclats de mort
+import { crepuscule } from '../../crepuscule.js';                 // le jardin passe du jour au crépuscule quand la manche s'achève
+import { creerJournal, blocFin } from '../../finpartie.js';       // écran de fin : longueur au fil de la manche + meilleure action
 // grille dynamique (nb de joueurs) : l'arène garde la MÊME taille logique, seule la taille des cases change
 let GW = GW0, GH = GH0, CELL = CELL0;
 
@@ -161,6 +165,18 @@ export default (function () {
   const HX = new Float64Array(MAX_SEATS), HY = new Float64Array(MAX_SEATS), HON = new Uint8Array(MAX_SEATS);   // têtes dessinées cette image
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0, NOW = 0, sndPan = 0, sndGain = 1;
   let rocksRef = null, rocksKey = '';
+  // éclairage : flashs éphémères plafonnés + file d'attente (les effets tombent ~90 ms plus tard, avec l'interpolation)
+  const LUM = creerLumieres(24), lumPend = [];
+  // crépuscule : 0 = plein jour → 1 = nuit tombante ; lissé, gelé en fin de manche
+  let dusk = 0, playMs = 0;
+  let SC = 1, CSC = 1;                              // pixels (écran réel / CSS) par unité d'arène, mis à jour à chaque image
+  const AVON = new Uint8Array(MAX_SEATS);           // avatar déjà posé sur la tête cette image (sinon pastille)
+  // journal de manche (écran de fin) : séries, séries de pommes, festins, arrêts
+  const J = creerJournal();
+  let jRound = -1, jLast = -1e12;
+  const eatLast = new Float64Array(MAX_SEATS), eatRun = new Uint16Array(MAX_SEATS), eatBest = new Uint16Array(MAX_SEATS);
+  const feast = new Uint16Array(MAX_SEATS), killsBy = new Uint16Array(MAX_SEATS), lenMax = new Uint16Array(MAX_SEATS);
+  const corpse = new Set();                         // cases de nourriture laissées par un serpent mort
   const music = createMusic(() => actx, () => A, MUSIC_THEME);
   let hud, cards, startBtn, pauseBtn, modeBtn, variantBtn, rushBtn, botsBtn, diffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
@@ -237,8 +253,9 @@ export default (function () {
         <span class="estat" title="longueur">📏 ${p.len | 0}</span><span class="estat" title="pommes">🍎 ${p.score | 0}</span><span class="estat" title="serpents arrêtés">⚡ ${p.kills | 0}</span><span class="eres">${res}</span></div>`;
     }).join('');
     const mvpLine = mvp && !solo ? `<div class="emeta">⭐ MVP : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.kills} serpent${mvp.kills > 1 ? 's' : ''} arrêté${mvp.kills > 1 ? 's' : ''}</div>` : '';
+    const fin = blocFin(J, { titre: m.rush ? 'Pommes au fil de la manche' : 'Longueur des serpents', couleur: colSeat, nom: nameOf });   // noms échappés, couleurs filtrées par finpartie.js
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : '#f3ecd2'}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} joueur${m.stats.nParts > 1 ? 's' : ''}</div>${mvpLine}<div class="elist">${rows}</div><div class="ehint">Espace / clic pour rejouer</div>`;
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} joueur${m.stats.nParts > 1 ? 's' : ''}</div>${mvpLine}<div class="elist">${rows}</div>${fin}<div class="ehint">Espace / clic pour rejouer</div>`;
   }
 
   // ───────────────────────── état réseau ─────────────────────────
@@ -248,6 +265,36 @@ export default (function () {
     buf = []; parts.length = 0; waves.length = 0; floats.length = 0; rushAlerted = duelAlerted = false;
     for (const k in bulges) delete bulges[k];
     deathCause = {}; foodBorn.clear(); angSet.fill(0);
+    LUM.vider(); lumPend.length = 0; playMs = 0; corpse.clear();
+    eatLast.fill(0); eatRun.fill(0); eatBest.fill(0); feast.fill(0); killsBy.fill(0); lenMax.fill(0);
+  }
+  // ── journal de manche : une valeur par serpent (longueur, ou pommes en food-rush) + faits marquants ──
+  function jSample(m, now, force) {
+    if (!J.actif() || (!force && now - jLast < 1000)) return;
+    jLast = now;
+    const v = {}, pl = m.players || [];
+    for (let i = 0; i < pl.length; i++) {
+      const p = pl[i]; if (!p || !p.playing) continue;
+      if (p.alive && p.len > lenMax[i]) lenMax[i] = Math.min(65535, p.len | 0);
+      v[i] = m.rush ? (p.score | 0) : (p.alive ? (p.len | 0) : 0);   // mort = la courbe retombe
+    }
+    J.echantillon(now, v, force);
+  }
+  function jRoundEnd(m, now) {                      // derniers faits (survivant, meneur, plus long serpent) puis on referme
+    if (!J.actif()) return;
+    jSample(m, now, true);
+    const pl = m.players || [];
+    let dead = 0, tot = 0; for (let i = 0; i < pl.length; i++) if (pl[i] && pl[i].playing) { tot++; if (!pl[i].alive) dead++; }
+    if (tot >= 2 && m.winner >= 0) {
+      for (let i = 0; i < pl.length; i++) {
+        const p = pl[i]; if (!p || !p.playing || p.team !== m.winner) continue;
+        if (m.rush) { if (p.place === 1) J.moment(now, i, 'arrive premier à ' + (p.score | 0) + ' pommes', 4.5); }
+        else if (p.alive) J.moment(now, i, teamMode ? "a tenu jusqu'au bout pour l'équipe " + (TEAM_LETTER[p.team] || '?') : 'dernier serpent debout', 2 + 0.3 * dead);
+      }
+    }
+    let bs = -1; for (let i = 0; i < MAX_SEATS; i++) if (lenMax[i] > 0 && (bs < 0 || lenMax[i] > lenMax[bs])) bs = i;
+    if (bs >= 0 && lenMax[bs] >= 8) J.moment(now, bs, 'plus long serpent de la manche (' + lenMax[bs] + ' cases)', Math.min(4, 1 + lenMax[bs] / 20));
+    J.fin();
   }
   function onState(m) {
     if (m.gw && m.gw !== GW) { GW = m.gw; GH = m.gh || m.gw; CELL = ARENA / GW; }   // grille redimensionnée
@@ -258,12 +305,14 @@ export default (function () {
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
     if (m.round !== prevRound) { prevRound = m.round; resetRound(); }
+    if ((m.gs === 'play' || m.gs === 'paused') && jRound !== m.round) { jRound = m.round; J.debut(performance.now()); jLast = -1e12; }   // aussi pour qui arrive en cours de manche
     const prevS = buf.length ? buf[buf.length - 1].s : null;   // instantané précédent : le corps d'un serpent qui vient de mourir
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     const fxs = m.fx || []; let crashed = false;
     for (let i = 0; i < fxs.length; i++) { if (fxs[i] && fxs[i].type === 'crash') crashed = true; playFx(fxs[i], m, prevS); }
     trackFood(m, crashed);
-    if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
+    if (m.gs === 'play') jSample(m, performance.now(), crashed);     // une mort : point forcé, la chute tombe au bon instant
+    if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); jRoundEnd(m, performance.now()); }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte 3·2·1
     if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); playSince = performance.now(); }
     lastCount = m.count;
@@ -301,9 +350,11 @@ export default (function () {
       const fd = list[i], k = fd.x + fd.y * 4096, e = foodBorn.get(k);
       if (e) { e.gen = gen; continue; }
       foodBorn.set(k, { born, gen });
+      if (crashed) corpse.add(k);                   // restes d'un serpent mort (le journal compte les festins)
       if (crashed && !A.reduceFx) burst(px(fd.x), px(fd.y), 3, { k: K_SPARK, col: '255,236,150', sp: CELL * 0.05, r: CELL * 0.16, life: 700, dl: born - performance.now() + 120, jit: 200 });
     }
     foodBorn.forEach((e, k) => { if (e.gen !== gen) foodBorn.delete(k); });
+    if (corpse.size) corpse.forEach(k => { if (!foodBorn.has(k)) corpse.delete(k); });
   }
 
   // ───────────────────────── sons (WebAudio, zéro fichier) ─────────────────────────
@@ -364,6 +415,30 @@ export default (function () {
     for (let i = 0; i < fxs.length; i++) { const o = fxs[i]; if (o && o !== f && o.type === 'crash' && o.x === f.x && o.y === f.y) return 'head'; }
     return 'self';
   }
+  function lumLater(at, x, y, r, col, ms, a) { if (lumPend.length >= 40) lumPend.shift(); lumPend.push({ at, x, y, r, col, ms, a }); }
+  // faits marquants du journal (déduits des mêmes événements que les effets ; aucun message réseau en plus)
+  function jEat(f, ft, now) {
+    const s = f.seat; if (!(s >= 0 && s < MAX_SEATS) || !J.actif()) return;
+    eatRun[s] = eatLast[s] && now - eatLast[s] <= 2600 ? eatRun[s] + 1 : 1; eatLast[s] = now;
+    if (eatRun[s] >= 4 && eatRun[s] > eatBest[s]) { eatBest[s] = eatRun[s]; J.moment(now, s, 'enchaîne ' + eatRun[s] + ' pommes d\'affilée', 1.5 + eatRun[s] * 0.5); }
+    if (ft === 'gold') J.moment(now, s, 'croque une pomme dorée (+3)', 2.2);
+    const k = f.x + f.y * 4096;
+    if (corpse.has(k)) {
+      corpse.delete(k); const n = ++feast[s];
+      if (n === 3 || n === 6 || n === 10 || n === 15 || n === 25) J.moment(now, s, 'festin : ' + n + ' restes de serpent dévorés', 1.8 + n * 0.35);
+    }
+  }
+  function jCrash(f, m, cause, now) {
+    if (!J.actif()) return;
+    const by = f.by | 0;
+    if (cause === 'snake' && by >= 0 && by < MAX_SEATS) {
+      const n = ++killsBy[by];
+      J.moment(now, by, n === 1 ? 'arrête ' + nameOf(f.seat) : 'arrête ' + nameOf(f.seat) + ' (' + n + ' serpents stoppés)', 3 + 1.5 * (n - 1));
+    } else if (cause === 'head') {                  // choc frontal : noté une fois, pour le plus petit siège de la paire
+      const fxs = m.fx || [];
+      for (let i = 0; i < fxs.length; i++) { const o = fxs[i]; if (o && o !== f && o.type === 'crash' && o.x === f.x && o.y === f.y && o.seat > f.seat) { J.moment(now, f.seat, 'choc frontal avec ' + nameOf(o.seat), 2.5); break; } }
+    }
+  }
   function playFx(f, m, prevS) {
     if (!f) return;
     const now = performance.now(), dl = viewDelay(), C = CELL;
@@ -371,8 +446,13 @@ export default (function () {
       const ft = FOOD_TYPES[f.ft] === 1 ? f.ft : 'apple', mine = f.seat === mySeat;
       if (mine) { psound(ft === 'apple' ? 'eat' : ft, f.x); const fm = FOOD_MSG.hasOwnProperty(ft) ? FOOD_MSG[ft] : null; if (fm) msgPerso(fm.i, fm.t, { color: fm.c }); }   // nourriture spéciale ramassée par MOI : on annonce l'effet (les autres n'en sont pas affectés)
       else if (ft !== 'apple') { sndGain = 0.35; psound(ft, f.x); sndGain = 1; }                                // les nourritures spéciales des autres : en sourdine
+      jEat(f, ft, now);
       if (A.reduceFx) return;
       const x = px(f.x), y = px(f.y);
+      if (ft === 'gold') lumLater(now + dl, x, y, C * 4.2, '#ffd24a', 700, 0.9);          // la pomme dorée illumine la pelouse
+      else if (ft === 'ghost') lumLater(now + dl, x, y, C * 3.6, '#bfe3ff', 620, 0.7);
+      else if (ft === 'shrink') lumLater(now + dl, x, y, C * 3, '#ff8aa8', 520, 0.55);
+      else lumLater(now + dl, x, y, C * 2, '#ff9a70', 280, 0.32);
       if (f.seat >= 0 && f.seat < MAX_SEATS) { const b = bulges[f.seat] || (bulges[f.seat] = []); b.push(now + dl); if (b.length > 4) b.shift(); }   // renflement de digestion
       if (ft === 'gold') {
         burst(x, y, 12, { k: K_SPARK, col: '255,210,74', sp: C * 0.16, r: C * 0.2, life: 620, dl });
@@ -396,9 +476,11 @@ export default (function () {
       deathCause[seat] = { k: cause, by: f.by };
       psound(mine ? 'crashMe' : 'crash', f.x); music.sting('kill');
       if (mine) msgPerso('✖', CAUSE_MSG[cause], { bad: true });
+      jCrash(f, m, cause, now);
       if (A.reduceFx) return;
       shakeMag = Math.max(shakeMag, mine ? 7 : 3.5);
       const x = Math.max(3, Math.min(ARENA - 3, px(f.x))), y = Math.max(3, Math.min(ARENA - 3, px(f.y))), col = colSeat(seat);
+      lumLater(now + dl, x, y, C * 5, '#fff0c8', 520, 0.9);                                  // éclair de l'impact sur l'herbe
       if (cause === 'wall') burst(x, y, 12, { k: K_LEAF, col: ['#3f8a3a', '#5fc36a', '#2a6a2e'], sp: C * 0.15, r: C * 0.24, g: 0.018, dr: 0.94, life: 950, dl });   // la haie perd des feuilles
       else if (cause === 'rock') { burst(x, y, 9, { k: K_CHIP, col: ['#8a857c', '#b3ada2', '#5a564f'], sp: C * 0.17, r: C * 0.16, g: 0.02, life: 700, dl }); burst(x, y, 4, { k: K_SPARK, col: '255,250,230', sp: C * 0.14, r: C * 0.14, life: 300, dl }); }
       else burst(x, y, 8, { k: K_SPARK, col: '255,240,200', sp: C * 0.2, r: C * 0.18, life: 360, dl });   // étoile d'impact
@@ -409,10 +491,12 @@ export default (function () {
       if (pp && pp.path) {
         const L = loadPath(pp.path, false, 0, 0);
         if (L > 0) {
-          const step = Math.max(C * 0.8, L / 36);
+          const step = Math.max(C * 0.8, L / 36), lstep = Math.max(step, L / 4);           // ≤ 5 lueurs par corps : les éclats éclairent le sol
+          let nextL = L;
           for (let d = L; d >= 0; d -= step) {
             pointAt(d, 0); if (!QOK) continue;
             const del = dl + (L - d) / L * 280;
+            if (d <= nextL + 1e-6) { nextL = d - lstep; lumLater(now + del, QX, QY, C * 2.6, col, 760, 0.45); }
             burst(QX, QY, 1, { k: K_CHIP, col, sp: C * 0.1, r: C * 0.22, g: 0.012, life: 850, dl: del });
             if (Math.random() < 0.4) burst(QX, QY, 1, { k: K_SPARK, col: '255,220,110', sp: C * 0.06, r: C * 0.15, life: 700, dl: del + 60 });
           }
@@ -519,7 +603,9 @@ export default (function () {
   }
   // Tête : ombre, langue fourchue, contour, motif, reflet, narines, yeux (paupière qui cligne, pupille tournée
   // vers la nourriture la plus proche). ang = orientation lissée ; (lx, ly) = direction du regard (unitaire).
-  function drawHead(C, x, y, ang, col, seat, alpha, blink, tongue, lx, ly) {
+  // av = pseudo dont on pose l'avatar sur le crâne (derrière les yeux, toujours droit) ; renvoie true s'il est posé.
+  function drawHead(C, x, y, ang, col, seat, alpha, blink, tongue, lx, ly, av) {
+    let onHead = false;
     const T = tint(col), ca = Math.cos(ang), sa = Math.sin(ang);
     ctx.save(); ctx.translate(x, y); if (alpha < 1) ctx.globalAlpha = alpha;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -534,6 +620,7 @@ export default (function () {
     ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.beginPath(); oval(ctx, C * 0.5, 0, C * 0.15, C * 0.28); ctx.fill();   // museau
     ctx.rotate(-ang); ctx.fillStyle = T.lt; ctx.globalAlpha = (alpha < 1 ? alpha : 1) * 0.45; ctx.beginPath(); oval(ctx, -C * 0.14, -C * 0.2, C * 0.2, C * 0.1); ctx.fill(); ctx.rotate(ang);
     ctx.globalAlpha = alpha < 1 ? alpha : 1;
+    if (av) { ctx.rotate(-ang); onHead = dessinerAvatar(ctx, av, -C * 0.2 * ca, -C * 0.2 * sa, C * 0.58, SC, A.contrast ? '#ffffff' : T.dk); ctx.rotate(ang); }   // les yeux restent dessinés par-dessus
     ctx.fillStyle = T.dk; ctx.beginPath(); circ(ctx, C * 0.54, -C * 0.11, C * 0.04); circ(ctx, C * 0.54, C * 0.11, C * 0.04); ctx.fill();   // narines
     const er = C * 0.17, ex = C * 0.16, ey = C * 0.26, llx = lx * ca + ly * sa, lly = -lx * sa + ly * ca;
     ctx.fillStyle = T.dk; ctx.beginPath(); circ(ctx, ex, -ey, er * 1.25); circ(ctx, ex, ey, er * 1.25); ctx.fill();
@@ -545,6 +632,7 @@ export default (function () {
       ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); circ(ctx, ex + ox - er * 0.18, -ey + oy - er * 0.18, er * 0.2); circ(ctx, ex + ox - er * 0.18, ey + oy - er * 0.18, er * 0.2); ctx.fill();
     }
     ctx.restore();
+    return onHead;
   }
   // un serpent vivant : corps de l'instantané b, tête ramenée le long du corps et queue prolongée selon al
   function drawSnake(pa, now, dtm, foods) {
@@ -582,7 +670,8 @@ export default (function () {
     const ll = Math.hypot(lx, ly) || 1, near = best < 6.25 * C * C;
     const tp = (now + seat * 1531) % (near ? 900 : 2600), tongue = soft && tp < 260 ? Math.sin(tp / 260 * Math.PI) : 0;
     const blink = soft && ((now + seat * 977) % 4300) < 130;
-    drawHead(C, hx, hy, headAng[seat], col, seat, ga, blink, tongue, lx / ll, ly / ll);
+    const av = !pb.bot && pb.name && C * CSC >= 23 ? pb.name : null;               // tête assez grande à l'écran : l'avatar va sur le crâne
+    AVON[seat] = drawHead(C, hx, hy, headAng[seat], col, seat, ga, blink, tongue, lx / ll, ly / ll, av) ? 1 : 0;
     HX[seat] = hx; HY[seat] = hy; HON[seat] = 1;
   }
   // repères : « c'est moi » (anneau pulsé + flèche au départ), couronne des vainqueurs en fin de manche
@@ -613,6 +702,29 @@ export default (function () {
       if (cd) { ctx.font = '700 12px ' + DISP; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 3; ctx.strokeStyle = '#10200e'; const ly = ty - s * (k * 1.1 + 8); ctx.strokeText('TOI', x, ly); ctx.fillStyle = '#fff4cf'; ctx.fillText('TOI', x, ly); }
     }
     ctx.restore();
+  }
+
+  // avatars en pastille pour les têtes trop petites pour les porter (10 joueurs, mobile) : posée derrière la
+  // tête, sur le cou (jamais sur la case devant ni sur celles où l'on peut tourner) ; au-dessus de la couronne en fin.
+  function drawAvatarPips(now) {
+    const C = CELL, pl = snap.players || [], over = snap.gs === 'over';
+    const d = Math.min(C * 1.8, Math.max(C * 1.05, 12 / (CSC || 1)));
+    const arrow = snap.gs === 'countdown' || (snap.gs === 'play' && now - playSince < 2500);
+    for (let s = 0; s < MAX_SEATS; s++) {
+      if (!HON[s] || AVON[s]) continue;
+      const p = pl[s]; if (!p || p.bot || !p.name) continue;
+      if (s === mySeat && arrow) continue;          // la flèche « TOI » occupe déjà cette place
+      const crown = over && snap.winner >= 0 && p.alive && p.team === snap.winner;
+      let x = HX[s], y;
+      if (crown) { y = HY[s] - C * 0.62 - d / 2 - C * 0.2 - Math.max(4.5, C * 0.55) * 1.2; if (y - d / 2 < 1) y = HY[s] + C * 0.62 + d / 2; }
+      else { const k = C * 0.55 + d / 2; x -= Math.cos(headAng[s]) * k; y = HY[s] - Math.sin(headAng[s]) * k; }   // en jeu : DERRIÈRE la tête, sur son propre cou — ni la case devant, ni celles où l'on tourne
+      x = Math.max(d / 2 + 1, Math.min(ARENA - d / 2 - 1, x)); y = Math.max(d / 2 + 1, Math.min(ARENA - d / 2 - 1, y));
+      const lis = A.contrast ? '#ffffff' : colSeat(s);
+      const spr = avatarSprite(p.name, d * SC, lis);
+      if (!spr) continue;                           // pas d'avatar (ou image pas encore décodée) : rien, pas même l'ombre
+      ctx.globalAlpha = 0.35; ctx.fillStyle = '#041204'; ctx.beginPath(); circ(ctx, x + d * 0.06, y + d * 0.1, d * 0.52); ctx.fill(); ctx.globalAlpha = 1;   // ombre : la pastille se détache
+      ctx.drawImage(spr, x - d / 2, y - d / 2, d, d);
+    }
   }
 
   // ───────────────────────── nourriture ─────────────────────────
@@ -799,6 +911,51 @@ export default (function () {
     const spr = glow('216,255,154');
     for (let i = 0; i < AMB_FLY.length; i++) { const f = AMB_FLY[i], x = f.x * ARENA + Math.sin(t / 2.2 + f.ph) * 26, y = f.y * ARENA + Math.cos(t / 1.9 + f.ph * 1.7) * 20, gl = 0.5 + 0.5 * Math.sin(t / 0.65 + f.ph), r = (f.r + gl) * 3.2; ctx.globalAlpha = 0.12 + 0.3 * gl; ctx.drawImage(spr, x - r, y - r, r * 2, r * 2); }
     ctx.restore();
+  }
+
+  // ───────────────────────── éclairage dynamique (après le sol, avant les pièces) ─────────────────────────
+  // Sources permanentes (pommes spéciales, serpents fantômes, lucioles et pommes qui luisent à la brune) +
+  // flashs éphémères (repas, impacts, éclats du corps). Sprites pré-rendus en additif : aucun dégradé par image.
+  function drawLights(now, S) {
+    if (A.reduceFx) { lumPend.length = 0; LUM.vider(); return; }
+    const C = CELL, boost = 1 + 0.6 * dusk;         // à la tombée du jour, les lueurs portent davantage
+    for (let i = 0; i < lumPend.length; i++) { const q = lumPend[i]; if (now >= q.at) { LUM.ajouter(q.x, q.y, q.r, q.col, q.ms, q.a * boost); lumPend.splice(i, 1); i--; } }
+    if (S) {
+      const foods = S.food || [];
+      for (let i = 0; i < foods.length; i++) {
+        const fd = foods[i], t = fd.t, x = px(fd.x), y = px(fd.y);
+        if (t === 'gold') lumiere(ctx, x, y, C * 2.6, '#ffd24a', (0.3 + 0.08 * Math.sin(now / 300 + fd.x)) * boost);
+        else if (t === 'ghost') lumiere(ctx, x, y, C * 2.2, '#bfe3ff', 0.22 * boost);
+        else if (t === 'shrink') lumiere(ctx, x, y, C * 1.8, '#ff8aa8', 0.14 * boost);
+        else if (dusk > 0.15) lumiere(ctx, x, y, C * 1.3, '#ff7a5a', 0.16 * dusk);   // pommes qui luisent à la brune
+      }
+      const pl = S.players || [];                   // têtes de l'image précédente : un décalage d'une image, invisible
+      for (let s = 0; s < pl.length && s < MAX_SEATS; s++) { const p = pl[s]; if (p && p.alive && p.ghost && HON[s]) lumiere(ctx, HX[s], HY[s], C * 3, '#cfe6ff', (0.2 + 0.06 * Math.sin(now / 110 + s)) * boost); }
+    }
+    if (dusk > 0.05) {                              // les lucioles éclairent l'herbe quand le jour baisse
+      const t = now / 1000;
+      for (let i = 0; i < AMB_FLY.length; i++) { const f = AMB_FLY[i], gl = 0.5 + 0.5 * Math.sin(t / 0.65 + f.ph); lumiere(ctx, f.x * ARENA + Math.sin(t / 2.2 + f.ph) * 26, f.y * ARENA + Math.cos(t / 1.9 + f.ph * 1.7) * 20, 18, '#d8ff9a', 0.2 * dusk * gl); }
+    }
+    LUM.dessiner(ctx, now);
+  }
+  // crépuscule : survie → part des serpents tombés (duel final = soir), food-rush → approche de la cible,
+  // et une manche qui s'éternise voit le soleil baisser. Plafonné à 0.85 : serpents et nourriture restent nets.
+  function updateDusk(dtm) {
+    const gs = snap ? snap.gs : 'lobby';
+    if (gs === 'play') playMs += dtm;
+    if (gs === 'over') return;                      // gelé : l'écran de fin garde la lumière du dénouement
+    let tgt = 0;
+    if (gs === 'play' || gs === 'paused') {
+      const pl = snap.players || []; let tot = 0, alive = 0, lead = 0;
+      for (let i = 0; i < pl.length; i++) { const p = pl[i]; if (!p || !p.playing) continue; tot++; if (p.alive) alive++; if (p.score > lead) lead = p.score; }
+      const te = (playMs / 1000 - 45) / 150;
+      if (snap.rush) tgt = Math.max(te, (lead / (snap.rushTarget || 20) - 0.4) / 0.6);
+      else if (tot >= 2) { tgt = Math.max(te, (tot - alive) / (tot - 1)); if (tot >= 3 && alive <= 2) tgt = Math.max(tgt, 0.72); }
+      else tgt = te;
+      tgt = tgt < 0 ? 0 : tgt > 0.85 ? 0.85 : tgt;
+    }
+    dusk += (tgt - dusk) * Math.min(1, dtm / (tgt < dusk ? 500 : 1600));
+    if (dusk < 0.002) dusk = 0;
   }
 
   // ───────────────────────── particules, ondes, textes flottants ─────────────────────────
@@ -1011,19 +1168,24 @@ export default (function () {
     let ox = 0, oy = 0;
     if (shakeMag > 0.3 && soft) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= Math.pow(0.85, kdt); } else shakeMag = 0;
     ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
+    SC = sc; CSC = sc / (window.devicePixelRatio || 1);
     ensureTerrain(); ctx.drawImage(terrainCv, 0, 0, ARENA, ARENA);   // décor statique pré-rendu (1 drawImage au lieu de ~6000 tracés)
     if (snap && snap.variant === 1) drawPortal(now);
+    updateDusk(dtm);
+    if (snap) viewPair(now);
+    const S = snap ? (VA || snap) : null;
+    drawLights(now, S);                             // lumière sur le sol, avant toute pièce
     if (soft) drawAmbient(now);
-    HON.fill(0);
-    if (snap) {
-      viewPair(now);
-      const S = VA || snap, foods = S.food || [], pl = S.players || [];
+    HON.fill(0); AVON.fill(0);
+    if (S) {
+      const foods = S.food || [], pl = S.players || [];
       drawFoods(foods, now);
       for (let i = 0; i < pl.length; i++) if (i !== mySeat) drawSnake(pl[i], now, dtm, foods);   // un serpent mort disparaît du plateau (il n'est plus un obstacle)
       if (mySeat >= 0 && pl[mySeat]) drawSnake(pl[mySeat], now, dtm, foods);                   // le mien par-dessus
-      drawMarkers(now);
     }
     drawFx(now, kdt);
+    if (dusk > 0.01) crepuscule(ctx, 0, 0, ARENA, ARENA, dusk, { soleil: 'gauche', force: A.contrast || A.reduceFx ? 0.6 : 1 });   // étalonnage sur sol + pièces
+    if (snap) { drawMarkers(now); drawAvatarPips(now); }                         // repères et pastilles au-dessus du crépuscule : toujours nets
     if (snap && snap.rush && (snap.gs === 'play' || snap.gs === 'countdown')) drawRush();
     if (snap && snap.gs === 'countdown') drawCountdown(now);
     if (snap && snap.gs === 'lobby') drawLobby(now);
@@ -1078,7 +1240,8 @@ export default (function () {
     rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
-  function teardown() { destroyed = true; music.stop(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); parts.length = 0; waves.length = 0; floats.length = 0; }
+  function teardown() { destroyed = true; music.stop(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); parts.length = 0; waves.length = 0; floats.length = 0; LUM.vider(); lumPend.length = 0;
+    J.fin(); jRound = -1; prevRound = -1; dusk = 0; }   // retour au jeu (autre salle, manche renumérotée) : journal et lumière repartent propres
 
   return { init, onState, onMessage, onLb, onA11y, teardown };
 })();

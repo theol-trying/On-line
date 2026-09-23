@@ -10,6 +10,10 @@ import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (daltonisme / jusqu'à 10 joueurs)
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // bandeaux « ce que tu viens de ramasser »
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux jeux (mode plein écran compris)
+import { dessinerAvatar } from '../../avatar-sprite.js';        // avatar du lobby en pastille portée par la moto
+import { lumiere, creerLumieres } from '../../lumiere.js';      // phares, halos de traînée, dérésolutions qui éclairent le sol
+import { crepuscule } from '../../crepuscule.js';               // jour → crépuscule pendant que l'arène se referme
+import { creerJournal, blocFin } from '../../finpartie.js';     // courbe de la manche + meilleure action (écran de fin)
 
 // musique : synthwave en mi mineur (i–VI–III–VII) — nappe en dents de scie, basse en croches à l'octave,
 // arpège carré, batterie 4 temps ; lobby = nappe + arpège sinus ; climax (duel final) = charley serré + lead.
@@ -136,6 +140,14 @@ export default (function () {
   let lastFrame = 0, wallFlash = 0, invFlash = 0, lastFw = 0;
   let occ = null;                                        // occupation de la grille (reconstruite à 15 Hz) : alerte « mur devant »
   const music = createMusic(() => actx, () => A, MUSIC_THEME);
+  // Couche « vitrine » : éclairage dynamique, crépuscule, journal de manche (côté client seulement)
+  const LUM = creerLumieres(24), J = creerJournal({ pas: 750 });
+  let duskT = 0, jClock = 0, jLast = 0;                  // jClock : temps de JEU (les pauses ne comptent pas)
+  const dist = {}, lastHead = {}, lastKill = {}, phareC = {};
+  // intensité des lueurs : pleine en Néon/CRT, discrète sur le sol clair, adoucie en contraste élevé
+  const lk = () => (TH.glow ? 1 : 0.35) * (A.contrast ? 0.6 : 1);
+  const phare = col => phareC[col] || (phareC[col] = rgbStr(mix(hexRgb(col), [255, 255, 255], 0.65)));
+  const pname = s => { const p = snap && snap.players[s]; return (p && p.name) || ('P' + (s + 1)); };
   let hud, cards, startBtn, pauseBtn, modeBtn, fadeBtn, botsBtn, diffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
@@ -207,7 +219,7 @@ export default (function () {
     }).join('');
     const mvpLine = mvp ? `<div class="emeta">⭐ MVP : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.kills} élimination${mvp.kills > 1 ? 's' : ''}</div>` : '';
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : '#fff'}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} pilotes</div>${mvpLine}<div class="elist">${rows}</div><div class="ehint">Espace / clic pour rejouer</div>`;
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} pilotes</div>${mvpLine}<div class="elist">${rows}</div>${blocFin(J, { titre: 'Distance parcourue (cases)', couleur: s => colSeat(s), nom: pname })}<div class="ehint">Espace / clic pour rejouer</div>`;
   }
 
   // ───────────────────────── état réseau ─────────────────────────
@@ -220,13 +232,22 @@ export default (function () {
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
+    const tNow = performance.now();
     if (m.round !== prevRound) {
+      J.fin(); LUM.vider(); duskT = 0; jLast = 0;
+      for (const k in dist) delete dist[k]; for (const k in lastHead) delete lastHead[k]; for (const k in lastKill) delete lastKill[k];
       prevRound = m.round; buf = []; killcam = null; prevShrink = 0;
       voxels.length = 0; sparks.length = 0; rings.length = 0; flashes.length = 0; labels.length = 0; cutGhosts.length = 0; derez.length = 0; embers.length = 0;
       for (const k in deadAt) delete deadAt[k]; for (const k in angView) delete angView[k]; for (const k in headPos) delete headPos[k];
     }
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
+    if (m.gs === 'play') {                               // horloge de jeu du journal (arrivée en cours de manche : courbe partielle)
+      if (!J.actif()) { J.debut(0); jClock = 0; for (const k in dist) delete dist[k]; for (const k in lastHead) delete lastHead[k]; for (const k in lastKill) delete lastKill[k]; }
+      else if (jLast) jClock += Math.min(500, tNow - jLast);
+      jLast = tNow;
+    } else jLast = 0;
     (m.fx || []).forEach(playFx);
+    journal(m);
     if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte 3·2·1 (bip même sans musique)
     if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); }
@@ -257,6 +278,39 @@ export default (function () {
     modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     fadeBtn.disabled = !idle; fadeBtn.textContent = m.fade ? '〰 Traînée courte' : '➖ Traînée ∞'; fadeBtn.classList.toggle('on', !!m.fade);
   }
+  // Journal de manche : distance parcourue par pilote (cases, prise sur la tête — vaut aussi en « traînée courte »)
+  function journal(m) {
+    if (!J.actif() || (m.gs !== 'play' && m.gs !== 'over')) return;
+    const vals = {};
+    m.players.forEach(p => {
+      if (!p.playing || !p.head) return;
+      const h = p.head, lh = lastHead[p.seat];
+      if (lh) { const d = Math.abs(h.x - lh.x) + Math.abs(h.y - lh.y); if (p.alive && d > 0 && d <= 12) dist[p.seat] = (dist[p.seat] || 0) + d; lh.x = h.x; lh.y = h.y; }
+      else lastHead[p.seat] = { x: h.x, y: h.y };
+      vals[p.seat] = dist[p.seat] || 0;
+    });
+    if (m.gs === 'over') {                               // dernier survivant : le moment qui clôt la manche
+      const surv = m.winner >= 0 ? m.players.filter(p => p.playing && p.alive && p.team === m.winner) : [];
+      const best = surv.slice().sort((a, b) => (dist[b.seat] || 0) - (dist[a.seat] || 0))[0];
+      if (best) J.moment(jClock, best.seat, (teamMode ? 'a tenu la grille pour son équipe' : 'dernier·e en ligne') + ((m.shrink | 0) > 0 ? ' dans l’arène refermée' : ''), m.players.filter(p => p.playing).length >= 4 ? 6 : 5);
+      J.echantillon(jClock, vals, true); J.fin();
+    } else J.echantillon(jClock, vals);
+  }
+  function journalCrash(f) {                            // élimination créditée : coupure (décisive, double…)
+    if (!J.actif() || !snap || !(f.by >= 0) || f.by === f.seat) return;
+    const k = snap.players[f.by], v = snap.players[f.seat]; if (!k || !v) return;
+    if (teamMode && k.team === v.team) return;           // tir ami : pas un exploit
+    const alive = snap.players.filter(p => p.playing && p.alive), teams = {};
+    alive.forEach(p => { teams[p.team] = 1; });
+    const units = teamMode ? Object.keys(teams).length : alive.length, vn = pname(f.seat);
+    const k0 = lastKill[f.by], dbl = !!(k0 && jClock - k0.t < 2500);
+    let txt = 'a coupé la route de ' + vn, w = 4;
+    if (dbl) { txt = 'double coupure : ' + k0.n + ' puis ' + vn; w = 8; }
+    if (units <= 1) { txt = 'coupure décisive : a sorti ' + vn + (dbl ? ' (doublé)' : ''); w = dbl ? 10 : 9; }
+    J.moment(jClock, f.by, txt, w);
+    lastKill[f.by] = { t: jClock, n: vn };
+  }
+
   // Grille d'occupation reconstruite à chaque instantané (15 Hz, pas à chaque image) : -1 = mur, s+1 = traînée du siège s
   function buildOcc() {
     const n = GW * GH; if (!occ || occ.length !== n) occ = new Int16Array(n); else occ.fill(0);
@@ -350,6 +404,8 @@ export default (function () {
       const side = k % 4, u = w + Math.random() * (E - w), x = side === 0 ? u : side === 1 ? E : side === 2 ? u : w, y = side === 0 ? w : side === 1 ? u : side === 2 ? E : u;
       spawnSparks(x, y, 1, TH.laser, 2.2, [Math.PI / 2, Math.PI, -Math.PI / 2, 0][side], 1.4);
     }
+    const lr = Math.max(CELL * 6, (E - w) * 0.22), m0 = (w + E) / 2;   // la barrière qui avance illumine ses 4 faces
+    [[m0, w], [E, m0], [m0, E], [w, m0]].forEach(q => LUM.ajouter(q[0], q[1], lr, TH.laser, 520, 0.5 * lk()));
     shakeMag = Math.max(shakeMag, 2.5);
   }
   function playFx(f) {
@@ -367,6 +423,8 @@ export default (function () {
         if (d && d.t) msgPerso(d.i, d.t);              // `d.t` : garde-fou si `kind` tombe sur une clé du prototype
       }
       const d = puDef(f.kind), x = px(f.x), y = px(f.y), st = angView[f.seat], a = st ? st.t : 0;
+      if (!A.reduceFx) LUM.ajouter(x, y, CELL * 4.2, d.c, 420, 0.7 * lk());
+      if (f.kind === 'invert') J.moment(jClock, f.seat, 'a inversé les contrôles adverses', 2);
       ring(x, y, CELL * 0.6, CELL * 3.6, d.c, 2.2, 460, 'hex');
       spawnSparks(x, y, 10, d.c, 1.8);
       if (f.kind === 'invert') ring(x, y, CELL, CELL * 14, d.c, 3, 700, 'c');
@@ -387,6 +445,8 @@ export default (function () {
       if (f.seat === mySeat) msgPerso(BREAK_MSG.i, BREAK_MSG.t);
       const x = px(f.x), y = px(f.y);
       spawnVoxels(x, y, 0, PU.breaker.c, 9, 1.4); spawnSparks(x, y, 14, '#ffffff', 2.6);
+      if (!A.reduceFx) LUM.ajouter(x, y, CELL * 4.8, PU.breaker.c, 460, 0.85 * lk());
+      J.moment(jClock, f.seat, 'a percé une traînée au casse-mur', 3.5);
       ring(x, y, CELL * 0.5, CELL * 2.8, PU.breaker.c, 2.4, 380, 'sq');
       return;
     }
@@ -399,7 +459,10 @@ export default (function () {
       const x = hp ? hp.x : px(cx), y = hp ? hp.y : px(cy), a = hp ? hp.a : 0;
       capPush(derez, { seat: f.seat, col, x, y, a, born: now }, 10);
       capPush(labels, { x, y, txt: 'DÉRÉSOLU', sub: f.by >= 0 && f.by !== f.seat ? 'par ' + canvasName(f.by) : '', col, born: now }, 5);
+      journalCrash(f);
       if (A.reduceFx) return;
+      LUM.ajouter(x, y, CELL * 7.5, col, 760, 0.95 * lk());       // la dérésolution éclaire la grille alentour
+      LUM.ajouter(x, y, CELL * 3.6, '#ffffff', 300, 0.7 * lk());
       shakeMag = Math.max(shakeMag, f.seat === mySeat ? 9 : 3.5);
       spawnVoxels(x, y, a, col, 24, 1);
       spawnSparks(px(cx), px(cy), 12, col, 3);
@@ -700,6 +763,14 @@ export default (function () {
       }
     }
     ctx.restore();
+    // pilote : l'avatar du lobby en pastille sur la selle, toujours droit (lisible), liseré à la couleur du siège.
+    // Taille plancher de 9 unités : reste identifiable sur la grande grille à 10 joueurs. Bots : pas d'avatar.
+    if (!p.bot && p.name) {
+      const D = Math.max(C * 1.15, 9), ax = x - Math.cos(ang) * C * 0.85, ay = y - Math.sin(ang) * C * 0.85;
+      if (p.ghost) ctx.globalAlpha = FX ? 0.55 + 0.2 * Math.sin(now / 55) : 0.6;
+      dessinerAvatar(ctx, p.name, ax, ay, D, cv.width / ARENA, col);
+      ctx.globalAlpha = 1;
+    }
   }
   function drawMeMarker(x, y, now) {                        // repère « c'est moi » : équerres pulsées autour de la tête + pointe au-dessus
     const C = CELL, s = C * 0.9 + 2 + (FX ? Math.sin(now / 200) * 1.2 : 0), l = Math.max(2.5, C * 0.5);
@@ -711,6 +782,41 @@ export default (function () {
     const ty = y - s - 3; ctx.fillStyle = TH.accent; ctx.strokeStyle = TH.glow ? '#02060c' : '#ffffff'; ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.moveTo(x - 5, ty - 7); ctx.lineTo(x + 5, ty - 7); ctx.lineTo(x, ty); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.restore();
+  }
+
+  // ───────────────────────── éclairage dynamique (sous les pièces) ─────────────────────────
+  // Phare qui éclaire la grille devant chaque moto, halo de la traînée chaude derrière, réacteur en boost,
+  // hologrammes des bonus ; flashs éphémères (dérésolution, casse-mur, bonus, barrière) via LUM.
+  // Plus marqué quand la nuit tombe (crépuscule). Coupé en « réduire les effets ».
+  function drawLights(now) {
+    if (A.reduceFx) { LUM.vider(); return; }
+    const k = lk() * (1 + 0.9 * duskT), C = CELL;
+    if (snap && snap.gs !== 'lobby') {
+      const pr = puR() * 2.6;
+      (snap.pickups || []).forEach(pk => lumiere(ctx, px(pk.x), px(pk.y), pr, puDef(pk.t).c, 0.16 * k));
+      for (const p of snap.players) {
+        if (!p.playing || !p.alive) continue;
+        const h = headPos[p.seat]; if (!h) continue;                    // position de l'image précédente : écart imperceptible
+        const ca = Math.cos(h.a), sa = Math.sin(h.a), col = colSeat(p.seat), fast = p.boosting || p.speed;
+        lumiere(ctx, h.x + ca * 2.5 * C, h.y + sa * 2.5 * C, C * (fast ? 3.3 : 2.7), phare(col), (fast ? 0.3 : 0.22) * k);
+        lumiere(ctx, h.x - ca * 3 * C, h.y - sa * 3 * C, C * (fast ? 3.4 : 2.7), col, (p.boosting ? 0.36 : 0.22) * k * (p.ghost ? 0.5 : 1));
+        if (p.boosting) lumiere(ctx, h.x - ca * 2.5 * C, h.y - sa * 2.5 * C, C * 2, '#ffffff', (0.16 + 0.12 * Math.random()) * k);
+      }
+    }
+    LUM.dessiner(ctx, now);
+  }
+  // ───────────────────────── crépuscule : l'arène qui se referme fait tomber la nuit ─────────────────────────
+  // t d'après snap.shrink : 0,25 au premier recul du mur, nuit (plafonnée par crepuscule.js) quand l'arène a perdu
+  // ~la moitié de sa largeur. Lissé dans le temps ; conservé sur l'écran de fin, remis à zéro au lobby.
+  function drawDusk(dtm) {
+    const s = snap ? (snap.shrink | 0) : 0, gs = snap ? snap.gs : 'lobby';
+    let tgt = 0;
+    if (s > 0 && (gs === 'play' || gs === 'paused' || gs === 'over')) tgt = 0.25 + 0.75 * Math.min(1, (s - 1) / Math.max(4, GW * 0.25));
+    duskT += (tgt - duskT) * (A.reduceFx ? 1 : Math.min(1, dtm / 700));
+    if (duskT < 0.01 && !tgt) { duskT = 0; return; }
+    const force = (TH.glow ? 0.92 : 0.5) * (A.contrast ? 0.7 : 1) * (A.reduceFx ? 0.6 : 1);
+    // débord = celui du fond (-20) : le tremblement ne découvre pas de liseré « jour » au bord
+    crepuscule(ctx, -20, -20, ARENA + 40, ARENA + 40, duskT, { soleil: A.reduceFx ? false : 'haut', force });
   }
 
   // ───────────────────────── murs de rétrécissement : barrières laser ─────────────────────────
@@ -979,6 +1085,7 @@ export default (function () {
     ensureDecor(); ctx.drawImage(decorCv, 0, 0, ARENA, ARENA);
     drawAmbient(now);
     drawWalls(now);
+    drawLights(now);                                     // lumière sur le sol, avant bonus, traînées et motos
     const over = !!(snap && snap.gs === 'over'), me = (snap && mySeat >= 0) ? snap.players[mySeat] : null;
 
     if (snap) {
@@ -1004,7 +1111,7 @@ export default (function () {
         if (over) {                                                                                // vainqueur(s) : auréole pulsée
           ctx.save(); ctx.strokeStyle = colSeat(p.seat); ctx.lineWidth = 2.2; ctx.globalAlpha = FX ? 0.5 + 0.4 * Math.sin(now / 180) : 0.8;
           ctx.beginPath(); ctx.arc(hx - Math.cos(ang) * CELL * 0.8, hy - Math.sin(ang) * CELL * 0.8, CELL * 2.2 + 3, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
-          if (FX && now - lastFw > 850) { lastFw = now; const fx0 = hx + (Math.random() - 0.5) * 90, fy0 = hy + (Math.random() - 0.5) * 90; spawnSparks(fx0, fy0, 18, colSeat(p.seat), 2.6); spawnSparks(fx0, fy0, 6, '#ffffff', 1.6); ring(fx0, fy0, 2, 26, colSeat(p.seat), 1.6, 520, 'sq'); }
+          if (FX && now - lastFw > 850) { lastFw = now; const fx0 = hx + (Math.random() - 0.5) * 90, fy0 = hy + (Math.random() - 0.5) * 90; spawnSparks(fx0, fy0, 18, colSeat(p.seat), 2.6); spawnSparks(fx0, fy0, 6, '#ffffff', 1.6); LUM.ajouter(fx0, fy0, 38, colSeat(p.seat), 620, 0.6 * lk()); ring(fx0, fy0, 2, 26, colSeat(p.seat), 1.6, 520, 'sq'); }
         }
       }
       for (const p of pl) if (p.playing && !p.alive && p.head && !(deadAt[p.seat] && now - deadAt[p.seat] < 700)) {   // épave, une fois la dérésolution jouée : croix sobre
@@ -1014,6 +1121,7 @@ export default (function () {
       if (me && me.playing && me.alive && !over && headPos[mySeat] && snap.gs !== 'countdown') drawMeMarker(headPos[mySeat].x, headPos[mySeat].y, now);
     }
     drawFx(now, kdt);
+    drawDusk(dtm);                                       // étalonnage par-dessus l'arène ; HUD, alertes et voiles restent nets
     if (me && me.playing && me.alive && snap.gs === 'play') { drawDanger(me, now); drawGauge(me, now); }
     if (invFlash && now - invFlash < 700) {                 // inversion subie : liseré magenta qui pulse au bord de l'écran
       const t = (now - invFlash) / 700; ctx.save(); ctx.strokeStyle = PU.invert.c;

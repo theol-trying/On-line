@@ -1,6 +1,7 @@
 // SHELL client de la plateforme : réseau (WS + token), pseudo, menu de jeux, accessibilité partagée,
 // gestion des panneaux modaux, et délégation du rendu/inputs au module du jeu actif (games/<id>/client.js).
 import { initJoystick, joystickPour } from './joystick.js';   // manette tactile des 5 jeux (téléphone)
+import { creerVitrine } from './vitrine.js';                  // accueil : les 6 jeux en cartes animées
 
 let ws = null;
 let you = { id: null, name: '', token: localStorage.getItem('pong-lan-token') || '' };
@@ -385,6 +386,14 @@ function avatarHtml(name, cls) {          // HTML sûr : l'image n'est acceptée
   return `<span class="${cls || 'av'} av-e">${esc(a)}</span>`;
 }
 window.__AV = n => avatarHtml(n);         // utilisé par les cartes HUD des 5 jeux
+// Source BRUTE de l'avatar pour le canvas (public/avatar-sprite.js) : l'emoji, ou la data URL validée par
+// AV_IMG_RE (base64 strict) — jamais une chaîne arbitraire venue du réseau.
+window.__AVSRC = n => {
+  const a = n && avatars[n];
+  if (!a) return null;
+  if (a.slice(0, 11) === 'data:image/') return AV_IMG_RE.test(a) ? a : null;
+  return a;
+};
 function avBig(a) { return a ? (a.slice(0, 11) === 'data:image/' ? (AV_IMG_RE.test(a) ? `<img src="${a}" alt="">` : '🙂') : esc(a)) : '🙂'; }
 function renderAvatarUI() {
   if (avBtn) avBtn.innerHTML = avBig(myAvatar);
@@ -430,10 +439,12 @@ nameInput.onchange = () => { myName = nameInput.value.trim().slice(0, 12); local
 nameInput.onkeydown = e => e.stopPropagation();   // saisie du pseudo : Espace/flèches ne doivent pas déclencher les raccourcis du jeu
 
 /* ---------- menu de jeux ---------- */
+// Vitrine de 6 cartes animées (public/vitrine.js) : créée au premier appel, puis seul l'état .on change
+// à chaque message 'room' — les cartes ne sont reconstruites que si la liste des jeux change.
+let vitrine = null;
 function renderMenu() {
-  gamemenu.innerHTML = gamesMeta.map(g =>
-    `<button class="gtab ${g.id === activeId ? 'on' : ''}" data-id="${g.id}" title="${g.desc || ''}">${g.name}</button>`).join('');
-  gamemenu.querySelectorAll('.gtab').forEach(b => b.onclick = () => send({ t: 'pick', id: b.dataset.id }));
+  if (!vitrine) vitrine = creerVitrine(gamemenu, { choisir: id => send({ t: 'pick', id }), sous: id => GAME_SUB[id] });
+  vitrine.rendre(gamesMeta, activeId);
 }
 
 /* ---------- identité visuelle de la page selon le jeu actif ---------- */
