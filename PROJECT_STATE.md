@@ -755,6 +755,23 @@ d'interpolation. Elle est maintenant **prédite** (`client.js · predireMoi`), l
 - Mesuré avec 80 ms de latence simulée : la raquette réagit en **26 ms** (une image) au lieu de 135 ms ;
   déplacement identique au serveur (123 unités), **écart final 0** — aucun effet élastique.
 
+## Refonte graphique des 5 jeux au niveau du Sumo (23/09)
+Demande utilisateur : le Sumo étant jugé plus abouti, porter les 5 autres au même niveau (sprites, sols,
+effets, écrans). Un agent par jeu, sur son seul `client.js`, le client du Sumo servant de barème : décor
+pré-rendu texturé, sprites détaillés, un visuel par état et par bonus, un effet par événement, ambiance
+animée discrète, écrans titre / compte à rebours / pause / fin thématisés, pictogrammes de bonus dessinés.
+**Aucun changement de règle ni de protocole** (le serveur n'est pas touché).
+- ⚠ Les agents ont été coupés par la limite de dépense AVANT leur phase de revue adverse et avant la passe
+  CSS des fonds de page (non faite : les fonds de page restent ceux d'avant). Le travail a été récupéré et
+  vérifié à la main : parties réelles contre bots dans les 5 jeux (compte à rebours, jeu, palette
+  daltonienne, contraste, effets réduits, pause/reprise, changements de jeu répétés) → **0 erreur** ;
+  écrans de fin atteints en vrai pour Pong, Tron, Snake, relus au code pour Tanks et Bomberman ; API
+  canvas absentes des vieux Safari : aucune ; drapeau `premiere` intact partout ; pièces critiques de
+  Pong (geoFit, predireMoi, canvas transparent, joy) et **camouflage réel de Tanks** intacts.
+- Coût de rendu mesuré (JS par image, plateau 1090 px) : pong 0,45 ms · tron 0,40 · snake 0,41 ·
+  tank 0,59 · bomb 0,63 — dans l'enveloppe du Sumo (0,63 ms).
+- Non vérifiable d'ici : les sons, le ressenti sur vieux iPhone.
+
 ## Filet de sécurité du hub (23/09)
 `game.tick()` et `game.onMessage()` n'étaient protégés nulle part : une exception dans n'importe lequel
 des 6 jeux tuait le processus Node, donc le site pour tout le monde (c'est la panne du 21/09,
