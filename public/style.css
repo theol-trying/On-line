@@ -13,7 +13,7 @@ body{
   padding:clamp(12px,2.5vh,22px) 12px; min-height:100%;
 }
 body::before{
-  content:""; position:fixed; inset:-20%; z-index:-1;
+  content:""; position:fixed; top:-20%; right:-20%; bottom:-20%; left:-20%; z-index:-1;
   background:
     radial-gradient(40vw 40vw at 18% 12%, rgba(74,158,224,.18), transparent 60%),
     radial-gradient(42vw 42vw at 84% 18%, rgba(226,98,64,.16), transparent 60%),
@@ -64,7 +64,7 @@ body.playing{ -webkit-touch-callout:none; -webkit-user-select:none; user-select:
 body.playing input, body.playing textarea{ -webkit-user-select:text; user-select:text; }
 
 /* écran de fin */
-#endscreen, .endscreen{ position:absolute; inset:0; border-radius:16px; display:flex; flex-direction:column; gap:8px;
+#endscreen, .endscreen{ position:absolute; top:0; right:0; bottom:0; left:0; border-radius:16px; display:flex; flex-direction:column; gap:8px;
   align-items:center; justify-content:center; padding:16px; background:rgba(5,6,14,.84); cursor:pointer; overflow:auto;
   transition:opacity .28s ease; }
 #endscreen.hidden, .endscreen.hidden{ opacity:0; pointer-events:none; }
@@ -126,7 +126,7 @@ button.on{ border-color:var(--ok); color:var(--okTxt); }
 .bar > button.on{ border-color:var(--ok); color:var(--okTxt); }
 
 /* ---------- panneaux modaux (réglages / options / classement) ---------- */
-#scrim{ position:fixed; inset:0; z-index:9; background:rgba(4,6,14,.5); backdrop-filter:blur(3px); }
+#scrim{ position:fixed; top:0; right:0; bottom:0; left:0; z-index:9; background:rgba(4,6,14,.5); backdrop-filter:blur(3px); }
 #scrim.hidden{ display:none; }
 
 .settings{ position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:10;
@@ -230,7 +230,7 @@ body.theme-light::before{ background:
   radial-gradient(40vw 40vw at 18% 12%, rgba(74,158,224,.12), transparent 60%),
   radial-gradient(42vw 42vw at 84% 18%, rgba(226,98,64,.10), transparent 60%), var(--bg1); }
 body.theme-crt{ --bg1:#04130b; }
-.theme-crt .canvas-wrap::after{ content:''; position:absolute; inset:0; pointer-events:none; border-radius:16px;
+.theme-crt .canvas-wrap::after{ content:''; position:absolute; top:0; right:0; bottom:0; left:0; pointer-events:none; border-radius:16px;
   background:repeating-linear-gradient(0deg, rgba(0,0,0,.20) 0 1px, transparent 1px 3px); }
 body.flat .theme-crt .canvas-wrap::after, body.flat.theme-crt .canvas-wrap::after{ display:none; }
 
@@ -427,7 +427,7 @@ body.flat .fxon{ animation:none; }
 .gmsg-global, .gmsg-perso{ --gmsg-col:var(--accent); }
 .gmsg-global .gmsg-i, .gmsg-global .gmsg-t{ color:var(--gmsg-col); }
 .gmsg-perso .gmsg-i, .gmsg-perso .gmsg-t{ color:#fff; }
-.gmsg-global::before, .gmsg-perso::before{ content:''; position:absolute; inset:0; margin:0 auto;
+.gmsg-global::before, .gmsg-perso::before{ content:''; position:absolute; top:0; right:0; bottom:0; left:0; margin:0 auto;
   border-radius:999px; background:rgba(8,10,20,.72); border:1px solid var(--gmsg-col);
   width:100%; max-width:min(92%,420px); z-index:-1; }
 .gmsg-global{ padding:3px 0; } .gmsg-perso{ padding:6px 0; }
@@ -472,7 +472,7 @@ body.playing #chatPanel .chatlog{ max-height:150px; }
 .dayrow .dp{ font-weight:800; color:var(--okTxt); }
 #dailyBtn.on{ border-color:var(--ok); color:var(--okTxt); }
 /* calque de transition entre jeux / entre manches : balayage aux couleurs du jeu actif */
-#xfade{ position:fixed; inset:0; z-index:8; background:var(--bg0); opacity:0; pointer-events:none; transition:opacity .28s ease;
+#xfade{ position:fixed; top:0; right:0; bottom:0; left:0; z-index:8; background:var(--bg0); opacity:0; pointer-events:none; transition:opacity .28s ease;
   display:flex; align-items:center; justify-content:center; overflow:hidden;
   font-family:var(--display-font,'Segoe UI',sans-serif); font-weight:800; font-size:34px; letter-spacing:var(--display-ls,.04em);
   color:var(--accent); text-shadow:0 0 22px currentColor; }
@@ -485,7 +485,7 @@ body.playing #chatPanel .chatlog{ max-height:150px; }
 #xfade.quick::before{ animation-duration:.5s; opacity:.42; }
 body.flat #xfade::before{ display:none; }                                 /* « réduire les effets » : simple fondu */
 /* calque confettis (au-dessus de tout, ne bloque pas les clics) */
-#confetti{ position:fixed; inset:0; width:100%; height:100%; z-index:12; pointer-events:none; display:none;
+#confetti{ position:fixed; top:0; right:0; bottom:0; left:0; width:100%; height:100%; z-index:12; pointer-events:none; display:none;
   background:transparent; box-shadow:none; border-radius:0; }   /* sinon la règle générale `canvas{}` le rendait OPAQUE : l'écran de fin disparaissait sous un aplat bleu nuit à chaque victoire */
 /* slider volume des effets */
 .rng{ -webkit-appearance:none; appearance:none; width:148px; height:6px; border-radius:999px; outline:none; cursor:pointer;
@@ -511,15 +511,12 @@ button.primary, #tourBar, #readyBar .rbtn{ font-family:var(--display-font,inheri
 
 /* ---------- 🏓 PONG — Arcade Synthwave (palette via thème) ---------- */
 body.game-pong{ --display-font:'Orbitron','Segoe UI',sans-serif; --display-ls:.04em; --accent:#ff5db4; }
-body.game-pong:not(.theme-light):not(.flat)::after{ content:''; position:fixed; left:0; right:0; bottom:0; height:44vh; z-index:-1; pointer-events:none;
-  background:linear-gradient(transparent,rgba(255,60,180,.07)),repeating-linear-gradient(90deg,rgba(120,200,255,.06) 0 1px,transparent 1px 46px);
-  -webkit-mask:linear-gradient(transparent,#000); mask:linear-gradient(transparent,#000); }
+/* fond de page : voir « D. Fonds de page », plus bas */
 body.game-pong .logo{ background:linear-gradient(92deg,#5be4ff,#ff5db4); -webkit-background-clip:text; background-clip:text; }
 
 /* ---------- 🟦 TRON — Cyber Grid (palette via thème, formes tranchantes) ---------- */
 body.game-tron{ --display-font:'Orbitron','Segoe UI',sans-serif; --display-ls:.05em; --accent:#1fe0ff; }
-body.game-tron:not(.theme-light):not(.flat)::after{ content:''; position:fixed; inset:0; z-index:-1; pointer-events:none;
-  background:repeating-linear-gradient(0deg,rgba(31,224,255,.05) 0 1px,transparent 1px 46px),repeating-linear-gradient(90deg,rgba(31,224,255,.05) 0 1px,transparent 1px 46px); }
+/* fond de page : voir « D. Fonds de page », plus bas */
 body.game-tron button, body.game-tron #gamemenu, body.game-tron .bar, body.game-tron #msg,
 body.game-tron .pc, body.game-tron .settings, body.game-tron .readybar, body.game-tron .touch{ border-radius:3px; }
 body.game-tron button.primary, body.game-tron .bar>button.primary{ background:linear-gradient(92deg,#1fe0ff,#0a86ff); color:#021018; box-shadow:0 0 18px -4px #1fe0ff; }
@@ -529,7 +526,7 @@ body.game-tron .logo{ background:linear-gradient(92deg,#1fe0ff,#9ff7ff); -webkit
 body.game-tank{ --bg0:#15100a; --bg1:#241a0e; --panel:rgba(58,48,30,.82); --panel2:rgba(78,64,38,.6);
   --border:rgba(214,184,120,.16); --border2:rgba(214,184,120,.32); --txt:#f4ecd7; --txt2:#bda878; --accent:#e0a92e;
   --display-font:'Black Ops One','Impact',sans-serif; --display-ls:.04em; }
-body.game-tank::before{ background:radial-gradient(60vw 50vw at 50% 0%,rgba(200,150,60,.18),transparent 60%),radial-gradient(50vw 40vw at 15% 92%,rgba(120,90,40,.22),transparent 60%),var(--bg1); }
+/* fond de page : voir « D. Fonds de page », plus bas */
 body.game-tank button, body.game-tank #gamemenu, body.game-tank .bar, body.game-tank #msg,
 body.game-tank .pc, body.game-tank .settings, body.game-tank .touch, body.game-tank .readybar{ border-radius:5px; }
 body.game-tank button.primary, body.game-tank .bar>button.primary{ background:linear-gradient(180deg,#8a7a2e,#5e4a1c); color:#fff6dc; border-color:#caa64a; box-shadow:0 2px 0 #2a2010,0 6px 14px -6px rgba(0,0,0,.6); text-transform:uppercase; }
@@ -540,7 +537,7 @@ body.game-tank:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.6),0 0 0 3p
 body.game-snake{ --bg0:#08160a; --bg1:#0f2611; --panel:rgba(30,58,32,.82); --panel2:rgba(42,78,40,.6);
   --border:rgba(150,220,140,.16); --border2:rgba(150,220,140,.32); --txt:#eef7e2; --txt2:#9fc79a; --accent:#5fc36a;
   --display-font:'Fredoka','Segoe UI',sans-serif; --display-ls:.01em; }
-body.game-snake::before{ background:radial-gradient(55vw 45vw at 20% 10%,rgba(120,200,90,.18),transparent 60%),radial-gradient(50vw 45vw at 85% 90%,rgba(60,150,70,.20),transparent 60%),var(--bg1); }
+/* fond de page : voir « D. Fonds de page », plus bas */
 body.game-snake button, body.game-snake #gamemenu, body.game-snake .bar, body.game-snake #msg,
 body.game-snake .pc, body.game-snake .settings, body.game-snake .touch, body.game-snake .readybar{ border-radius:16px; }
 body.game-snake button.primary, body.game-snake .bar>button.primary{ background:linear-gradient(92deg,#3da34d,#8fd14f); color:#06210a; box-shadow:0 6px 16px -7px rgba(60,170,70,.9); }
@@ -551,7 +548,7 @@ body.game-snake:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.5),0 0 0 3
 body.game-bomb{ --bg0:#16092e; --bg1:#241043; --panel:rgba(58,36,90,.82); --panel2:rgba(78,50,116,.62);
   --border:rgba(255,200,240,.16); --border2:rgba(255,200,240,.34); --txt:#fdeeff; --txt2:#c8a6d8; --accent:#ff7ac0;
   --display-font:'Baloo 2','Segoe UI',sans-serif; }
-body.game-bomb::before{ background:radial-gradient(45vw 40vw at 15% 12%,rgba(255,120,200,.20),transparent 60%),radial-gradient(45vw 40vw at 85% 16%,rgba(120,170,255,.18),transparent 60%),radial-gradient(50vw 45vw at 50% 96%,rgba(255,210,90,.16),transparent 60%),var(--bg1); }
+/* fond de page : voir « D. Fonds de page », plus bas */
 body.game-bomb button, body.game-bomb #gamemenu, body.game-bomb .bar, body.game-bomb #msg,
 body.game-bomb .pc, body.game-bomb .settings, body.game-bomb .touch, body.game-bomb .readybar{ border-radius:18px; }
 body.game-bomb button.primary, body.game-bomb .bar>button.primary{ background:linear-gradient(92deg,#ff5aa0,#ffb13c); color:#2a0c33; box-shadow:0 6px 0 -1px rgba(0,0,0,.25),0 10px 20px -8px rgba(255,90,160,.8); font-weight:800; }
@@ -723,31 +720,135 @@ body.game-snake{ --ok:#5fc36a; --okTxt:#c2f0b8; }
 body.game-bomb{ --ok:#ff7ac0; --okTxt:#ffd3ea; }
 body.game-sumo{ --ok:#e0b23c; --okTxt:#ffe6a6; }   /* or, pas vermillon : un état ON rouge se lirait comme une erreur */
 
-/* ---- D. Fonds signature renforcés ---- */
-body.game-pong:not(.theme-light):not(.flat)::after{                       /* + soleil synthwave au-dessus de l'horizon */
+/* ---- D. Fonds de page — au niveau du Sumo (23/09) ----
+   Même recette que le dohyō : une MATIÈRE (pas un simple dégradé), des SOURCES DE LUMIÈRE, un BANDEAU
+   identitaire, et une animation qui ne coûte rien — on n'anime que l'opacité ou une transformation,
+   que la carte graphique compose sans repeindre la page. ::before porte le décor (il hérite de la dérive
+   lente `drift`), ::after le premier plan. Tout est coupé par « Réduire les effets » (body.flat, qui
+   retombe sur l'aplat --bg1) et par prefers-reduced-motion.
+   Vieil iOS : ni inset, ni clamp/min, ni conic-gradient ; perspective et masque préfixés -webkit-. */
+
+/* 🏓 PONG — nuit synthwave : ciel étoilé, soleil rayé posé sur l'horizon, sol quadrillé en perspective
+   qui défile vers le joueur. Thème Clair : fonds clairs d'origine ; thème CRT : même scène en phosphore vert. */
+body.game-pong:not(.theme-light):not(.flat)::before{ background:
+  radial-gradient(rgba(255,255,255,.55) 1px, transparent 1.6px) 0 0 / 97px 89px,
+  radial-gradient(rgba(180,220,255,.35) 1px, transparent 1.4px) 41px 29px / 61px 67px,
+  repeating-linear-gradient(180deg, transparent 0 1.6vmin, #2c0d45 1.6vmin 2.3vmin) 50% 56% / 34vmin 16vmin no-repeat,
+  radial-gradient(17vmin 17vmin at 50% 50%, #ffd36e 0%, #ff8a5b 38%, #ff4fb0 72%, rgba(255,79,176,0) 74%),
+  radial-gradient(70vw 26vh at 50% 57%, rgba(255,70,170,.34), transparent 70%),
+  linear-gradient(180deg, #05061a 0%, #140a38 34%, #3a0f55 55%, #1a0730 57%, #0a0418 100%); }
+body.game-pong.theme-crt:not(.flat)::before{ background:
+  radial-gradient(rgba(170,255,200,.40) 1px, transparent 1.6px) 0 0 / 97px 89px,
+  repeating-linear-gradient(180deg, transparent 0 1.6vmin, #062416 1.6vmin 2.3vmin) 50% 56% / 34vmin 16vmin no-repeat,
+  radial-gradient(17vmin 17vmin at 50% 50%, #d8ffe4 0%, #6fff9f 50%, rgba(60,255,140,0) 74%),
+  radial-gradient(70vw 26vh at 50% 57%, rgba(60,255,140,.20), transparent 70%),
+  linear-gradient(180deg, #010904 0%, #04160b 55%, #031008 57%, #010703 100%); }
+body.game-pong:not(.theme-light):not(.flat)::after, body.game-tron:not(.theme-light):not(.flat)::after{
+  content:''; position:fixed; left:-50%; right:-50%; bottom:0; height:120vh; z-index:-1; pointer-events:none;
+  -webkit-transform-origin:50% 100%; transform-origin:50% 100%;
+  -webkit-transform:perspective(150vh) rotateX(62deg); transform:perspective(150vh) rotateX(62deg);
+  -webkit-mask-image:linear-gradient(0deg, #000 35%, transparent 92%); mask-image:linear-gradient(0deg, #000 35%, transparent 92%);
+  -webkit-animation:solDefile 2.6s linear infinite; animation:solDefile 2.6s linear infinite; }
+body.game-pong:not(.theme-light):not(.flat)::after{ background:
+  repeating-linear-gradient(90deg, rgba(255,93,180,.62) 0 2px, transparent 2px 80px),
+  repeating-linear-gradient(0deg, rgba(91,228,255,.50) 0 2px, transparent 2px 80px),
+  linear-gradient(0deg, #1c0836, #0c0420); }
+body.game-pong.theme-crt:not(.flat)::after{ background:
+  repeating-linear-gradient(90deg, rgba(120,255,170,.45) 0 2px, transparent 2px 80px),
+  repeating-linear-gradient(0deg, rgba(120,255,170,.32) 0 2px, transparent 2px 80px),
+  linear-gradient(0deg, #04150b, #010704); }
+/* une case de grille par cycle : la boucle est parfaite, et seule la transformation bouge */
+@-webkit-keyframes solDefile{ from{ -webkit-transform:perspective(150vh) rotateX(62deg) translateY(0); } to{ -webkit-transform:perspective(150vh) rotateX(62deg) translateY(80px); } }
+@keyframes solDefile{ from{ transform:perspective(150vh) rotateX(62deg) translateY(0); } to{ transform:perspective(150vh) rotateX(62deg) translateY(80px); } }
+body.game-pong:not(.flat) canvas{ box-shadow:0 18px 60px rgba(0,0,0,.6), 0 0 0 1px rgba(255,93,180,.35) inset, 0 0 60px -10px rgba(255,93,180,.45), 0 0 34px -14px rgba(91,228,255,.6); }
+
+/* 🟦 TRON — cœur de données : fond bleu-noir, colonnes de lumière qui montent vers un noyau lumineux,
+   même sol en perspective (cyan, plus lent) — l'arène est posée sur la grille. */
+body.game-tron:not(.theme-light):not(.flat)::before{ background:
+  radial-gradient(46vw 30vh at 50% 42%, rgba(31,224,255,.22), transparent 70%),
+  repeating-linear-gradient(90deg, transparent 0 13vw, rgba(31,224,255,.07) 13vw 13.15vw, transparent 13.15vw 17vw),
+  repeating-linear-gradient(90deg, transparent 0 7vw, rgba(159,247,255,.04) 7vw 7.08vw),
+  linear-gradient(180deg, #02040b 0%, #041224 50%, #06203a 57%, #020812 58%, #01040a 100%); }
+body.game-tron.theme-crt:not(.flat)::before{ background:
+  radial-gradient(46vw 30vh at 50% 42%, rgba(80,255,150,.16), transparent 70%),
+  repeating-linear-gradient(90deg, transparent 0 13vw, rgba(120,255,170,.06) 13vw 13.15vw, transparent 13.15vw 17vw),
+  linear-gradient(180deg, #010603 0%, #04140a 57%, #010402 100%); }
+body.game-tron:not(.theme-light):not(.flat)::after{ -webkit-animation-duration:4.2s; animation-duration:4.2s; background:
+  repeating-linear-gradient(90deg, rgba(31,224,255,.55) 0 2px, transparent 2px 80px),
+  repeating-linear-gradient(0deg, rgba(31,224,255,.40) 0 2px, transparent 2px 80px),
+  linear-gradient(0deg, #041a2c, #020912); }
+body.game-tron.theme-crt:not(.flat)::after{ background:
+  repeating-linear-gradient(90deg, rgba(120,255,170,.40) 0 2px, transparent 2px 80px),
+  repeating-linear-gradient(0deg, rgba(120,255,170,.28) 0 2px, transparent 2px 80px),
+  linear-gradient(0deg, #04150b, #010704); }
+body.game-tron:not(.flat) canvas{ box-shadow:0 18px 60px rgba(0,0,0,.65), 0 0 0 1px rgba(31,224,255,.45) inset, 0 0 54px -12px rgba(31,224,255,.55); }
+
+/* 🟫 TANKS — base avancée dans le désert : ciel brûlé, soleil voilé, dunes en trois plans, grain de
+   sable ; au premier plan, bandeau d'acier riveté bordé de rayures de danger (le « tsuriyane » du char). */
+body.game-tank:not(.flat)::before{ background:
+  radial-gradient(rgba(255,230,180,.05) 1px, transparent 1.3px) 0 0 / 7px 7px,
+  radial-gradient(90vw 20vh at 22% 100%, #6b4c24 0%, #5a3e1c 55%, transparent 56%),
+  radial-gradient(80vw 24vh at 84% 100%, #7c5a2c 0%, #674a22 55%, transparent 56%),
+  radial-gradient(120vw 34vh at 50% 108%, #8e6a36 0%, #7a5a2c 50%, transparent 51%),
+  radial-gradient(26vmin 26vmin at 72% 26%, rgba(255,236,190,.55), rgba(255,200,120,.16) 45%, transparent 70%),
+  linear-gradient(180deg, #3a2a16 0%, #6a4a24 48%, #8a6230 70%, #5a3e1c 100%); }
+body.game-tank:not(.flat)::after{ content:''; position:fixed; top:0; left:0; right:0; height:38px; z-index:-1; pointer-events:none;
   background:
-    radial-gradient(26vmin 26vmin at 50% 78%, rgba(255,93,180,.30), rgba(255,140,80,.10) 58%, transparent 62%),
-    linear-gradient(transparent,rgba(255,60,180,.07)),
-    repeating-linear-gradient(90deg,rgba(120,200,255,.06) 0 1px,transparent 1px 46px),
-    repeating-linear-gradient(0deg,transparent 0 23px,rgba(255,93,180,.05) 23px 24px); }
-body.game-tron:not(.theme-light):not(.flat)::after{ animation:tronGrid 4s linear infinite; }   /* grille qui défile */
-@keyframes tronGrid{ to{ background-position:0 46px, 46px 0; } }
-body.game-tank::before{ background:
-  repeating-linear-gradient(135deg, rgba(0,0,0,.10) 0 16px, transparent 16px 34px),
-  radial-gradient(60vw 50vw at 50% 0%,rgba(200,150,60,.18),transparent 60%),
-  radial-gradient(70vw 24vh at 50% 100%,rgba(140,104,48,.30),transparent 70%), var(--bg1); }   /* rayures pochoir + dunes */
-body.game-snake:not(.flat)::after{ content:''; position:fixed; inset:0; z-index:-1; pointer-events:none;
+    repeating-linear-gradient(135deg, #e0a92e 0 12px, #1a140a 12px 24px) 0 100% / 100% 7px no-repeat,
+    radial-gradient(circle, rgba(0,0,0,.55) 2px, rgba(255,240,200,.18) 2.6px, transparent 3.2px) 14px 11px / 56px 38px repeat-x,
+    linear-gradient(180deg, #5c5232, #3e3620 85%, #2a2414);
+  -webkit-box-shadow:0 6px 18px rgba(0,0,0,.45); box-shadow:0 6px 18px rgba(0,0,0,.45); }
+
+/* 🟩 SNAKE — jardin au soleil : rais de lumière obliques, pelouse à brins, haies en lisière, feuillage
+   aux coins ; la lumière « respire » lentement (opacité seule). */
+body.game-snake:not(.flat)::before{ background:
+  radial-gradient(rgba(190,255,150,.07) 1.2px, transparent 1.5px) 0 0 / 11px 11px,
+  radial-gradient(rgba(20,60,20,.35) 1px, transparent 1.4px) 5px 6px / 11px 11px,
+  radial-gradient(10vw 16vh at 0% 30%, #1d4a1c 0%, #173c17 60%, transparent 62%),
+  radial-gradient(12vw 18vh at 1% 70%, #1b451a 0%, #153815 60%, transparent 62%),
+  radial-gradient(10vw 16vh at 100% 40%, #1d4a1c 0%, #173c17 60%, transparent 62%),
+  radial-gradient(12vw 18vh at 99% 80%, #1b451a 0%, #153815 60%, transparent 62%),
+  radial-gradient(60vw 50vh at 18% 0%, rgba(255,246,190,.20), transparent 70%),
+  linear-gradient(180deg, #1e4a22 0%, #173a19 45%, #10290f 100%); }
+body.game-snake:not(.flat)::after{ content:''; position:fixed; top:0; right:0; bottom:0; left:0; z-index:-1; pointer-events:none;
   background:
-    radial-gradient(34vmin 30vmin at -4% -6%, rgba(95,195,106,.30), transparent 70%),
-    radial-gradient(38vmin 32vmin at 104% 104%, rgba(95,195,106,.26), transparent 70%),
-    radial-gradient(rgba(180,255,150,.05) 1.4px, transparent 1.5px);
-  background-size:auto,auto,26px 26px; }                                                       /* feuillage aux coins + pois d'herbe */
-body.game-bomb:not(.flat)::after{ content:''; position:fixed; inset:0; z-index:-1; pointer-events:none;
+    repeating-linear-gradient(115deg, rgba(255,250,200,0) 0 9vw, rgba(255,250,200,.05) 9vw 13vw, rgba(255,250,200,0) 13vw 24vw),
+    radial-gradient(34vmin 30vmin at -4% -6%, rgba(95,195,106,.34), transparent 70%),
+    radial-gradient(38vmin 32vmin at 104% 104%, rgba(95,195,106,.28), transparent 70%);
+  -webkit-animation:snLumiere 9s ease-in-out infinite alternate; animation:snLumiere 9s ease-in-out infinite alternate; }
+@-webkit-keyframes snLumiere{ from{ opacity:.7; } to{ opacity:1; } }
+@keyframes snLumiere{ from{ opacity:.7; } to{ opacity:1; } }
+
+/* 🎈 BOMBERMAN — confiserie : papier peint à rayures de sucre d'orge et gros pois, lueurs de vitrine ;
+   au premier plan, un store festonné rose et blanc et un semis de confettis qui scintille. */
+body.game-bomb:not(.flat)::before{ background:
+  radial-gradient(rgba(255,255,255,.07) 14px, transparent 15px) 0 0 / 88px 88px,
+  radial-gradient(rgba(255,122,192,.08) 14px, transparent 15px) 44px 44px / 88px 88px,
+  repeating-linear-gradient(90deg, rgba(255,122,192,.10) 0 26px, rgba(255,255,255,.035) 26px 52px),
+  radial-gradient(45vw 40vw at 15% 22%, rgba(255,120,200,.20), transparent 60%),
+  radial-gradient(45vw 40vw at 85% 26%, rgba(120,170,255,.18), transparent 60%),
+  radial-gradient(50vw 45vw at 50% 100%, rgba(255,210,90,.16), transparent 60%),
+  linear-gradient(180deg, #2c1250, #1c0a38); }
+body.game-bomb:not(.flat)::after{ content:''; position:fixed; top:0; right:0; bottom:0; left:0; z-index:-1; pointer-events:none;
   background:
-    radial-gradient(rgba(255,122,192,.07) 2.2px, transparent 2.4px),
-    radial-gradient(rgba(122,184,255,.06) 1.8px, transparent 2px),
-    radial-gradient(rgba(255,210,60,.05) 1.5px, transparent 1.7px);
-  background-size:64px 64px, 48px 48px, 36px 36px; background-position:0 0, 24px 18px, 10px 34px; }   /* semis de confettis */
+    radial-gradient(circle at 50% 0, #ff7ac0 0 19px, transparent 20px) 0 22px / 40px 22px repeat-x,
+    radial-gradient(circle at 50% 0, #fff4fb 0 19px, transparent 20px) 20px 22px / 40px 22px repeat-x,
+    repeating-linear-gradient(90deg, #ff7ac0 0 20px, #fff4fb 20px 40px) 0 0 / 100% 24px no-repeat,
+    radial-gradient(rgba(255,122,192,.09) 2.2px, transparent 2.4px) 0 0 / 64px 64px,
+    radial-gradient(rgba(122,184,255,.08) 1.8px, transparent 2px) 24px 18px / 48px 48px,
+    radial-gradient(rgba(255,210,60,.07) 1.5px, transparent 1.7px) 10px 34px / 36px 36px;
+  -webkit-animation:bmScintille 3.8s ease-in-out infinite alternate; animation:bmScintille 3.8s ease-in-out infinite alternate; }
+@-webkit-keyframes bmScintille{ from{ opacity:.82; } to{ opacity:1; } }
+@keyframes bmScintille{ from{ opacity:.82; } to{ opacity:1; } }
+
+/* Le bandeau du haut (acier de Tanks, store de Bomberman) ne doit pas passer sous le titre du lobby. */
+body.game-tank:not(.flat):not(.playing){ padding-top:52px; }
+body.game-bomb:not(.flat):not(.playing){ padding-top:56px; }
+/* En partie, le plateau recouvre le sol en perspective : inutile de le faire défiler (batterie des téléphones). */
+body.playing.game-pong::after, body.playing.game-tron::after{ -webkit-animation-play-state:paused; animation-play-state:paused; }
+@media (prefers-reduced-motion:reduce){
+  body.game-pong::after, body.game-tron::after, body.game-snake::after, body.game-bomb::after{ -webkit-animation:none; animation:none; }
+}
 /* Sumo : lueur chaude des lanternes qui vacille lentement + bandeau vermillon du toit suspendu (tsuriyane).
    On n'anime QUE l'opacité (composité, aucun repeint) ; coupé par « Réduire les effets » et prefers-reduced-motion. */
 body.game-sumo:not(.flat)::after{ content:''; position:fixed; top:0; right:0; bottom:0; left:0;   /* pas inset : absent avant iOS 14.1 */ z-index:-1; pointer-events:none;
@@ -762,7 +863,7 @@ body.game-sumo:not(.flat)::after{ content:''; position:fixed; top:0; right:0; bo
 
 /* ---- E. Cartes HUD thématiques ---- */
 body.game-tank .pc{ background:linear-gradient(180deg,rgba(88,74,44,.92),rgba(50,40,24,.92)); border-color:#6b5a32; box-shadow:0 2px 0 rgba(0,0,0,.45); }
-body.game-tank .pc::after{ content:''; position:absolute; inset:0; pointer-events:none;
+body.game-tank .pc::after{ content:''; position:absolute; top:0; right:0; bottom:0; left:0; pointer-events:none;
   background:
     radial-gradient(circle at 9px 9px, rgba(0,0,0,.55) 2px, transparent 2.7px),
     radial-gradient(circle at calc(100% - 9px) 9px, rgba(0,0,0,.55) 2px, transparent 2.7px),
