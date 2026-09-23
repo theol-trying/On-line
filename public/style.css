@@ -629,6 +629,39 @@ body.game-bomb:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.5),0 0 0 3p
 #hudFloat{ display:none; position:fixed; z-index:11; top:9px; left:107px; width:42px; height:42px; padding:0; font-size:17px;
   align-items:center; justify-content:center; opacity:.75; }
 body.hudon #hudFloat{ opacity:1; border-color:var(--accent); }
+/* ---------- JOYSTICK TACTILE (public/joystick.js) — défaut sur téléphone depuis le 23/09 ----------
+   Réglage retenu à l'essai (/manette.html, Pixel 7 Pro) : 82 px → anneau 139 px, bouton 51 px, zone
+   de 189 px de haut. Le stick naît sous le pouce, n'importe où dans sa zone. Actions à 92 / 82 px,
+   comme dans le prototype essayé. Réglage « Croix » : body.pad-croix rétablit la croix d'origine.
+   Vieil iOS : ni gap ni clamp(), tailles fixes, -webkit- partout. */
+.joyzone{ display:none; }
+@media (max-width:600px){
+  body:not(.pad-croix) .joyzone{ display:block; position:relative; -webkit-flex:1 1 auto; flex:1 1 auto; height:189px;
+    margin-right:12px; border:1px dashed var(--border2); border-radius:18px; background:rgba(255,255,255,.02);
+    touch-action:none; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  body:not(.pad-croix) .joyzone::after{ content:'joystick : pose le pouce'; position:absolute; left:0; right:0; top:50%;
+    margin-top:-7px; text-align:center; font-size:11px; color:var(--txt2); opacity:.55; pointer-events:none; }
+  body:not(.pad-croix) .gpad .dirs{ display:none; }
+  body:not(.pad-croix) .gpad{ -webkit-align-items:flex-end; align-items:flex-end; max-width:none; padding:0 4px; }
+  body:not(.pad-croix) .gpad.solo .joyzone{ margin-right:0; }                 /* Snake : pas d'action, toute la largeur */
+  body:not(.pad-croix) .gpad .acts .touch{ width:82px; height:82px; }
+  body:not(.pad-croix) .gpad .acts .touch.fire{ width:92px; height:92px; }
+  /* Pong : le joystick remplace les deux flèches, sous le plateau */
+  body:not(.pad-croix) .stage > .joyzone{ -webkit-order:1; order:1; -webkit-flex:1 1 100%; flex:1 1 100%; margin:0 4px; padding:0; }
+  body:not(.pad-croix) .stage > div:not(.canvas-wrap):not(.joyzone){ display:none; }
+  body:not(.pad-croix) .joyzone.actif::after{ opacity:0; }
+  /* En partie, la manette descend SOUS LES POUCES, en bas de l'écran (comme dans le prototype essayé),
+     au lieu de flotter sous le plateau en laissant du vide dessous. Marge pour la barre d'accueil. */
+  body.playing .gpad{ margin-top:auto; padding-bottom:10px; padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px)); }
+  body.playing:not(.pad-croix) #pong-root .stage{ -webkit-flex:1 1 auto; flex:1 1 auto;
+    -webkit-align-content:space-between; align-content:space-between; }
+}
+.joyring, .joyknob{ position:absolute; border-radius:50%; pointer-events:none; opacity:0; -webkit-transition:opacity .08s; transition:opacity .08s; }
+.joyring{ width:139px; height:139px; border:2px solid var(--accent); background:rgba(255,255,255,.05); }
+.joyknob{ width:51px; height:51px; background:var(--accent); -webkit-box-shadow:0 0 16px var(--accent); box-shadow:0 0 16px var(--accent); }
+.joyring.on{ opacity:.55; } .joyknob.on{ opacity:1; }
+body.flat .joyknob{ -webkit-box-shadow:none; box-shadow:none; }
+
 @media (max-width:370px){                               /* très petits écrans (ancien iPhone) : on réduit pour tout faire tenir sans chevauchement */
   .gpad .touch{ width:54px; height:54px; font-size:22px; }
   .gpad .acts .touch{ width:60px; height:60px; }

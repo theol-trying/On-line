@@ -146,6 +146,37 @@ async function arriveeEnCours() {
   a.ws.close(); b.ws.close(); await wait(400);
 }
 
+/* ---------- protections du serveur (le site est PUBLIC, une seule instance) ---------- */
+const ferme = (ws, ms) => new Promise(r => {           // true si le SERVEUR coupe la connexion dans le délai
+  if (ws.readyState >= 2) return r(true);
+  const t = setTimeout(() => r(false), ms);
+  ws.addEventListener('close', () => { clearTimeout(t); r(true); });
+});
+async function protections() {
+  console.log('\n▶ protections : taille et débit des messages');
+  // 1. une trame de 70 Ko (au-delà du plafond de 64 Ko) → connexion coupée
+  const gros = client('Gros'); await gros.ouvert; await wait(200);
+  gros.ws.send('x'.repeat(70 * 1024));
+  ok('une trame trop grosse coupe la connexion', await ferme(gros.ws, 2000));
+  // 2. un message légitime volumineux (≈ un avatar, 30 Ko) passe toujours
+  const legit = client('Legit'); await legit.ouvert; await wait(200);
+  let echos = 0; legit.ws.addEventListener('message', e => { if (/"t":"png"/.test(e.data)) echos++; });
+  legit.envoie({ t: 'name', name: 'Legit', bourrage: 'y'.repeat(30 * 1024) });
+  await wait(300);
+  ok('un message de 30 Ko est accepté', legit.ws.readyState === 1);
+  // 3. rythme honnête (30 messages/s pendant 2 s) : tout est traité, rien n'est jeté
+  for (let i = 0; i < 60; i++) { legit.envoie({ t: 'png', ts: i }); await wait(33); }
+  await wait(400);
+  ok('un rythme humain n\'est jamais bridé', echos >= 58, echos + '/60 réponses');
+  // 4. inondation : 5 000 messages d'un coup → connexion coupée, le client honnête n'est pas touché
+  const bourrin = client('Bourrin'); await bourrin.ouvert; await wait(200);
+  for (let i = 0; i < 5000; i++) bourrin.envoie({ t: 'png', ts: i });
+  ok('une inondation coupe la connexion fautive', await ferme(bourrin.ws, 3000));
+  ok('les autres joueurs restent connectés', legit.ws.readyState === 1);
+  ok('le serveur a encaissé', serveurVivant());
+  legit.ws.close(); await wait(300);
+}
+
 /* ---------- déroulé ---------- */
 console.log(`Test de fumée — serveur sur le port ${PORT}\n`);
 if (!await demarrerServeur()) {
@@ -162,6 +193,7 @@ cadences.snake = await jouer('snake', 10, { arene: { lire: s => 'grille ' + s.gw
 cadences.tank = await jouer('tank', 8, { arene: { lire: s => 'grille ' + s.ag, valeur: 'grille 19' } });
 cadences.bomb = await jouer('bomb', 8, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 17' } });
 await arriveeEnCours();
+await protections();
 
 console.log('\n▶ état final du serveur');
 ok('le serveur a survécu à tous les jeux', serveurVivant(), srvSorti !== null ? 'sorti avec le code ' + srvSorti : '');

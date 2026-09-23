@@ -29,6 +29,10 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
   la colonne centrale `.stage` ; sinon elle applique la formule en fractions de fenêtre. Un jeu avec des
   commandes **latérales** (les flèches ▲▼ de Pong) doit être déclaré dans `SIDE_JEU` d'`app.js`, sinon
   les colonnes lui volent cette largeur.
+- **Manette tactile** : le joystick (`public/joystick.js`) actionne les boutons `.touch` des jeux par leur
+  `id`. Un nouveau jeu doit garder ces boutons (même masqués) et s'inscrire dans `CARTES` — ou exposer
+  `joy(dx, dy)` dans son module s'il lui faut une projection propre, comme Pong.
+- **Ne pas supprimer `/manette.html`** : page d'essai permanente, demandée par l'utilisateur.
 - Le snapshot renvoyé par `tick()` **doit** contenir `gs` (utilisé par le throttle du hub).
 
 ## Lancer et tester
