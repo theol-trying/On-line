@@ -300,6 +300,9 @@ body.playing.dock.game-snake .stage{ --amb:#0a1b0c;            /* pelouse, pois 
 body.playing.dock.game-bomb .stage{ --amb:#190b2e;             /* semis de confettis */
   background-image:radial-gradient(rgba(255,122,192,.10) 2.2px, transparent 2.4px), radial-gradient(rgba(122,184,255,.08) 1.8px, transparent 2px), radial-gradient(rgba(255,210,60,.07) 1.5px, transparent 1.7px);
   background-size:64px 64px, 48px 48px, 36px 36px; background-position:0 0, 24px 18px, 10px 34px; }
+body.playing.dock.game-sumo .stage{ --amb:#1a120e;             /* le plancher laqué autour du dohyō se prolonge, lueur d'argile au centre */
+  background-image:radial-gradient(55% 45% at 50% 50%, rgba(201,163,107,.10), transparent 70%), repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0 2px, transparent 2px 96px), repeating-linear-gradient(90deg, rgba(255,220,170,.025) 0 1px, transparent 1px 11px); }
+body.flat.playing.dock.game-sumo .stage{ background-image:none; }   /* « Réduire les effets » : l'aplat de bois seul, sans rainures ni lueur */
 body.flat.playing.dock .stage{ -webkit-animation:none; animation:none; }
 body.flat.playing.dock.game-pong .stage{ background-image:none; }   /* Pong ne dessine pas non plus d'étoiles en effets réduits */
 @media (prefers-reduced-motion:reduce){ body.playing.dock .stage{ -webkit-animation:none; animation:none; } }
@@ -556,6 +559,31 @@ body.game-bomb:not(.flat) button.primary:hover{ transform:translateY(-2px); }
 body.game-bomb .logo{ background:linear-gradient(92deg,#ff7ac0,#ffd23c,#7ab8ff); -webkit-background-clip:text; background-clip:text; }
 body.game-bomb:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.5),0 0 0 3px #b06ad0 inset; }
 
+/* ---------- ⭕ SUMO — Dohyō (tournoi traditionnel : bois laqué, vermillon, argile, paille, washi) ---------- */
+body.game-sumo{ --bg0:#120c09; --bg1:#1a120e; --panel:rgba(48,33,24,.84); --panel2:rgba(72,50,35,.6);
+  --border:rgba(217,194,122,.16); --border2:rgba(217,194,122,.32); --txt:#f1e6d0; --txt2:#c4ad88; --accent:#e0452f;
+  --display-font:'Dela Gothic One','Impact',sans-serif; --display-ls:.03em; }
+/* Planches de bois laqué (rainures sombres tous les ~120 px + fil du bois) sous deux lueurs de lanternes.
+   Dégradés statiques uniquement : la dérive générale (drift) suffit à les faire vivre. */
+body.game-sumo::before{ background:
+  radial-gradient(34vw 30vw at 12% 6%, rgba(255,150,60,.20), transparent 62%),
+  radial-gradient(34vw 30vw at 88% 6%, rgba(255,150,60,.18), transparent 62%),
+  radial-gradient(60vw 36vw at 50% 106%, rgba(224,69,47,.14), transparent 66%),
+  repeating-linear-gradient(90deg, rgba(0,0,0,.34) 0 2px, transparent 2px 118px),
+  repeating-linear-gradient(90deg, rgba(255,220,170,.022) 0 1px, transparent 1px 9px),
+  linear-gradient(180deg,#231811,#140e0a); }
+/* Dela Gothic One n'existe qu'en graisse 400 : le 800 hérité des titres produirait un faux gras baveux. */
+body.game-sumo .logo, body.game-sumo .shead h3, body.game-sumo .etitle, body.game-sumo .bann, body.game-sumo .champ,
+body.game-sumo button.primary, body.game-sumo #tourBar, body.game-sumo #readyBar .rbtn, body.game-sumo .settings h4,
+body.game-sumo .gtab, body.game-sumo .ghosttab, body.game-sumo #xfade{ font-weight:400; }
+body.game-sumo button, body.game-sumo #gamemenu, body.game-sumo .bar, body.game-sumo #msg,
+body.game-sumo .pc, body.game-sumo .settings, body.game-sumo .touch, body.game-sumo .readybar{ border-radius:6px; }
+body.game-sumo button.primary, body.game-sumo .bar>button.primary{ background:linear-gradient(180deg,#ea5a3f,#b8321f); color:#fff4e6; border-color:#7a1f12;
+  box-shadow:0 2px 0 #5a160c,0 8px 18px -8px rgba(224,69,47,.85); }
+body.game-sumo .logo{ letter-spacing:.1em; background:linear-gradient(92deg,#f1e6d0,#e0b23c 55%,#e0452f); -webkit-background-clip:text; background-clip:text; filter:drop-shadow(0 2px 1px rgba(0,0,0,.55)); }
+body.game-sumo .shead{ border-bottom-color:rgba(224,69,47,.32); }                   /* filet vermillon sous l'en-tête des panneaux */
+body.game-sumo:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.6),0 0 0 3px #4a2616 inset,0 0 46px -6px rgba(255,150,60,.22); }
+
 /* ============================================================================
    ERGONOMIE MOBILE — manette à 2 zones (croix directionnelle ⟷ actions),
    flèches Pong sous l'écran, boutons flottants discrets hors de l'aire de jeu.
@@ -679,11 +707,13 @@ body.flat .joyknob{ -webkit-box-shadow:none; box-shadow:none; }
 #gamemenu .gtab[data-id="tank"]{ font-family:'Black Ops One','Impact',sans-serif; font-weight:400; text-transform:uppercase; color:#e0c277; border-radius:5px; }
 #gamemenu .gtab[data-id="snake"]{ font-family:'Fredoka','Segoe UI',sans-serif; color:#8fd98a; border-radius:16px; }
 #gamemenu .gtab[data-id="bomb"]{ font-family:'Baloo 2','Segoe UI',sans-serif; color:#ff9ed0; border-radius:16px; }
+#gamemenu .gtab[data-id="sumo"]{ font-family:'Dela Gothic One','Impact',sans-serif; font-weight:400; letter-spacing:.04em; color:#f08a6e; border-radius:6px; }
 #gamemenu .gtab.on[data-id="pong"]{ background:linear-gradient(92deg,#ff5db4,#7c3cff); color:#fff; }
 #gamemenu .gtab.on[data-id="tron"]{ background:linear-gradient(92deg,#1fe0ff,#0a86ff); color:#021018; }
 #gamemenu .gtab.on[data-id="tank"]{ background:linear-gradient(180deg,#8a7a2e,#5e4a1c); color:#fff6dc; box-shadow:0 2px 0 #2a2010; }
 #gamemenu .gtab.on[data-id="snake"]{ background:linear-gradient(92deg,#3da34d,#8fd14f); color:#06210a; }
 #gamemenu .gtab.on[data-id="bomb"]{ background:linear-gradient(92deg,#ff5aa0,#ffb13c); color:#2a0c33; }
+#gamemenu .gtab.on[data-id="sumo"]{ background:linear-gradient(180deg,#ea5a3f,#b8321f); color:#fff4e6; box-shadow:0 2px 0 #5a160c; }
 
 /* ---- C. États « ON » par identité ---- */
 body.game-pong{ --ok:#ff5db4; --okTxt:#ffb3dd; }
@@ -691,6 +721,7 @@ body.game-tron{ --ok:#1fe0ff; --okTxt:#aef4ff; }
 body.game-tank{ --ok:#e0a92e; --okTxt:#ffe2a1; }
 body.game-snake{ --ok:#5fc36a; --okTxt:#c2f0b8; }
 body.game-bomb{ --ok:#ff7ac0; --okTxt:#ffd3ea; }
+body.game-sumo{ --ok:#e0b23c; --okTxt:#ffe6a6; }   /* or, pas vermillon : un état ON rouge se lirait comme une erreur */
 
 /* ---- D. Fonds signature renforcés ---- */
 body.game-pong:not(.theme-light):not(.flat)::after{                       /* + soleil synthwave au-dessus de l'horizon */
@@ -717,6 +748,17 @@ body.game-bomb:not(.flat)::after{ content:''; position:fixed; inset:0; z-index:-
     radial-gradient(rgba(122,184,255,.06) 1.8px, transparent 2px),
     radial-gradient(rgba(255,210,60,.05) 1.5px, transparent 1.7px);
   background-size:64px 64px, 48px 48px, 36px 36px; background-position:0 0, 24px 18px, 10px 34px; }   /* semis de confettis */
+/* Sumo : lueur chaude des lanternes qui vacille lentement + bandeau vermillon du toit suspendu (tsuriyane).
+   On n'anime QUE l'opacité (composité, aucun repeint) ; coupé par « Réduire les effets » et prefers-reduced-motion. */
+body.game-sumo:not(.flat)::after{ content:''; position:fixed; top:0; right:0; bottom:0; left:0;   /* pas inset : absent avant iOS 14.1 */ z-index:-1; pointer-events:none;
+  background:
+    linear-gradient(180deg, rgba(224,69,47,.16), transparent 9vh),
+    radial-gradient(22vmin 22vmin at 12% 10%, rgba(255,178,90,.20), transparent 70%),
+    radial-gradient(22vmin 22vmin at 88% 10%, rgba(255,178,90,.18), transparent 70%);
+  -webkit-animation:smLantern 7s ease-in-out infinite alternate; animation:smLantern 7s ease-in-out infinite alternate; }
+@-webkit-keyframes smLantern{ 0%{ opacity:.75; } 45%{ opacity:1; } 60%{ opacity:.86; } 100%{ opacity:.96; } }
+@keyframes smLantern{ 0%{ opacity:.75; } 45%{ opacity:1; } 60%{ opacity:.86; } 100%{ opacity:.96; } }
+@media (prefers-reduced-motion:reduce){ body.game-sumo::after{ -webkit-animation:none; animation:none; } }
 
 /* ---- E. Cartes HUD thématiques ---- */
 body.game-tank .pc{ background:linear-gradient(180deg,rgba(88,74,44,.92),rgba(50,40,24,.92)); border-color:#6b5a32; box-shadow:0 2px 0 rgba(0,0,0,.45); }
@@ -730,6 +772,10 @@ body.game-snake .pc{ border-style:dashed; }                                     
 body.game-bomb .pc{ border:2px solid rgba(255,255,255,.5); box-shadow:0 4px 0 rgba(0,0,0,.3); }  /* bulle BD */
 body.game-tron .pc{ border-left:3px solid #1fe0ff; }                                           /* liseré lumineux */
 body.game-pong .pc{ border-bottom:2px solid rgba(255,93,180,.35); }
+body.game-sumo .pc{ background:linear-gradient(180deg,rgba(64,44,31,.94),rgba(36,24,18,.94)); border-color:rgba(217,194,122,.22);
+  border-top:3px solid #e0452f; box-shadow:0 2px 0 rgba(0,0,0,.42); }                        /* banderole nobori : liseré vermillon */
+/* La règle ci-dessus (plus spécifique que .pc.me) écraserait le halo « c'est toi » : on le repose. */
+body.game-sumo .pc.me{ box-shadow:0 0 0 1.5px currentColor inset,0 0 22px -6px currentColor,0 2px 0 rgba(0,0,0,.42); }
 
 /* ---- F. Finitions ---- */
 ::selection{ background:var(--accent); color:#0a0d18; }

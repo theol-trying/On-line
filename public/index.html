@@ -7,7 +7,7 @@
 <title>Plateforme LAN</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Black+Ops+One&family=Fredoka:wght@500;600;700&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Black+Ops+One&family=Dela+Gothic+One&family=Fredoka:wght@500;600;700&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="game-pong">
@@ -387,6 +387,62 @@
         <h4>Mode de partie (bouton 🏁)</h4>
         <div class="legrow"><span>🐍</span><b>Survie</b> — règle classique : le dernier serpent en vie gagne</div>
         <div class="legrow"><span>🏁</span><b>Food-rush</b> — l'arène déborde de pastilles ; le <b>premier à 20 points</b> 🍎 gagne tout de suite (sinon, à l'élimination, c'est le meilleur score qui l'emporte)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== racine du jeu SUMO ===== -->
+  <div id="sumo-root" class="game-root hidden">
+    <div class="stage"><div class="canvas-wrap">
+      <canvas id="smc" width="600" height="600"></canvas>
+      <div id="smBanner" class="banner-mid"></div>
+      <div id="smEnd" class="endscreen hidden"></div>
+    </div></div>
+    <div id="smHud" class="hud"></div>
+    <div class="bar">
+      <button id="smStart" class="primary" disabled>▶ Démarrer</button>
+      <button id="smPause" disabled>⏸ Pause</button>
+      <span class="sep"></span>
+      <button class="gm" id="smBots">🤖 Bots : 0</button>
+      <button class="gm" id="smDiff">🎯 IA : Normale</button>
+      <button class="gm" id="smMode" disabled>⚔ FFA</button>
+      <button id="smHelp">❔ Techniques</button>
+      <button id="smLbBtn">🏆 Classement</button>
+    </div>
+    <div class="help">
+      Déplace ton lutteur <b>↑ ↓ ← →</b> / <b>W A S D</b> · <b>Espace</b> = charge 💨 · <b>Maj</b> ou <b>E</b> = ancrage ⚓ · <b>P / Échap</b> = pause.
+      Pousse les autres hors du dohyō : le dernier dans le cercle gagne. Le cercle rétrécit avec le temps !
+    </div>
+    <div class="gpad">
+      <div class="dirs">
+        <button id="smUp" class="touch" aria-label="haut">▲</button>
+        <div class="drow"><button id="smLeft" class="touch" aria-label="gauche">◀</button><button id="smDown" class="touch" aria-label="bas">▼</button><button id="smRight" class="touch" aria-label="droite">▶</button></div>
+      </div>
+      <div class="acts">
+        <button id="smDash" class="touch fire" aria-label="charge">💨</button>
+        <button id="smBrace" class="touch" aria-label="ancrage">⚓</button>
+      </div>
+    </div>
+    <button id="smPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
+    <div id="smLbPanel" class="settings hidden" style="width:min(94vw,460px);">
+      <div class="shead"><h3>🏆 Classement — Sumo</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody"><div id="smLbBody"></div></div>
+    </div>
+    <div id="smHelpPanel" class="settings hidden" style="width:min(94vw,420px);">
+      <div class="shead"><h3>Techniques &amp; bonus — Sumo</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody">
+        <h4>Règle</h4>
+        <div class="legrow"><span>⭕</span><b>Hors du cercle</b> — un lutteur dont le <b>centre</b> franchit le cordon de paille est éliminé. Le dernier dans le dohyō (ou la dernière équipe) gagne la manche</div>
+        <div class="legrow"><span>⏳</span><b>Mort subite</b> — après 25 s le cercle rétrécit, plus vite après 90 s : la manche finit toujours</div>
+        <h4>Techniques</h4>
+        <div class="legrow"><span>💨</span><b>Charge</b> — touche <b>Espace</b> (ou bouton 💨) : bond violent dans la direction tenue. Un choc porté en pleine charge pousse <b>1,7× plus fort</b>. Recharge ~2 s</div>
+        <div class="legrow"><span>⚓</span><b>Ancrage</b> — touche <b>Maj</b> ou <b>E</b> (ou bouton ⚓) : tu deviens 3× plus lourd pendant 1 s, mais tu bouges à peine. Le contre idéal à une charge, surtout près du bord. Recharge 3 s</div>
+        <h4>Bonus (à ramasser sur le dohyō)</h4>
+        <div class="legrow"><span>🍙</span><b>Lourd</b> — plus gros et bien plus lourd pendant 8 s : difficile à déplacer</div>
+        <div class="legrow"><span>⚡</span><b>Élan</b> — ta charge est rechargée tout de suite et frappe 1,4× plus fort pendant 6 s</div>
+        <div class="legrow"><span>💥</span><b>Onde de choc</b> — repousse immédiatement tous les lutteurs proches de toi</div>
+        <div class="legrow"><span>👣</span><b>Pieds collés</b> — tu glisses moins et tu encaisses les chocs 2× moins fort pendant 6 s</div>
+        <div class="note">Celui qui t'a touché en dernier (dans les 3 s) est crédité de ta sortie. Une sortie provoquée par un coéquipier ne compte pour personne.</div>
       </div>
     </div>
   </div>
