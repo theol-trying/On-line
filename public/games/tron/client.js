@@ -10,7 +10,6 @@ import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (daltonisme / jusqu'à 10 joueurs)
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // bandeaux « ce que tu viens de ramasser »
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux jeux (mode plein écran compris)
-import { dessinerAvatar } from '../../avatar-sprite.js';        // avatar du lobby en pastille portée par la moto
 import { lumiere, creerLumieres } from '../../lumiere.js';      // phares, halos de traînée, dérésolutions qui éclairent le sol
 import { crepuscule } from '../../crepuscule.js';               // jour → crépuscule pendant que l'arène se referme
 import { creerJournal, blocFin } from '../../finpartie.js';     // courbe de la manche + meilleure action (écran de fin)
@@ -763,14 +762,6 @@ export default (function () {
       }
     }
     ctx.restore();
-    // pilote : l'avatar du lobby en pastille sur la selle, toujours droit (lisible), liseré à la couleur du siège.
-    // Taille plancher de 9 unités : reste identifiable sur la grande grille à 10 joueurs. Bots : pas d'avatar.
-    if (!p.bot && p.name) {
-      const D = Math.max(C * 1.15, 9), ax = x - Math.cos(ang) * C * 0.85, ay = y - Math.sin(ang) * C * 0.85;
-      if (p.ghost) ctx.globalAlpha = FX ? 0.55 + 0.2 * Math.sin(now / 55) : 0.6;
-      dessinerAvatar(ctx, p.name, ax, ay, D, cv.width / ARENA, col);
-      ctx.globalAlpha = 1;
-    }
   }
   function drawMeMarker(x, y, now) {                        // repère « c'est moi » : équerres pulsées autour de la tête + pointe au-dessus
     const C = CELL, s = C * 0.9 + 2 + (FX ? Math.sin(now / 200) * 1.2 : 0), l = Math.max(2.5, C * 0.5);

@@ -21,7 +21,6 @@ import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par si�
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // messages de ramassage : l'icône seule ne parle pas
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux jeux (mode plein écran compris)
 // Couche graphique commune aux 6 jeux, posée PAR-DESSUS la refonte (rien de ce qui précède n'est retiré) :
-import { avatarSprite } from '../../avatar-sprite.js';          // avatar du lobby en pastille sur l'étiquette de la raquette
 import { lumiere, creerLumieres } from '../../lumiere.js';       // balles qui éclairent le sol, éclairs aux renvois / bumpers / vies perdues
 import { crepuscule } from '../../crepuscule.js';               // mort subite : l'arène glisse du jour au crépuscule
 import { creerJournal, blocFin } from '../../finpartie.js';      // écran de fin : courbe des vies + meilleure action
@@ -1075,20 +1074,15 @@ export default (function () {
     ctx.moveTo(x - 5, y - 2); ctx.lineTo(x + 4.5, y - 2); ctx.moveTo(x + 2.4, y - 4.2); ctx.lineTo(x + 4.8, y - 2); ctx.lineTo(x + 2.4, y + 0.2);
     ctx.moveTo(x + 5, y + 2.4); ctx.lineTo(x - 4.5, y + 2.4); ctx.moveTo(x - 2.4, y + 0.2); ctx.lineTo(x - 4.8, y + 2.4); ctx.lineTo(x - 2.4, y + 4.6); ctx.stroke();
   }
-  const AV_D = 18;                                                       // diamètre de la pastille d'avatar (unités terrain)
   function drawLabel(p, e) {
     const isMe = p.seat === mySeat, col = colOf(p), [lx, ly] = pt(e, e.len / 2, PAD_OFF + PAD_W + 14);
     const txt = isMe ? 'VOUS' : ((p.name || ('P' + (p.seat + 1))).slice(0, 8) + (p.bot ? '*' : ''));
     const icons = (p.lead ? 1 : 0) + (p.inv ? 1 : 0);
-    // avatar choisi au lobby (humains seulement) : pastille ronde cerclée à la couleur du siège, en tête d'étiquette.
-    // Sprite pré-rendu et mis en cache par avatar-sprite.js ; null (pas d'avatar / image en décodage) = étiquette d'avant.
-    const av = p.bot ? null : avatarSprite(p.name, AV_D * (cv.width / W) * ((fitCache && fitCache.s) || 1), col);
-    const aw = av ? AV_D - 1 : 0;
+    const aw = 0;
     ctx.font = UI(isMe ? 12 : 11); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const tw = ctx.measureText(txt).width, tot = aw + tw + icons * 13, x0 = lx - tot / 2, alive = p.playing ? p.alive : true;
     ctx.globalAlpha = alive ? 1 : 0.35; ctx.fillStyle = TH.label; ctx.beginPath(); rrect(ctx, x0 - 5, ly - 8, tot + 10, 16, 6); ctx.fill();   // pastille : lisible sur la grille
     if (isMe) { ctx.strokeStyle = rgba(col, 0.8); ctx.lineWidth = 1; ctx.stroke(); }
-    if (av) { ctx.globalAlpha = alive ? 1 : 0.4; ctx.drawImage(av, x0 - 5, ly - AV_D / 2, AV_D, AV_D); }   // collée au bord gauche arrondi de l'étiquette
     ctx.globalAlpha = alive ? (A.contrast ? 1 : 0.88) : 0.3; ctx.fillStyle = col; ctx.fillText(txt, x0 + aw + tw / 2, ly + 0.5);
     let ix = x0 + aw + tw + 8;
     if (p.lead) { crown(ix, ly); ix += 13; }

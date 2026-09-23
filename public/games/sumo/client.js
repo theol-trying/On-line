@@ -7,7 +7,6 @@ import { createMusic } from '../../music.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motif par siège, peint sur la ceinture (mawashi)
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
-import { dessinerAvatar } from '../../avatar-sprite.js';        // avatar du lobby peint sur la tête du lutteur
 import { lumiere, creerLumieres } from '../../lumiere.js';      // lanternes, charges, ondes et sorties éclairent l'argile
 import { crepuscule } from '../../crepuscule.js';               // le jour tombe à mesure que la paille se referme
 import { creerJournal, blocFin } from '../../finpartie.js';     // courbe du combat + meilleure action à l'écran de fin
@@ -537,15 +536,6 @@ export default (function () {
     ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.beginPath(); oval(ctx, r * 0.3, -r * 0.03, r * 0.1, r * 0.035); ctx.fill();   // lustre de l'huile (bintsuke)
     ctx.strokeStyle = K.washi; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(r * 0.16, -r * 0.07); ctx.lineTo(r * 0.16, r * 0.07); ctx.stroke();
     ctx.rotate(-(a + (o.spin || 0)));
-    // avatar du lobby sur la tête (repère non tourné : l'emoji reste droit), chignon redessiné par-dessus pour garder l'orientation
-    if (o.name) {
-      const ang = a + (o.spin || 0), hx = Math.cos(ang) * r * 0.06, hy = Math.sin(ang) * r * 0.06;
-      if (dessinerAvatar(ctx, o.name, hx, hy, r * 0.86, (cv.width / AR) * (o.scale || 1), K.ink)) {
-        ctx.rotate(ang); ctx.fillStyle = K.ink; ctx.beginPath(); oval(ctx, r * 0.52, 0, r * 0.15, r * 0.1); ctx.fill();
-        ctx.strokeStyle = K.washi; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(r * 0.44, -r * 0.07); ctx.lineTo(r * 0.44, r * 0.07); ctx.stroke();
-        ctx.rotate(-ang);
-      }
-    }
     // contours : ancrage = contour épais d'encre ; lourd = liseré d'or ; contraste élevé = blanc net
     if (o.brace) { ctx.strokeStyle = K.ink; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(0, 0, r + 0.5, 0, Math.PI * 2); ctx.stroke(); }
     else if (o.heavy) { ctx.strokeStyle = 'rgba(224,178,60,0.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, r + 1, 0, Math.PI * 2); ctx.stroke(); }

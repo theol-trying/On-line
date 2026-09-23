@@ -13,7 +13,6 @@ import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux 5 jeux (mode plein écran compris)
 // couche partagée (par-dessus la refonte « Confiserie ») : avatar sur le visage du bombeur, lueurs des
 // flammes / mèches / téléporteurs sur le glaçage, crépuscule pendant la mort subite, courbe de fin de manche
-import { dessinerAvatar } from '../../avatar-sprite.js';
 import { lumiere, creerLumieres } from '../../lumiere.js';
 import { crepuscule } from '../../crepuscule.js';
 import { creerJournal, blocFin } from '../../finpartie.js';
@@ -807,11 +806,7 @@ export default (function () {
     if (pat) { ctx.fillStyle = pat; ctx.fill(); }
     ctx.strokeStyle = K.ink; ctx.lineWidth = 1.6; ctx.stroke();
     ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); oval(ctx, -3.6, hy - 5.2, 3.2, 1.6); ctx.fill();
-    // avatar du joueur (lobby) à la place du visage, tourné comme la visière ; de dos, en écusson sur le casque.
-    // Le casque (couleur + motif du siège) reste visible tout autour : l'identification du siège ne change pas.
-    const avOk = !!o.name && dessinerAvatar(ctx, o.name, dir === 0 ? 2.6 : dir === 2 ? -2.6 : 0, dir === 3 ? hy - 0.6 : hy + 1.6, dir === 3 ? 10 : dir === 1 ? 12.6 : 11.6,
-      PXU * (o.scale || 1), A.contrast ? '#ffffff' : K.ink);
-    if (dir !== 3 && !avOk) {
+    if (dir !== 3) {
       const f0 = dir === 0 ? 3.2 : dir === 2 ? -3.2 : 0, fw = dir === 1 ? 7.2 : 5.8, ey = hy + 1.4;
       ctx.fillStyle = o.skull ? '#e2f5cf' : '#fff1dc'; ctx.beginPath(); oval(ctx, f0, hy + 1.8, fw, 5.4); ctx.fill(); ctx.strokeStyle = K.ink; ctx.lineWidth = 1.1; ctx.stroke();
       const ex = f0 + (dir === 0 ? 0.8 : dir === 2 ? -0.8 : 0), sp = dir === 1 ? 2.7 : 2.1;
@@ -867,11 +862,9 @@ export default (function () {
     const pat = seatPattern(ctx, seat, { size: 8, ink: 'rgba(255,255,255,0.36)' }); if (pat) { ctx.fillStyle = pat; ctx.fill(); }
     ctx.strokeStyle = me ? '#fff' : K.ink; ctx.lineWidth = me ? 2 : 1.5; ctx.stroke();
     ctx.globalAlpha = 1;
-    if (!(name && dessinerAvatar(ctx, name, 0, -2.2, 11, PXU, A.contrast ? '#ffffff' : K.ink))) {   // avatar à la place du visage du fantôme
-      ctx.fillStyle = K.ink; ctx.beginPath(); oval(ctx, -3.6, -3, 2, 2.8); oval(ctx, 3.6, -3, 2, 2.8); ctx.fill();
-      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-3.1, -4, 0.7, 0, TAU); ctx.arc(4.1, -4, 0.7, 0, TAU); ctx.fill();
-      ctx.fillStyle = K.ink; ctx.beginPath(); ctx.arc(0, 2.6, 1.4, 0, TAU); ctx.fill();
-    }
+        ctx.fillStyle = K.ink; ctx.beginPath(); oval(ctx, -3.6, -3, 2, 2.8); oval(ctx, 3.6, -3, 2, 2.8); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-3.1, -4, 0.7, 0, TAU); ctx.arc(4.1, -4, 0.7, 0, TAU); ctx.fill();
+    ctx.fillStyle = K.ink; ctx.beginPath(); ctx.arc(0, 2.6, 1.4, 0, TAU); ctx.fill();
     ctx.restore();
   }
   function drawPoof(pf, now) {                        // élimination : le personnage gonfle et part en nuage

@@ -115,6 +115,10 @@ body.flat .dot{ box-shadow:none; }
 .badge{ font-size:9px; font-weight:700; padding:2px 6px; border-radius:5px; letter-spacing:.04em; }
 .lv{ font-size:14px; margin-top:3px; letter-spacing:1px; }
 
+/* line-height EXPLICITE : chaque jeu a sa police d'affichage, et la hauteur « normale » d'une ligne dépend
+   de la police (Baloo 2 est bien plus haute qu'Orbitron) — tous les menus sautaient de quelques pixels au
+   changement de jeu. Une hauteur fixée en em est la même quelle que soit la police. */
+button{ line-height:1.25; }
 button{ cursor:pointer; padding:10px 16px; font-size:13px; font-weight:600;
   border:1px solid var(--border2); background:var(--panel); color:var(--txt);
   border-radius:11px; backdrop-filter:blur(8px); transition:background .15s,transform .05s,border-color .15s; }
@@ -392,6 +396,10 @@ body.flat .fxon{ animation:none; }
 @keyframes etin{ from{ opacity:0; transform:translateY(-8px) scale(.9); } to{ opacity:1; transform:none; } }
 @keyframes etout{ to{ opacity:0; transform:translateY(-6px); } }
 /* barre « Prêt » (gate de démarrage, commune aux 6 jeux) */
+.readybar{ line-height:1.3; }                             /* même raison que button{line-height} : indépendant de la police du jeu */
+/* Cartes joueurs du lobby : bordures et polices diffèrent selon le jeu (2 px à Bomberman, liseré de 3 px au
+   Sumo…) ; une hauteur minimale commune garde la barre de commandes, en dessous, au même endroit partout. */
+body:not(.playing) .pc{ min-height:66px; }
 .readybar{ display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px 12px;
   padding:7px 12px; max-width:min(96vw,760px); background:var(--panel); border:1px solid var(--border2); border-radius:14px; backdrop-filter:blur(8px); }
 .readybar.hidden{ display:none; }
@@ -687,6 +695,10 @@ body.hudon #hudFloat{ opacity:1; border-color:var(--accent); }
   body:not(.pad-croix) .stage > .joyzone{ -webkit-order:1; order:1; -webkit-flex:1 1 100%; flex:1 1 100%; margin:0 4px; padding:0; }
   body:not(.pad-croix) .stage > div:not(.canvas-wrap):not(.joyzone){ display:none; }
   body:not(.pad-croix) .joyzone.actif::after{ opacity:0; }
+  /* Lobby : pas de manette (elle ne sert qu'en partie, et revient dès le compte à rebours). Sans ça, le joystick
+     de Pong, logé sous son plateau, décalait tout le bas de page de ~200 px par rapport aux 5 autres jeux. */
+  body:not(.playing) .gpad, body:not(.playing) .joyzone, body:not(.playing) .stage > div:not(.canvas-wrap){ display:none !important; }
+  body:not(.playing) .pc{ min-height:70px; }               /* la plus haute des cartes (Tanks) : même ligne pour tous */
   /* En partie, la manette descend SOUS LES POUCES, en bas de l'écran (comme dans le prototype essayé),
      au lieu de flotter sous le plateau en laissant du vide dessous. Marge pour la barre d'accueil. */
   body.playing .gpad{ margin-top:auto; padding-bottom:10px; padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px)); }
@@ -795,27 +807,49 @@ body.game-tron.theme-crt:not(.flat)::after{ background:
   linear-gradient(0deg, #04150b, #010704); }
 body.game-tron:not(.flat) canvas{ box-shadow:0 18px 60px rgba(0,0,0,.65), 0 0 0 1px rgba(31,224,255,.45) inset, 0 0 54px -12px rgba(31,224,255,.55); }
 
-/* 🟫 TANKS — base avancée dans le désert : ciel brûlé, soleil voilé, dunes en trois plans, grain de
-   sable ; au premier plan, bandeau d'acier riveté bordé de rayures de danger (le « tsuriyane » du char). */
+/* 🟫 TANKS — avant-poste dans le désert : ciel brûlé, soleil voilé, mesas à l'horizon dans la brume de
+   chaleur, dunes en trois plans ; au premier plan, un mur de SACS DE SABLE sur deux rangées surmonté de
+   barbelés sur piquets, et une fine bande de rayures de danger en haut (fine : elle ne pousse aucun menu). */
 body.game-tank:not(.flat)::before{ background:
   radial-gradient(rgba(255,230,180,.05) 1px, transparent 1.3px) 0 0 / 7px 7px,
+  repeating-linear-gradient(180deg, rgba(255,226,170,0) 0 6px, rgba(255,226,170,.05) 6px 8px) 0 55% / 100% 11vh no-repeat,
   radial-gradient(90vw 20vh at 22% 100%, #6b4c24 0%, #5a3e1c 55%, transparent 56%),
   radial-gradient(80vw 24vh at 84% 100%, #7c5a2c 0%, #674a22 55%, transparent 56%),
   radial-gradient(120vw 34vh at 50% 108%, #8e6a36 0%, #7a5a2c 50%, transparent 51%),
+  radial-gradient(19vw 5vh at 15% 61%, #4d3519 0 66%, transparent 68%),
+  radial-gradient(10vw 3.6vh at 28% 62%, #573c1d 0 66%, transparent 68%),
+  radial-gradient(15vw 4.6vh at 66% 61.5%, #4a3318 0 66%, transparent 68%),
+  radial-gradient(22vw 5.6vh at 86% 61%, #523820 0 66%, transparent 68%),
+  radial-gradient(110vw 12vh at 50% 61%, rgba(255,206,130,.22), transparent 70%),
   radial-gradient(26vmin 26vmin at 72% 26%, rgba(255,236,190,.55), rgba(255,200,120,.16) 45%, transparent 70%),
   linear-gradient(180deg, #3a2a16 0%, #6a4a24 48%, #8a6230 70%, #5a3e1c 100%); }
-body.game-tank:not(.flat)::after{ content:''; position:fixed; top:0; left:0; right:0; height:38px; z-index:-1; pointer-events:none;
+body.game-tank:not(.flat)::after{ content:''; position:fixed; top:0; right:0; bottom:0; left:0; z-index:-1; pointer-events:none;
   background:
-    repeating-linear-gradient(135deg, #e0a92e 0 12px, #1a140a 12px 24px) 0 100% / 100% 7px no-repeat,
-    radial-gradient(circle, rgba(0,0,0,.55) 2px, rgba(255,240,200,.18) 2.6px, transparent 3.2px) 14px 11px / 56px 38px repeat-x,
-    linear-gradient(180deg, #5c5232, #3e3620 85%, #2a2414);
-  -webkit-box-shadow:0 6px 18px rgba(0,0,0,.45); box-shadow:0 6px 18px rgba(0,0,0,.45); }
+    repeating-linear-gradient(135deg, #e0a92e 0 10px, #1a140a 10px 20px) 0 0 / 100% 9px no-repeat,
+    linear-gradient(rgba(0,0,0,.45), rgba(0,0,0,0)) 0 9px / 100% 6px no-repeat,
+    radial-gradient(circle, rgba(46,34,18,.95) 0 1.5px, rgba(46,34,18,0) 2.1px) left 0 bottom 67px / 23px 7px repeat-x,
+    linear-gradient(rgba(46,34,18,.85), rgba(46,34,18,.85)) left 0 bottom 70px / 100% 1.5px repeat-x,
+    linear-gradient(90deg, rgba(58,42,22,.95) 0 3px, rgba(0,0,0,0) 3px) left 36px bottom 42px / 170px 32px repeat-x,
+    radial-gradient(ellipse 50% 44% at 50% 56%, #d4b27a 0%, #bf9b62 52%, #8a6a3c 69%, rgba(0,0,0,0) 72%) left 30px bottom 20px / 60px 26px repeat-x,
+    radial-gradient(ellipse 50% 44% at 50% 56%, #c8a56c 0%, #b08c55 52%, #7d6035 69%, rgba(0,0,0,0) 72%) left 0 bottom 0 / 60px 26px repeat-x,
+    linear-gradient(0deg, rgba(20,14,6,.6), rgba(20,14,6,0)) left 0 bottom 0 / 100% 48px no-repeat; }
 
-/* 🟩 SNAKE — jardin au soleil : rais de lumière obliques, pelouse à brins, haies en lisière, feuillage
-   aux coins ; la lumière « respire » lentement (opacité seule). */
+/* 🟩 SNAKE — jardin sous le feuillage : pelouse à brins et à fleurs semées, taches de soleil tamisé,
+   rais de lumière obliques, haies en lisière ; au premier plan, une PALISSADE de bois blanchi avec ses
+   traverses et une rangée de fleurs à son pied. */
 body.game-snake:not(.flat)::before{ background:
+  radial-gradient(circle, #ff7a8e 0 1.9px, rgba(255,122,142,0) 2.4px) 13px 17px / 97px 83px,
+  radial-gradient(circle, #ffd84a 0 1.7px, rgba(255,216,74,0) 2.2px) 61px 44px / 113px 97px,
+  radial-gradient(circle, #f4f7ee 0 1.5px, rgba(244,247,238,0) 2px) 37px 71px / 89px 101px,
+  radial-gradient(circle, #c9a2ff 0 1.6px, rgba(201,162,255,0) 2.1px) 83px 9px / 127px 109px,
+  repeating-linear-gradient(115deg, rgba(255,250,200,0) 0 9vw, rgba(255,250,200,.05) 9vw 13vw, rgba(255,250,200,0) 13vw 24vw),
+  radial-gradient(10vmin 10vmin at 24% 32%, rgba(255,248,196,.10), transparent 70%),
+  radial-gradient(7vmin 7vmin at 63% 22%, rgba(255,248,196,.08), transparent 70%),
+  radial-gradient(12vmin 12vmin at 78% 58%, rgba(255,248,196,.07), transparent 70%),
+  radial-gradient(8vmin 8vmin at 38% 74%, rgba(255,248,196,.07), transparent 70%),
   radial-gradient(rgba(190,255,150,.07) 1.2px, transparent 1.5px) 0 0 / 11px 11px,
   radial-gradient(rgba(20,60,20,.35) 1px, transparent 1.4px) 5px 6px / 11px 11px,
+  repeating-linear-gradient(95deg, rgba(140,210,110,.035) 0 1px, rgba(0,0,0,0) 1px 6px),
   radial-gradient(10vw 16vh at 0% 30%, #1d4a1c 0%, #173c17 60%, transparent 62%),
   radial-gradient(12vw 18vh at 1% 70%, #1b451a 0%, #153815 60%, transparent 62%),
   radial-gradient(10vw 16vh at 100% 40%, #1d4a1c 0%, #173c17 60%, transparent 62%),
@@ -824,12 +858,16 @@ body.game-snake:not(.flat)::before{ background:
   linear-gradient(180deg, #1e4a22 0%, #173a19 45%, #10290f 100%); }
 body.game-snake:not(.flat)::after{ content:''; position:fixed; top:0; right:0; bottom:0; left:0; z-index:-1; pointer-events:none;
   background:
-    repeating-linear-gradient(115deg, rgba(255,250,200,0) 0 9vw, rgba(255,250,200,.05) 9vw 13vw, rgba(255,250,200,0) 13vw 24vw),
+    radial-gradient(circle, #ff6b8a 0 3px, rgba(255,107,138,0) 3.6px) left 12px bottom 3px / 44px 10px repeat-x,
+    radial-gradient(circle, #ffd84a 0 2.6px, rgba(255,216,74,0) 3.2px) left 33px bottom 7px / 57px 10px repeat-x,
+    radial-gradient(circle, #f4f7ee 0 2.2px, rgba(244,247,238,0) 2.8px) left 4px bottom 9px / 71px 10px repeat-x,
+    radial-gradient(circle at 8px 100%, rgba(222,214,190,.86) 0 8px, rgba(222,214,190,0) 8.6px) left 0 bottom 60px / 30px 9px repeat-x,
+    repeating-linear-gradient(90deg, rgba(222,214,190,.86) 0 14px, rgba(176,168,146,.86) 14px 16px, rgba(0,0,0,0) 16px 30px) left 0 bottom 0 / 100% 60px no-repeat,
+    linear-gradient(rgba(196,188,164,.8), rgba(196,188,164,.8)) left 0 bottom 12px / 100% 7px repeat-x,
+    linear-gradient(rgba(196,188,164,.8), rgba(196,188,164,.8)) left 0 bottom 40px / 100% 7px repeat-x,
+    linear-gradient(0deg, rgba(4,16,6,.55), rgba(4,16,6,0)) left 0 bottom 0 / 100% 70px no-repeat,
     radial-gradient(34vmin 30vmin at -4% -6%, rgba(95,195,106,.34), transparent 70%),
-    radial-gradient(38vmin 32vmin at 104% 104%, rgba(95,195,106,.28), transparent 70%);
-  -webkit-animation:snLumiere 9s ease-in-out infinite alternate; animation:snLumiere 9s ease-in-out infinite alternate; }
-@-webkit-keyframes snLumiere{ from{ opacity:.7; } to{ opacity:1; } }
-@keyframes snLumiere{ from{ opacity:.7; } to{ opacity:1; } }
+    radial-gradient(38vmin 32vmin at 104% 104%, rgba(95,195,106,.28), transparent 70%); }
 
 /* 🎈 BOMBERMAN — confiserie : papier peint à rayures de sucre d'orge et gros pois, lueurs de vitrine ;
    au premier plan, un store festonné rose et blanc et un semis de confettis qui scintille. */
@@ -843,9 +881,9 @@ body.game-bomb:not(.flat)::before{ background:
   linear-gradient(180deg, #2c1250, #1c0a38); }
 body.game-bomb:not(.flat)::after{ content:''; position:fixed; top:0; right:0; bottom:0; left:0; z-index:-1; pointer-events:none;
   background:
-    radial-gradient(circle at 50% 0, #ff7ac0 0 19px, transparent 20px) 0 22px / 40px 22px repeat-x,
-    radial-gradient(circle at 50% 0, #fff4fb 0 19px, transparent 20px) 20px 22px / 40px 22px repeat-x,
-    repeating-linear-gradient(90deg, #ff7ac0 0 20px, #fff4fb 20px 40px) 0 0 / 100% 24px no-repeat,
+    radial-gradient(circle at 50% 0, #ff7ac0 0 8.5px, rgba(255,122,192,0) 9px) 0 12px / 18px 9px repeat-x,
+    radial-gradient(circle at 50% 0, #fff4fb 0 8.5px, rgba(255,244,251,0) 9px) 9px 12px / 18px 9px repeat-x,
+    repeating-linear-gradient(90deg, #ff7ac0 0 9px, #fff4fb 9px 18px) 0 0 / 100% 12px no-repeat,
     radial-gradient(rgba(255,122,192,.09) 2.2px, transparent 2.4px) 0 0 / 64px 64px,
     radial-gradient(rgba(122,184,255,.08) 1.8px, transparent 2px) 24px 18px / 48px 48px,
     radial-gradient(rgba(255,210,60,.07) 1.5px, transparent 1.7px) 10px 34px / 36px 36px;
@@ -853,9 +891,8 @@ body.game-bomb:not(.flat)::after{ content:''; position:fixed; top:0; right:0; bo
 @-webkit-keyframes bmScintille{ from{ opacity:.82; } to{ opacity:1; } }
 @keyframes bmScintille{ from{ opacity:.82; } to{ opacity:1; } }
 
-/* Le bandeau du haut (acier de Tanks, store de Bomberman) ne doit pas passer sous le titre du lobby. */
-body.game-tank:not(.flat):not(.playing){ padding-top:52px; }
-body.game-bomb:not(.flat):not(.playing){ padding-top:56px; }
+/* Les bandeaux du haut (Tanks, Bomberman) restent FINS : les 6 interfaces gardent exactement les mêmes
+   coordonnées de menus d'un jeu à l'autre (retour utilisateur du 23/09 : tout sautait au changement de jeu). */
 /* En partie, le plateau recouvre le sol en perspective : inutile de le faire défiler (batterie des téléphones). */
 body.playing.game-pong::after, body.playing.game-tron::after{ -webkit-animation-play-state:paused; animation-play-state:paused; }
 @media (prefers-reduced-motion:reduce){
