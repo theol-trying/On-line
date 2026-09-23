@@ -698,6 +698,21 @@ sur téléphone (≤ 600 px) pour les 5 jeux ; réglage « Manette tactile : Joy
   Pong, Tanks, Snake tiennent sans défilement.
 - **Recul d'horloge** : le seau à jetons pouvait plonger sous zéro → `Math.max(0, now - seauT)`.
 
+## Prédiction locale (Pong, 23/09)
+Sa propre raquette bougeait ~100 ms après l'appui : aller-retour réseau + tick serveur + tampon
+d'interpolation. Elle est maintenant **prédite** (`client.js · predireMoi`), les autres restent interpolées.
+- Réplique exacte de `humanMove()` : vitesse `pspd` (nouvelle clé du snapshot, dépend du nombre de
+  joueurs), même règle de sens, malus d'inversion (`p.inv`), butées (`p.len`).
+- **Aucune correction pendant le mouvement** : le serveur est en retard d'une latence par construction,
+  s'y recaler ferait reculer la raquette. Il reçoit appui ET relâchement avec le même retard, donc il
+  s'arrête au même endroit : au repos (après RTT + 120 ms, RTT mesuré par le ping d'`app.js`), on
+  converge vers lui. Écart > 35 % du bord (nouvelle manche…) : recalage immédiat.
+- **Compensation côté serveur** (`ballPaddles`) : une raquette humaine en mouvement a une avance de
+  collision de `LEAD_TICKS` = 2 ticks dans son sens de marche (`p.mv`). Sans elle, la raquette vue en
+  avance à l'écran rattrapait des balles que le serveur jugeait ratées.
+- Mesuré avec 80 ms de latence simulée : la raquette réagit en **26 ms** (une image) au lieu de 135 ms ;
+  déplacement identique au serveur (123 unités), **écart final 0** — aucun effet élastique.
+
 ## Protections du serveur (23/09) — le site est public, l'instance unique
 - **Plafond de trame** (`ws.js · MAX_FRAME` = 64 Ko, le plus gros message légitime — l'avatar — fait
   ~19 Ko). Refus dès l'en-tête, avant de stocker la suite. Avant : une trame annonçant une taille énorme
@@ -710,8 +725,7 @@ sur téléphone (≤ 600 px) pour les 5 jeux ; réglage « Manette tactile : Joy
   rythme humain (30/s) jamais bridé, inondation coupée sans toucher les autres joueurs.
 
 ## Limites connues (assumées)
-- **Reste à gagner, non fait** : **prédiction locale** de sa propre raquette — le seul levier qui retire vraiment
-  l'aller-retour réseau du *ressenti* de contrôle (le débit, lui, n'est plus un sujet).
+- ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».
 - Hébergement Render en **Europe (Frankfurt)** — confirmé par l'utilisateur, donc ~15-25 ms de ping : le ping
   résiduel vient du code et du réseau local, pas de la région.
 - ~~Dérive de la boucle serveur~~ **FAIT — pas de temps fixe** (voir section dédiée) : ce n'était pas cosmétique,

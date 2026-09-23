@@ -24,6 +24,7 @@ let CX = W / 2, CY = H / 2, R = R0;
 let PAD_LEN = PAD_LEN0, PAD_SPD = PAD_SPD0;
 const MAX_SEATS = 10;
 const MIN_SPD = 2.6, TICK_HZ = 60;
+const LEAD_TICKS = 2;          // ≈ 33 ms : latence aller (~25 ms à Francfort) + un demi-tick — cf. ballPaddles
 function setArena(n) {
   const k = 1 + 0.13 * (Math.max(2, Math.min(MAX_SEATS, n)) - 2);   // 2 j : ×1.00 · 6 j : ×1.52 · 10 j : ×2.04
   // À 10 joueurs le polygone a des arêtes plus COURTES (2·R·sin(π/N)) alors que la raquette suit k :
@@ -389,7 +390,12 @@ export function createPong(room) {
       const s = (b.x - e.ax) * e.tx + (b.y - e.ay) * e.ty;
       const d = (b.x - e.ax) * e.nx + (b.y - e.ay) * e.ny;
       const L = padLenOf(p);
-      const ns = Math.max(p.pos - L / 2, Math.min(s, p.pos + L / 2));
+      // Compensation de latence : le client PRÉDIT sa raquette (client.js · predireMoi) et la voit donc
+      // en avance sur le serveur d'environ une latence. Une raquette humaine EN MOUVEMENT reçoit donc une
+      // avance de collision dans son sens de marche (LEAD_TICKS de trajet), sinon une balle rattrapée
+      // de justesse avec le bout de la raquette était vue rattrapée à l'écran mais comptée ratée.
+      const lead = (!p.bot && p.mv) ? PAD_SPD * LEAD_TICKS : 0;
+      const ns = Math.max(p.pos - L / 2 - (p.mv < 0 ? lead : 0), Math.min(s, p.pos + L / 2 + (p.mv > 0 ? lead : 0)));
       const nd = Math.max(PAD_OFF, Math.min(d, PAD_OFF + PAD_W));
       if ((s - ns) ** 2 + (d - nd) ** 2 >= BALL_R * BALL_R) continue;
       if (b.ghost) { b.ghost = false; fx.push({ type: 'ghost', side: p.seat, x: b.x, y: b.y }); return; }
@@ -498,11 +504,13 @@ export function createPong(room) {
     const e = geo.edges[p.edge], L = padLenOf(p);
     let d = (p.up ? -1 : 0) + (p.dn ? 1 : 0);          // intention ÉCRAN : -1 = haut/gauche, +1 = bas/droite
     if (p.invertUntil > tick) d = -d;                   // malus inversion
-    if (!d) return;
+    if (!d) { p.mv = 0; return; }
     // selon le sens de parcours de l'arête, +pos va vers le bas/droite (sign=+1) ou le haut/gauche (sign=-1).
     // On l'inverse pour que « haut » fasse TOUJOURS monter la raquette à l'écran (sinon les arêtes opposées sont inversées entre joueurs).
     const sign = ((Math.abs(e.ty) >= Math.abs(e.tx)) ? e.ty > 0 : e.tx > 0) ? 1 : -1;
+    const avant = p.pos;
     p.pos = Math.max(L / 2, Math.min(e.len - L / 2, p.pos + d * sign * PAD_SPD));
+    p.mv = p.pos > avant ? 1 : p.pos < avant ? -1 : 0;  // sens RÉEL du mouvement (0 contre une butée) : cf. ballPaddles
   }
   function update() {
     fx = [];
@@ -568,6 +576,7 @@ export function createPong(room) {
       gs: gameState, winner, fx, botCount, connected: connectedCount(), maxBots: maxBots(),
       mode, nteams, preset, maxLives: cfg.lives, aw: W, ah: H,
       wallBoost: wallBoostOn(),                        // le client dessine les bords éliminés en bumpers
+      pspd: Math.round(PAD_SPD * 100) / 100,           // vitesse raquette par tick : le client PRÉDIT la sienne avec
       count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / 60)) : 0,
       sd: sdActive, slow: slowUntil > tick,
       opts: {

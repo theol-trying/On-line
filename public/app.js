@@ -596,6 +596,7 @@ function connect() {
       showEmote(m.name, m.e);
     } else if (m.t === 'png') {
       const rtt = Math.max(0, Math.round(performance.now() - m.ts)); if (pingTxt) pingTxt.textContent = ' · ⚡ ' + rtt + ' ms';
+      window.__rtt = rtt;                             // lu par la prédiction locale de Pong (délai avant recalage)
     } else if (m.t === 'tour') {
       if (m.done) { tourState = null; renderTour(); showPodium(m.scores); }
       else if (m.on) { const was = tourState && tourState.on; tourState = m; renderTour(); if (!was) note('🏆 Tournoi lancé — que le meilleur gagne !'); }
