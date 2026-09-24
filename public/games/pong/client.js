@@ -603,7 +603,8 @@ export default (function () {
   function detectBanners(prev, m) {
     if (!prev || m.gs !== 'play') return;
     if (m.sd && !prev.sd) { banner('MORT SUBITE'); return; }
-    if (m.balls.length > prev.balls.length) banner('MULTI-BALLE !');
+    // (plus de bandeau « MULTI-BALLE ! » : le message de bonus « La balle se divise » l'annonce déjà — les deux
+    //  apparaissaient en même temps, en double, et le bandeau central masquait le terrain)
     for (let i = 0; i < m.players.length; i++) {
       const p = m.players[i], q = prev.players[i];
       if (p.playing && p.alive && p.lives === 1 && q && q.lives > 1) { banner('DERNIÈRE VIE — ' + (p.name || ('P' + (i + 1)))); break; }

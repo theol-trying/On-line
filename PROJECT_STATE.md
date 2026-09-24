@@ -691,8 +691,9 @@ redeviennent accessibles **à l'élimination**, à la demande.
 - **Aucun jeu modifié** : l'élimination est lue sur les cartes que les 5 jeux tiennent déjà (`.pc.me`,
   `.pc.dead`). Bomberman en revanche n'est pas marqué éliminé tant qu'il joue depuis le bord — il garde
   donc sa manette, c'est voulu.
-- Limite connue : un joueur arrivé **en cours de manche** (siège attribué, pas encore en jeu) n'est
-  marqué ni éliminé ni spectateur dans le DOM — il n'a le chat qu'à la fin de la manche.
+- ~~Limite : un arrivant en cours de manche n'avait le chat qu'à la fin~~ **CORRIGÉ (24/09)** : `app.js` retient
+  son siège (message `welcome`) et lit `playing` dans l'état de la partie — un siège hors de la manche = « hors jeu ».
+  Vérifié : arrivant en pleine manche de Tron → 💬 et 👥 ; joueur en jeu (compte à rebours compris) → ni l'un ni l'autre.
 - Seuil : `innerWidth <= 600`, le même que le bloc mobile de `style.css`. PC et tablettes inchangés.
 
 ### Page d'essai `/manette.html` — PERMANENTE
