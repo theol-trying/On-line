@@ -11,8 +11,11 @@ import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par si�
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // retour de test : l'icône seule ne dit pas l'effet, on l'écrit
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
 import { lumiere, creerLumieres } from '../../lumiere.js';        // lueurs sur la pelouse : pommes spéciales, fantômes, repas, éclats de mort
-import { crepuscule } from '../../crepuscule.js';                 // le jardin passe du jour au crépuscule quand la manche s'achève
+import { crepuscule, creerDuel } from '../../crepuscule.js';                 // le jardin passe du jour au crépuscule quand la manche s'achève
 import { creerJournal, blocFin } from '../../finpartie.js';       // écran de fin : longueur au fil de la manche + meilleure action
+
+// Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
+const DUEL = creerDuel();   // Snake annonce déjà son duel final (music.sting + message) : pas de second bandeau
 // grille dynamique (nb de joueurs) : l'arène garde la MÊME taille logique, seule la taille des cases change
 let GW = GW0, GH = GH0, CELL = CELL0;
 
@@ -924,6 +927,7 @@ export default (function () {
       else tgt = te;
       tgt = tgt < 0 ? 0 : tgt > 0.85 ? 0.85 : tgt;
     }
+    tgt = Math.max(tgt, Math.min(0.9, DUEL.t(snap, performance.now(), null)));   // duel final (annonce déjà faite par Snake)
     dusk += (tgt - dusk) * Math.min(1, dtm / (tgt < dusk ? 500 : 1600));
     if (dusk < 0.002) dusk = 0;
   }

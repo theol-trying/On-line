@@ -8,8 +8,11 @@ import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motif par siè
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
 import { lumiere, creerLumieres } from '../../lumiere.js';      // lanternes, charges, ondes et sorties éclairent l'argile
-import { crepuscule } from '../../crepuscule.js';               // le jour tombe à mesure que la paille se referme
+import { crepuscule, creerDuel } from '../../crepuscule.js';               // le jour tombe à mesure que la paille se referme
 import { creerJournal, blocFin } from '../../finpartie.js';     // courbe du combat + meilleure action à l'écran de fin
+
+// Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
+const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
 
 // musique : gamme pentatonique japonaise in-sen (0,1,5,7,8) — bourdon de quinte, pincements de koto,
 // taiko graves en jeu, flûte (shakuhachi) douce ; climax (mort subite / duel final) = taiko serrés + tempo.
@@ -50,9 +53,16 @@ const SKIN = [231, 181, 140];                           // peau de base, teinté
 const PU = { heavy: { i: '🍙', c: '#8a5a2b' }, dash: { i: '⚡', c: '#e0452f' }, shock: { i: '💥', c: '#3d6fb6' }, grip: { i: '👣', c: '#3f8f4f' } };
 // Libellés au ramassage — constantes du client uniquement, jamais une chaîne venue du réseau.
 const PU_MSG = {
-  heavy: { t: 'Lourd : plus gros, bien plus lourd' },
-  dash: { t: 'Élan : charge prête et 1,4× plus forte' },
-  grip: { t: 'Pieds collés : tu encaisses 2× moins' },
+  heavy: { t: 'plus lourd, plus fort, moins vif' },   // préfixé « Onigiri N/5 : » au ramassage
+  dash: { t: 'Élan : charge prête, recharge 2× plus vite (15 s)' },
+  grip: { t: 'Pieds collés : presque inamovible (12 s)' },
+};
+// Malus subis quand un ADVERSAIRE ramasse un bonus — message au seul joueur visé. Glyphes anciens (pas de
+// séquence ZWJ ni d'emoji récent) : les vieux iOS les affichent.
+const MALUS_MSG = {
+  tired: { i: '💦', t: 'Essoufflé : ta charge recharge plus lentement (8 s)', c: '#c0503a' },
+  slip: { i: '❄', t: 'Sol glissant : tu glisses plus loin (8 s)', c: '#3f8fc0' },
+  stun: { i: '💫', t: 'Sonné ! (1,2 s)', c: '#3d6fb6' },
 };
 const SHOCK_MSG = { i: '💥', t: 'Onde de choc !' };
 const SHRINK_MSG = { i: '⚠', t: 'Le dohyō rétrécit !' };
@@ -127,7 +137,8 @@ export default (function () {
       if (!p.alive) { lv.textContent = p.outBy >= 0 && p.outBy !== i ? '✖ sorti par ' + nameOf(p.outBy) : '✖ sorti'; return; }
       // état des deux techniques + bonus actifs : c'est ce qu'on regarde d'un coin d'œil en pleine poussée
       const st = [p.dashing ? '💨 CHARGE !' : cdTxt(p.dcd, '💨'), p.brace ? '⚓ ANCRÉ' : cdTxt(p.bcd, '⚓')];
-      if (p.heavy) st.push('🍙'); if (p.boost) st.push('⚡'); if (p.grip) st.push('👣');
+      if (p.heavy) st.push('🍙×' + (p.lvl | 0)); if (p.boost) st.push('⚡'); if (p.grip) st.push('👣');
+      if (p.stun) st.push('💫'); if (p.tired) st.push('💦'); if (p.slip) st.push('❄');
       lv.textContent = '● ' + st.join(' · ');
     });
   }
@@ -342,18 +353,23 @@ export default (function () {
     if (f.type === 'pickup') {
       psound('pickup', f.x);
       const d = PU[f.t], m = PU_MSG[f.t];
-      if (f.seat === mySeat && d && m && m.t) msgPerso(d.i, m.t, { color: d.c });   // `m.t` : garde-fou si `t` tombe sur une clé du prototype
+      if (f.seat === mySeat && d && m && m.t) msgPerso(d.i, f.t === 'heavy' ? 'Onigiri ' + Math.min(5, f.lvl | 0) + '/5 : ' + m.t : m.t, { color: d.c });   // `m.t` : garde-fou si `t` tombe sur une clé du prototype
       if (!A.reduceFx && d) { const c = hexRgb(d.c); waves.push({ x: f.x, y: f.y, r0: 8, r1: 34, born: now, life: 380, col: c.join(','), lw: 3 }); LUM.ajouter(f.x, f.y, 70, puLum(f.t), 420, 0.45); }
+      return;
+    }
+    if (f.type === 'malus') {                              // un adversaire a ramassé un bonus : seule la victime est prévenue
+      const m = MALUS_MSG[f.t];
+      if (f.seat === mySeat && m && m.t) msgPerso(m.i, m.t, { color: m.c, bad: true });
       return;
     }
     if (f.type === 'shock') {                              // repousse tout le monde alentour : message global
       psound('shock', f.x); msgGlobal(SHOCK_MSG.i, SHOCK_MSG.t, { color: PU.shock.c });
       if (A.reduceFx) return;
       shakeMag = Math.max(shakeMag, 9);
-      waves.push({ x: f.x, y: f.y, r0: 10, r1: 130, born: now, life: 520, col: '241,230,208', lw: 7 });
-      waves.push({ x: f.x, y: f.y, r0: 6, r1: 118, born: now + 70, life: 520, col: '61,111,182', lw: 4 });
-      dust(f.x, f.y, 26, 3.4);
-      LUM.ajouter(f.x, f.y, 170, '#7fb0ff', 620, 0.55); LUM.ajouter(f.x, f.y, 60, '#fff1d6', 260, 0.7);   // onde de choc
+      waves.push({ x: f.x, y: f.y, r0: 10, r1: 180, born: now, life: 560, col: '241,230,208', lw: 8 });    // r1 = SHOCK_R du serveur
+      waves.push({ x: f.x, y: f.y, r0: 6, r1: 164, born: now + 70, life: 560, col: '61,111,182', lw: 5 });
+      dust(f.x, f.y, 30, 3.8);
+      LUM.ajouter(f.x, f.y, 220, '#7fb0ff', 660, 0.6); LUM.ajouter(f.x, f.y, 60, '#fff1d6', 260, 0.7);   // onde de choc
       return;
     }
     if (f.type === 'shrink') { announceShrink(); return; }
@@ -495,7 +511,12 @@ export default (function () {
     gr.addColorStop(0, rgbStr(mix(base, [255, 240, 225], 0.35))); gr.addColorStop(0.65, rgbStr(base)); gr.addColorStop(1, rgbStr(mix(base, [90, 50, 30], 0.35)));
     return (bodyCache[key] = { grad: gr, skin: rgbStr(base), dark: rgbStr(mix(base, [80, 40, 25], 0.4)), belt: col, beltDk: rgbStr(mix(hexRgb(col), [0, 0, 0], 0.35)) });
   }
-  // o : { scale, spin, alpha, dashing, brace, heavy, grip, boost, me, shadow, name (avatar : humains seulement) }
+  function etoile(x, y, s) {                             // étoile à 5 branches (pas de Path2D : vieux iOS)
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) { const u = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? s * 0.45 : s; ctx.lineTo(x + Math.cos(u) * rr, y + Math.sin(u) * rr); }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  // o : { scale, spin, alpha, dashing, brace, heavy, lvl, grip, boost, tired, slip, stun, me, shadow, name }
   function drawRikishi(seat, x, y, a, r, o, now) {
     const col = colSeat(seat), B = bodyStyle(seat, r, col);
     ctx.save(); ctx.translate(x, y);
@@ -511,6 +532,13 @@ export default (function () {
       ctx.save(); ctx.strokeStyle = 'rgba(63,143,79,0.85)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath();
       for (let k = 0; k < 10; k++) { const t = k / 10 * Math.PI * 2 + a; ctx.moveTo(Math.cos(t) * (r + 3), Math.sin(t) * (r + 3)); ctx.lineTo(Math.cos(t) * (r + 8), Math.sin(t) * (r + 8)); }
       ctx.stroke(); ctx.restore();
+    }
+    if (o.slip) {                                        // sol glissant : flaque glacée sous les pieds, deux reflets qui filent
+      ctx.save(); ctx.fillStyle = 'rgba(150,205,240,0.38)'; ctx.beginPath(); ctx.arc(0, 0, r + 9, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(235,248,255,0.85)'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      const t = A.reduceFx ? 0.6 : now / 380;
+      ctx.beginPath(); ctx.arc(0, 0, r + 6, t, t + 0.7); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, r + 6, t + Math.PI, t + Math.PI + 0.4); ctx.stroke();
+      ctx.restore();
     }
     // corps (repère non tourné : la lumière vient toujours du haut-gauche)
     ctx.fillStyle = B.grad; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
@@ -538,7 +566,24 @@ export default (function () {
     ctx.rotate(-(a + (o.spin || 0)));
     // contours : ancrage = contour épais d'encre ; lourd = liseré d'or ; contraste élevé = blanc net
     if (o.brace) { ctx.strokeStyle = K.ink; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(0, 0, r + 0.5, 0, Math.PI * 2); ctx.stroke(); }
-    else if (o.heavy) { ctx.strokeStyle = 'rgba(224,178,60,0.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, r + 1, 0, Math.PI * 2); ctx.stroke(); }
+    else if (o.heavy) { ctx.strokeStyle = 'rgba(224,178,60,0.9)'; ctx.lineWidth = 1.4 + 0.5 * (o.lvl || 1); ctx.beginPath(); ctx.arc(0, 0, r + 1, 0, Math.PI * 2); ctx.stroke(); }
+    if (o.heavy) {                                       // paliers d'onigiri : une perle d'or par palier, en haut du liseré
+      const L = Math.min(5, o.lvl || 1); ctx.fillStyle = '#f2cf6a'; ctx.strokeStyle = K.ink; ctx.lineWidth = 1;
+      for (let k = 0; k < L; k++) { const u = -Math.PI / 2 + (k - (L - 1) / 2) * 0.3; ctx.beginPath(); ctx.arc(Math.cos(u) * (r + 2), Math.sin(u) * (r + 2), 2.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    }
+    if (o.tired) {                                       // essoufflé : deux gouttes de sueur qui perlent et coulent
+      const ga = ctx.globalAlpha; ctx.fillStyle = 'rgba(120,190,235,0.95)'; ctx.strokeStyle = 'rgba(30,60,90,0.6)'; ctx.lineWidth = 1;
+      for (let k = 0; k < 2; k++) {
+        const ph = A.reduceFx ? 0.3 : (now / 700 + k * 0.5) % 1, gx = (k ? 1 : -1) * r * 0.5, gy = -r * 0.6 + ph * r * 0.5;
+        ctx.globalAlpha = ga * (1 - ph * 0.7);
+        ctx.beginPath(); ctx.moveTo(gx, gy - 5); ctx.quadraticCurveTo(gx + 3.5, gy + 1, gx, gy + 3); ctx.quadraticCurveTo(gx - 3.5, gy + 1, gx, gy - 5); ctx.fill(); ctx.stroke();
+      }
+      ctx.globalAlpha = ga;
+    }
+    if (o.stun) {                                        // sonné : trois étoiles qui tournent autour de la tête
+      const t = A.reduceFx ? 0 : now / 200; ctx.fillStyle = '#ffd84a'; ctx.strokeStyle = K.ink; ctx.lineWidth = 1;
+      for (let k = 0; k < 3; k++) { const u = t + k * Math.PI * 2 / 3; etoile(Math.cos(u) * r * 0.62, Math.sin(u) * r * 0.36 - r * 0.12, 4.2); }
+    }
     if (A.contrast) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(0, 0, r + (o.brace ? 2.5 : 1.5), 0, Math.PI * 2); ctx.stroke(); }
     if (o.boost && !A.reduceFx) {                        // élan : deux volutes vermillon qui tournent
       ctx.strokeStyle = 'rgba(224,69,47,0.8)'; ctx.lineWidth = 2; ctx.lineCap = 'round';
@@ -688,6 +733,7 @@ export default (function () {
     if (snap && (snap.gs === 'play' || snap.gs === 'paused' || snap.gs === 'over')) {
       duskT = Math.max(0, Math.min(1, (1 - R / RING_0) / (1 - DUSK_FLOOR)));
       if (snap.sd) duskT = Math.max(duskT, Math.min(0.22, (now - sdT0) / 5000 * 0.22));
+      duskT = Math.max(duskT, DUEL.t(snap, now, duelAnnonce));   // duel final : la nuit tombe
     }
     duskV += (duskT - duskV) * Math.min(1, 0.04 * kdt);
     if (duskV < 0.002) duskV = 0;
@@ -715,7 +761,7 @@ export default (function () {
         } else if (!A.reduceFx && Math.hypot(p.vx || 0, p.vy || 0) > 3.5 && Math.random() < 0.12 * kdt) {   // suri-ashi : les pieds frottent le sable
           puffs.push({ x: v.x - Math.cos(v.a) * r * 0.8, y: v.y - Math.sin(v.a) * r * 0.8, vx: (Math.random() * 2 - 1) * 0.3, vy: (Math.random() * 2 - 1) * 0.3, born: now, life: 320, r0: 2 + Math.random() * 2, col: '222,196,150' });
         }
-        drawRikishi(p.seat, v.x, v.y, v.a, r, { dashing: p.dashing, brace: p.brace, heavy: p.heavy, grip: p.grip, boost: p.boost, me: p.seat === mySeat && !over, name: p.bot ? null : p.name }, now);
+        drawRikishi(p.seat, v.x, v.y, v.a, r, { dashing: p.dashing, brace: p.brace, heavy: p.heavy, lvl: p.lvl, grip: p.grip, boost: p.boost, tired: p.tired, slip: p.slip, stun: p.stun, me: p.seat === mySeat && !over, name: p.bot ? null : p.name }, now);
         if (over && !A.reduceFx) { ctx.save(); ctx.strokeStyle = K.gold; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.5 + 0.4 * Math.sin(now / 180); ctx.beginPath(); ctx.arc(v.x, v.y, r + 8, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }   // vainqueur(s) auréolé(s)
       });
       // danger : mon lutteur approche la paille -> l'arc du cordon le plus proche rougeoie
@@ -780,7 +826,8 @@ export default (function () {
       };
       gauge(x1, me.dcd, K.verm, 'CHARGE (Espace)', me.dashing);
       gauge(x2, me.bcd, K.straw, 'ANCRAGE (Maj)', me.brace);
-      const tags = []; if (me.heavy) tags.push(['LOURD', PU.heavy.c]); if (me.boost) tags.push(['ÉLAN', PU.dash.c]); if (me.grip) tags.push(['PIEDS COLLÉS', PU.grip.c]);
+      const tags = []; if (me.heavy) tags.push(['ONIGIRI ×' + (me.lvl | 0), PU.heavy.c]); if (me.boost) tags.push(['ÉLAN', PU.dash.c]); if (me.grip) tags.push(['PIEDS COLLÉS', PU.grip.c]);
+      if (me.stun) tags.push(['SONNÉ', MALUS_MSG.stun.c]); if (me.tired) tags.push(['ESSOUFFLÉ', MALUS_MSG.tired.c]); if (me.slip) tags.push(['SOL GLISSANT', MALUS_MSG.slip.c]);
       if (tags.length) {
         ctx.font = 'bold 10px system-ui, sans-serif'; const ws = tags.map(t => ctx.measureText(t[0]).width + 14), tot = ws.reduce((s, w) => s + w + 6, -6);
         let x = c - tot / 2; const ty = y - 30;

@@ -10,8 +10,11 @@ import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
 // couche partagée : avatar sur la trappe de tourelle, lueurs au sol, crépuscule de fin de manche, écran de fin enrichi
 import { lumiere, creerLumieres } from '../../lumiere.js';
-import { crepuscule } from '../../crepuscule.js';
+import { crepuscule, creerDuel } from '../../crepuscule.js';
 import { creerJournal, blocFin } from '../../finpartie.js';
+
+// Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
+const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
 // arène dimensionnée au nombre de participants : la taille des BLOCS ne bouge pas (BLK), c'est le NOMBRE
 // de blocs qui augmente (15 / 17 / 19). Le serveur envoie `ag` (côté de la grille) et le client se recale.
 let G = G0, ARENA = ARENA0;
@@ -1166,7 +1169,7 @@ export default (function () {
     if (snap && snap.grid) { ensureWalls(); ctx.drawImage(wallsCv, 0, 0, ARENA, ARENA); }   // décor statique pré-rendu : 1 drawImage
     else ctx.drawImage(groundCv, 0, 0, ARENA, ARENA);
     if (fx) drawAmbient(now);
-    const dusk = duskT(now), tv = snap ? viewTanks(now) : null;
+    const dusk = Math.max(duskT(now), DUEL.t(snap, now, duelAnnonce)), tv = snap ? viewTanks(now) : null;   // temps de manche OU duel final
     if (snap) {
       if (fx) drawPrints(now); else prints.length = 0;
       if (fx) drawGroundLights(now, tv, dusk); else LUM.vider();   // lueurs sur le sol, sous les pièces

@@ -11,8 +11,11 @@ import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par si�
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // bandeaux « ce que tu viens de ramasser »
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux jeux (mode plein écran compris)
 import { lumiere, creerLumieres } from '../../lumiere.js';      // phares, halos de traînée, dérésolutions qui éclairent le sol
-import { crepuscule } from '../../crepuscule.js';               // jour → crépuscule pendant que l'arène se referme
+import { crepuscule, creerDuel } from '../../crepuscule.js';               // jour → crépuscule pendant que l'arène se referme
 import { creerJournal, blocFin } from '../../finpartie.js';     // courbe de la manche + meilleure action (écran de fin)
+
+// Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
+const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
 
 // musique : synthwave en mi mineur (i–VI–III–VII) — nappe en dents de scie, basse en croches à l'octave,
 // arpège carré, batterie 4 temps ; lobby = nappe + arpège sinus ; climax (duel final) = charley serré + lead.
@@ -803,6 +806,7 @@ export default (function () {
     const s = snap ? (snap.shrink | 0) : 0, gs = snap ? snap.gs : 'lobby';
     let tgt = 0;
     if (s > 0 && (gs === 'play' || gs === 'paused' || gs === 'over')) tgt = 0.25 + 0.75 * Math.min(1, (s - 1) / Math.max(4, GW * 0.25));
+    tgt = Math.max(tgt, DUEL.t(snap, performance.now(), duelAnnonce));   // duel final : la nuit tombe
     duskT += (tgt - duskT) * (A.reduceFx ? 1 : Math.min(1, dtm / 700));
     if (duskT < 0.01 && !tgt) { duskT = 0; return; }
     const force = (TH.glow ? 0.92 : 0.5) * (A.contrast ? 0.7 : 1) * (A.reduceFx ? 0.6 : 1);

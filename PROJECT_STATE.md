@@ -152,17 +152,28 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
   **Ancrage** ⚓ (`brace`, Maj/E) : 30 ticks de masse × 3 et accélération × 0.3, recharge 90 ticks — le contre de la charge.
 - **Crédit de sortie** : dernier toucheur (seat + tick) mémorisé ; s'il a touché l'éliminé dans les **90 derniers ticks**, il est
   crédité (`kills++`, `outBy`), sauf coéquipier.
-- **Bonus au sol** (toutes les 5 s, 2 au plus, dans `0.7 × rayon`, ramassés au contact) : **lourd** (masse × 1.7, rayon × 1.25, 8 s),
-  **élan** (recharge de charge remise à zéro, impulsion × 1.4, 6 s), **onde de choc** (immédiate : repousse tout lutteur à < 130 u),
-  **pieds collés** (frottement 0.78, chocs subis × 0.5, 6 s).
+- **Bonus au sol + malus aux adversaires** (« version A » validée le 24/09 avec les ajustements de l'utilisateur ; toutes les 5 s,
+  2 au plus, dans `0.7 × rayon`, ramassés au contact). Chaque ramassage aide le ramasseur ET pénalise ses **adversaires vivants**
+  (coéquipiers épargnés) — un fx `malus {t, seat, by}` par victime, message au seul visé :
+  - 🍙 **onigiri** (tiré ≈ 40 % du temps, `ONIGIRI_P`) : **+1 palier, sans minuterie**, jusqu'à la fin de la manche (max 5,
+    remis à 0 à chaque manche). Par palier : masse et poussée de charge **+25 %**, rayon +8 %, vitesse max et accélération −6 %,
+    recharge de charge +15 % → plus fort mais moins vif et moins souvent. Pas de malus (le gain est déjà permanent).
+  - ⚡ **élan** : charge prête tout de suite puis recharge **× 0,5** pendant 15 s ; adversaires **essoufflés** 💦 : recharge × 1,2, 8 s.
+  - 💥 **onde de choc** (immédiate) : repousse les adversaires à < **180 u** (impulsion 13) ; ceux touchés sont **sonnés** 💫 1,2 s
+    (ni déplacement, ni charge, ni ancrage — ils glissent sur leur élan).
+  - 👣 **pieds collés** : frottement 0.78 et chocs subis × 0,4 pendant 12 s ; adversaires sur **sol glissant** ❄ 8 s :
+    frottement `1 − 0.14 / 1.5` ≈ 0.907, soit une glisse 1,5× plus longue.
+  - Recharge effective de la charge mémorisée par joueur (`dashCdLen`) pour que la jauge `dcd` reste juste.
+  - Client : perles d'or (une par palier) + liseré qui s'épaissit, gouttes de sueur, étoiles qui tournent, flaque glacée ;
+    carte HUD `🍙×N 💫 💦 ❄`, étiquettes « ONIGIRI ×N / SONNÉ / ESSOUFFLÉ / SOL GLISSANT » au-dessus des jauges.
 - **Bots** (🤖, IA Facile/Normale/Difficile via 🎯) : visent l'adversaire vivant le plus proche (jamais un coéquipier), distance
   **diminuée de la moitié de son éloignement au centre** (sinon, en mêlée, tout le monde pousse vers l'intérieur et personne ne sort) ; reviennent vers
   le centre au-delà de `0.7 × rayon` ; chargent si la cible est à < 130 u, alignée (cos > 0.9) **et plus proche du bord qu'eux** ;
   s'ancrent si un adversaire charge vers eux près du bord (sauf Facile) ; Facile = accélération × 0.75 et hésitations.
 - **Snapshot** : `gs, count, round, winner, fx[], connected, botCount, maxBots, botDiff, mode, nteams, ar, ring` (rayon actuel),
   `ring0, sd` (rétrécit), `pickups[{x,y,t}]`, `stats` (en `over`), `players` = **toujours les 10 sièges** `{seat,name,team,connected,
-  playing,alive,bot,x,y,vx,vy,a,r,dcd,dashing,brace,bcd,heavy,grip,boost,kills,place,elimTick,outBy}`.
-  Événements `fx` : hit · dash · brace · out · pickup · shock · shrink · salt (jet de sel au compte à rebours).
+  playing,alive,bot,x,y,vx,vy,a,r,dcd,dashing,brace,bcd,heavy,lvl,grip,boost,tired,slip,stun,kills,place,elimTick,outBy}`.
+  Événements `fx` : hit · dash · brace · out · pickup (`lvl`) · malus · shock · shrink · salt (jet de sel au compte à rebours).
 - Commandes : ↑↓←→ / WASD (8 directions), **Espace** charge, **Maj/E** ancrage, **P/Échap** pause ; tactile : joystick en **mode 8**
   (`CARTES.sumo` de `joystick.js` → `smUp/smDown/smLeft/smRight`) + 💨 + ⚓.
 - Messages C→S : input{up,down,left,right} (à chaque changement), dash, brace, start, pause, abort, mode, bots, botdiff, lbreset.
@@ -803,6 +814,11 @@ teinté pendant les tremblements, etc.).
   flammes, ondes de choc éclairent le sol. Un char caché n'émet aucune lueur (ses obus, si).
 - **Crépuscule** (`crepuscule.js`) : Pong d'après `sd`, Tron d'après `shrink`, Sumo d'après ring/ring0,
   les autres d'après le temps de manche (côté client). Plafonné bien avant le noir.
+  **24/09 — plus dramatique + duel final commun** (retour « trop discret ») : teinte or → **rouge sang** → violet, multiply
+  `0.18 + 0.44 t`, vignette jusqu'à 0.64. `creerDuel()` : dès qu'il ne reste que **2 joueurs ou 2 équipes** en lice sur une
+  manche commencée à plus de 2, la nuit tombe en ~4 s (courbe en S, plafond 0.92) et le bandeau « ⚔ Duel final ! » s'affiche
+  une fois (Snake garde son propre message de duel). Chaque jeu prend `max(sa montée propre, duel)` ; une manche qui démarre
+  à 2 garde la montée progressive du jeu. Détection purement client, sur `players[].playing/alive/team`.
 - **Écran de fin enrichi** (`finpartie.js`) : courbe de la manche (vies, distance, longueur…) + meilleure
   action repérée sur la courbe. Journal tenu côté client : un arrivant en cours de manche n'a que la fin.
 - Au passage : sur téléphone, ✕ / ⏸ / ⚙ s'affichaient AUSSI dans le lobby (défaut présent depuis juin,

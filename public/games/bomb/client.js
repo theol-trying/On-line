@@ -14,8 +14,11 @@ import { arenaSize } from '../../layout.js';   // taille du plateau : commune au
 // couche partagée (par-dessus la refonte « Confiserie ») : avatar sur le visage du bombeur, lueurs des
 // flammes / mèches / téléporteurs sur le glaçage, crépuscule pendant la mort subite, courbe de fin de manche
 import { lumiere, creerLumieres } from '../../lumiere.js';
-import { crepuscule } from '../../crepuscule.js';
+import { crepuscule, creerDuel } from '../../crepuscule.js';
 import { creerJournal, blocFin } from '../../finpartie.js';
+
+// Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
+const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
 
 // musique : cartoon enjoué — basse bondissante, mélodie espiègle, célesta sucré, woodblock + caisse claire ;
 // climax (mort subite) = motif chromatique + grosse caisse + tempo
@@ -1229,6 +1232,7 @@ export default (function () {
         const pre = Math.max(0, Math.min(1, (playMs - 45000) / 20000));
         tgt = snap.sd ? 0.34 + 0.52 * (spiral && lastDrop.i >= 0 ? Math.min(1, (lastDrop.i + 1) / spiral.length) : 0) : 0.3 * pre * pre * (3 - 2 * pre);
       }
+      tgt = Math.max(tgt, DUEL.t(snap, performance.now(), duelAnnonce));   // duel final : la nuit tombe
       dusk += (tgt - dusk) * Math.min(1, dtMs / 900);
     }
     let ox = 0, oy = 0;
