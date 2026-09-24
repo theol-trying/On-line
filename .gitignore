@@ -1,6 +1,9 @@
 # données locales (le classement et les avatars en ligne vivent dans Upstash, pas dans le repo)
 leaderboard.json
 avatars.json
+# écriture atomique (.tmp) et sauvegarde illisible mise de côté (.corrompu) — cf. leaderboard.js
+*.json.tmp
+*.corrompu
 # dépendances (le projet est zéro-dépendance, mais au cas où)
 node_modules/
 # note de travail personnelle (prompt de transfert vers un autre projet) — hors dépôt

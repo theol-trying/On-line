@@ -14,6 +14,9 @@
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import net from 'net';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.SMOKE_PORT || 3999);
@@ -29,8 +32,13 @@ const ok = (nom, cond, detail) => {
 
 /* ---------- serveur ---------- */
 let srv = null, srvSorti = null, srvLog = '';
+// Stockage du test : un dossier temporaire, JAMAIS Upstash. Des manches se terminent pour de vrai ci-dessous
+// (le classement est donc écrit) : hériter d'un UPSTASH_* défini dans le terminal écrirait dans la clé de PROD.
+const TMP = mkdtempSync(join(tmpdir(), 'online-smoke-'));
+const ENV = { ...process.env, PORT: String(PORT), SMOKE_FAULT: '1', LEADERBOARD_FILE: join(TMP, 'leaderboard.json') };
+for (const k of ['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'LEADERBOARD_KEY', 'AVATAR_KEY', 'ADMIN_KEY']) delete ENV[k];
 async function demarrerServeur() {
-  srv = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT), SMOKE_FAULT: '1' } });
+  srv = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: ENV });
   srv.stdout.on('data', d => { srvLog += d; });
   srv.stderr.on('data', d => { srvLog += d; });
   srv.on('exit', code => { srvSorti = code; });
@@ -44,19 +52,27 @@ async function demarrerServeur() {
 const serveurVivant = () => srvSorti === null;
 
 /* ---------- client ---------- */
-function client(nom) {
-  const c = { nom, cache: null, etats: new Set(), fx: 0, msgs: 0, erreurs: [], dernier: null, refus: 0 };
-  c.ws = new WebSocket(URL_WS);
+function client(nom, jeton) {
+  const c = { nom, cache: null, etats: new Set(), fx: 0, msgs: 0, erreurs: [], dernier: null, refus: 0, sansG: 0, sansFx: 0, av: 0, lb: {} };
+  c.ws = new WebSocket(URL_WS + (jeton ? '?t=' + encodeURIComponent(jeton) : ''));
   c.ws.onmessage = e => {
     let m; try { m = JSON.parse(e.data); } catch { c.erreurs.push('JSON illisible'); return; }
-    if (m.t === 'denied' || m.t === 'notready') { c.refus++; return; }
-    if (m.t === 'hello') { c.moi = m.you.id; return; }
+    if (m.t === 'denied' || m.t === 'notready') { c.refus++; if (m.t === 'notready') c.notready = m; return; }
+    if (m.t === 'hello') { c.moi = m.you.id; c.jeton = m.you.token; return; }
+    if (m.t === 'room') { c.room = m; return; }
+    if (m.t === 'remplace') { c.remplace = true; return; }
+    if (m.t === 'av') { c.av++; return; }
+    if (m.t === 'png') { c.pngTs = m.ts; return; }
+    if (m.t === 'lb') { c.lb[m.g] = m; return; }
     if (m.t !== 'state') return;
     c.msgs++;
+    if (!('g' in m)) c.sansG++;
+    if (!('fx' in m)) c.sansFx++;
     // réplique EXACTE de la reconstitution de public/app.js
     const part = { ...m }; delete part.t; delete part.g;
     const prec = c.cache;
     const s = prec ? Object.assign({}, prec, part) : part;
+    s.fx = part.fx || [];
     if (part.pd && prec && Array.isArray(prec.players)) {
       const arr = prec.players.slice();
       for (const d of part.pd) { const i = d[0]; if (i >= 0 && i < arr.length) arr[i] = Object.assign({}, arr[i], d[1]); }
@@ -125,7 +141,9 @@ async function jouer(id, participants, attentes = {}) {
       'mesuré ' + Math.round(min * 1000) / 10 + '–' + Math.round(max * 1000) / 10 + ' %');
   }
   const hz = Math.round(msgEnJeu > msg0 ? (c.msgs - msgEnJeu) / secs : 0);
-  console.log(`    · ${hz} instantanés/s reçus en jeu · ${c.fx} effets reçus`);
+  console.log(`    · ${hz} instantanés/s reçus en jeu · ${c.fx} effets reçus · ${Math.round(c.sansG / Math.max(1, c.msgs) * 100)} % sans « g », ${Math.round(c.sansFx / Math.max(1, c.msgs) * 100)} % sans « fx »`);
+  if (attentes.allege) ok('les deltas n\'emportent plus « g » ni un « fx » vide', c.sansG > c.msgs / 2 && c.sansFx > c.msgs / 2,
+    c.sansG + ' sans g, ' + c.sansFx + ' sans fx sur ' + c.msgs);
 
   c.jeu({ t: 'abort' });                               // abandon : la manche ne s'enregistre pas au classement
   await wait(250);
@@ -193,6 +211,98 @@ async function protections() {
   v.ws.close(); await wait(300);
 }
 
+/* ---------- robustesse (24/09) : ce qui tuait le serveur, les fantômes, les amplificateurs, « Rejouer = Prêt » ---------- */
+const attendre = async (cond, ms) => { for (let t = 0; t < ms; t += 50) { if (cond()) return true; await wait(50); } return cond(); };
+function requeteBrute(ligne) {                           // requête HTTP écrite à la main (malformée exprès)
+  return new Promise(r => {
+    const s = net.connect(PORT, '127.0.0.1', () => s.write(ligne + '\r\nHost: localhost\r\n\r\n'));
+    let rep = ''; s.on('data', d => { rep += d; }); s.on('error', () => r(rep)); s.on('close', () => r(rep));
+    setTimeout(() => { try { s.destroy(); } catch {} r(rep); }, 1500);
+  });
+}
+const cap = s => { const q = s && s.path; if (!q || q.length < 2) return null; const u = q[q.length - 2], v = q[q.length - 1]; return [Math.sign(v[0] - u[0]), Math.sign(v[1] - u[1])]; };
+const NOM_DIR = (x, y) => (x === 1 ? 'right' : x === -1 ? 'left' : y === 1 ? 'down' : 'up');
+
+async function robustesse() {
+  console.log('\n▶ robustesse : clés héritées, requête malformée, reprise de connexion, amplificateurs');
+  const a = client('Hote'); await a.ouvert; await wait(300);
+  a.envoie({ t: 'pick', id: 'constructor' }); await wait(300);          // tuait le processus (GAMES['constructor'] = Object)
+  ok('un choix de jeu « constructor » ne tue plus le serveur', serveurVivant());
+  const rep = await requeteBrute('GET http://[ HTTP/1.1');                 // new URL() levait hors filet
+  ok('une requête HTTP malformée ne tue plus le serveur', serveurVivant(), (rep.split('\r\n')[0] || 'pas de réponse'));
+  a.envoie({ t: 'png', ts: 'x'.repeat(2000) }); await attendre(() => a.pngTs !== undefined, 1000);
+  ok('l\'écho du ping ne renvoie qu\'un nombre', typeof a.pngTs === 'number', 'reçu : ' + typeof a.pngTs);
+  a.jeu({ t: 'lbreset' }); await wait(200);
+  ok('l\'hôte de repli ne peut pas effacer le classement (clé admin requise)', a.refus >= 1, a.refus + ' refus');
+  a.refus = 0;
+
+  // Reprise : un 2e onglet (ou le même après une perte de réseau) présente le jeton d'un membre ENCORE connecté
+  const b = client('Bis', a.jeton); await b.ouvert; await wait(500);
+  ok('le jeton d\'un membre connecté est REPRIS (même joueur, pas un doublon)', b.moi === a.moi && a.remplace === true,
+    'ids ' + a.moi + ' / ' + b.moi + ', remplacé : ' + !!a.remplace);
+  ok('l\'ancien onglet est fermé et la salle ne compte qu\'un joueur', await ferme(a.ws, 2000) && b.room && b.room.players.length === 1,
+    b.room ? b.room.players.length + ' membre(s)' : 'pas de salle');
+
+  // Hôte conservé après un F5 au lobby : l'ordre d'arrivée suit le jeton, pas la position dans la liste
+  const c2 = client('Second'); await c2.ouvert; await wait(300);
+  b.ws.close(); await wait(300);
+  const b2 = client('Bis', b.jeton); await b2.ouvert; await wait(400);
+  ok('l\'hôte de repli garde son rôle après un F5', b2.room && b2.room.host === b2.moi, 'hôte ' + (b2.room && b2.room.host) + ' au lieu de ' + b2.moi);
+
+  // Amplificateur : 50 avatars en 1 s → le témoin n'en reçoit presque aucun (au plus 1 par 5 s)
+  c2.av = 0;
+  for (let i = 0; i < 50; i++) { b2.envoie({ t: 'avatar', a: i % 2 ? '🐯' : '🦊' }); await wait(20); }
+  await wait(400);
+  ok('un avatar renvoyé en boucle n\'est plus rediffusé à chaque fois', c2.av <= 2, c2.av + ' diffusions reçues pour 50 envois');
+
+  // Pseudo piège + vraie fin de manche (Tron à 2 humains) + « Rejouer = Prêt »
+  b2.envoie({ t: 'name', name: '__proto__' }); await wait(1200);         // un renommage par seconde au plus
+  b2.envoie({ t: 'pick', id: 'tron' }); await wait(500);
+  b2.jeu({ t: 'start' });                                                 // pas prêt : « Rejouer » le rend prêt, mais c2 ne l'est pas
+  await attendre(() => b2.notready, 1000);
+  const moiPret = () => { const p = b2.room && b2.room.players.find(x => x.id === b2.moi); return !!(p && p.ready); };
+  ok('« Rejouer » vaut « Prêt » (sans lancer tant qu\'un joueur manque)', moiPret() && !b2.etats.has('countdown'),
+    'prêt : ' + moiPret() + ', états : ' + [...b2.etats].join(','));
+  ok('le refus nomme le retardataire', !!(b2.notready && Array.isArray(b2.notready.wait) && b2.notready.wait.indexOf('Second') >= 0),
+    JSON.stringify(b2.notready && b2.notready.wait));
+  c2.jeu({ t: 'start' });                                                 // le dernier qui se déclare lance la manche
+  ok('le dernier « Rejouer » lance la manche', await attendre(() => b2.etats.has('countdown') || b2.etats.has('play'), 1500));
+  const fin = await attendre(() => b2.dernier && b2.dernier.gs === 'over', 20000);   // les deux motos filent droit dans le mur
+  ok('la manche se termine (pseudo « __proto__ » au classement)', fin && serveurVivant(), fin ? '' : 'pas de fin de manche');
+  await wait(300);
+  const lbT = b2.lb.tron && b2.lb.tron.board || [];
+  ok('le pseudo piège est neutralisé dans le classement', lbT.some(e => e.name === '__proto___'), lbT.map(e => e.name).join(','));
+  b2.notready = null; c2.jeu({ t: 'start' }); await wait(300);            // < 2 s après la fin : Espace encore tenu → ignoré
+  const secondPret = () => { const p = b2.room && b2.room.players.find(x => x.id === c2.moi); return !!(p && p.ready); };
+  ok('pas de « Prêt » involontaire dans les 2 s qui suivent la fin', !secondPret());
+  await wait(2000);
+  b2.etats.clear(); b2.jeu({ t: 'start' }); await wait(300);               // après la garde : b2 prêt, c2 pas encore
+  c2.envoie({ t: 'ready', v: true });                                     // le bouton Prêt du dernier lance aussi la manche
+  ok('le dernier « Prêt » (bouton) lance la manche', await attendre(() => b2.etats.has('countdown'), 1500), [...b2.etats].join(','));
+  b2.jeu({ t: 'abort' }); await wait(300);
+
+  // File de 2 virages (Snake, solo) : « perpendiculaire puis demi-tour » dans le même tick → demi-tour en 2 ticks
+  c2.ws.close(); await wait(300);
+  b2.envoie({ t: 'pick', id: 'snake' }); await wait(400);
+  b2.etats.clear(); b2.jeu({ t: 'start' });
+  await attendre(() => b2.dernier && b2.dernier.gs === 'play', 6000);
+  const moi = () => (b2.dernier && b2.dernier.players || []).find(p => p.name === '__proto___');
+  await attendre(() => cap(moi()), 2000);
+  const c0 = cap(moi());
+  if (c0) {
+    const perp = [-c0[1], c0[0]];
+    b2.jeu({ t: 'dir', d: 'constructor' });                               // diffusait une tête {x:null}
+    b2.jeu({ t: 'dir', d: NOM_DIR(perp[0], perp[1]) }); b2.jeu({ t: 'dir', d: NOM_DIR(-c0[0], -c0[1]) });
+    await wait(450);
+    const c1 = cap(moi()), m1 = moi();
+    ok('deux virages tapés dans le même tick sont TOUS DEUX joués', !!(c1 && m1 && m1.alive && c1[0] === -c0[0] && c1[1] === -c0[1]),
+      'cap ' + JSON.stringify(c0) + ' → ' + JSON.stringify(c1) + (m1 && !m1.alive ? ' (mort)' : ''));
+  } else ok('deux virages tapés dans le même tick sont TOUS DEUX joués', false, 'cap initial illisible');
+  ok('le serveur a encaissé la série', serveurVivant());
+  b2.jeu({ t: 'abort' }); await wait(200);
+  b2.ws.close(); await wait(300);
+}
+
 /* ---------- déroulé ---------- */
 console.log(`Test de fumée — serveur sur le port ${PORT}\n`);
 if (!await demarrerServeur()) {
@@ -202,7 +312,7 @@ if (!await demarrerServeur()) {
 console.log('✓ serveur démarré');
 
 const cadences = {};
-cadences.pong = await jouer('pong', 4, { arene: { lire: s => s.aw + 'x' + s.ah, valeur: '630x630' }, ratioRaquette: 0.25 });
+cadences.pong = await jouer('pong', 4, { arene: { lire: s => s.aw + 'x' + s.ah, valeur: '630x630' }, ratioRaquette: 0.25, allege: true });
 await jouer('pong', 10, { arene: { lire: s => s.aw + 'x' + s.ah, valeur: '1020x1020' }, ratioRaquette: 0.25 });
 cadences.tron = await jouer('tron', 10, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 92' } });
 cadences.snake = await jouer('snake', 10, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 58' } });
@@ -211,6 +321,7 @@ cadences.bomb = await jouer('bomb', 8, { arene: { lire: s => 'grille ' + s.gw, v
 cadences.sumo = await jouer('sumo', 10, { arene: { lire: s => 'arène ' + s.ar, valeur: 'arène 1080' } });   // k = 1.8 → 600 × 1.8
 await arriveeEnCours();
 await protections();
+await robustesse();
 
 console.log('\n▶ état final du serveur');
 ok('le serveur a survécu à tous les jeux', serveurVivant(), srvSorti !== null ? 'sorti avec le code ' + srvSorti : '');
@@ -219,6 +330,7 @@ ok('aucune erreur dans le journal du serveur', traces.length === 0, traces.slice
 
 if (srv) srv.kill();
 await wait(300);
+try { rmSync(TMP, { recursive: true, force: true }); } catch {}
 console.log(`\n${echecs === 0 ? '✅' : '❌'}  ${tests - echecs}/${tests} vérifications passées` +
   `   ·   cadences en jeu : ${Object.entries(cadences).map(([k, v]) => k + ' ' + v + '/s').join(' · ')}`);
 process.exit(echecs === 0 ? 0 : 1);

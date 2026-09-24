@@ -12,7 +12,9 @@ import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // bandea
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux jeux (mode plein écran compris)
 import { lumiere, creerLumieres } from '../../lumiere.js';      // phares, halos de traînée, dérésolutions qui éclairent le sol
 import { crepuscule, creerDuel } from '../../crepuscule.js';               // jour → crépuscule pendant que l'arène se referme
-import { creerJournal, blocFin } from '../../finpartie.js';     // courbe de la manche + meilleure action (écran de fin)
+import { creerJournal, blocFin } from '../../finpartie.js';
+import { creerEcho } from '../../echo-virage.js';                 // chevron immédiat du virage enregistré (file de 2 virages côté serveur)
+const ECHO = creerEcho();     // courbe de la manche + meilleure action (écran de fin)
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -1100,7 +1102,7 @@ export default (function () {
         let dx = v ? v.dx : 0, dy = v ? v.dy : 0;
         if (!dx && !dy && !angView[p.seat]) { const sd = spawnDir(p); if (sd) { dx = sd.x; dy = sd.y; } }
         const ang = viewAngle(p.seat, dx, dy, dtm);
-        const h = headPos[p.seat] || (headPos[p.seat] = { x: 0, y: 0, a: 0 }); h.x = hx; h.y = hy; h.a = ang;
+        const h = headPos[p.seat] || (headPos[p.seat] = { x: 0, y: 0, a: 0 }); h.x = hx; h.y = hy; h.a = ang; h.dx = Math.sign(dx); h.dy = Math.sign(dy);
         drawMoto(p, hx, hy, ang, now);
         if (p.boosting && FX && snap.gs === 'play' && Math.random() < 0.7 * kdt) { const rx = hx - Math.cos(ang) * 2.2 * CELL, ry = hy - Math.sin(ang) * 2.2 * CELL; capPush(embers, { x: rx, y: ry, vx: -Math.cos(ang) * 1.3 + (Math.random() - 0.5) * 0.8, vy: -Math.sin(ang) * 1.3 + (Math.random() - 0.5) * 0.8, col: colSeat(p.seat), born: now, life: 260 + Math.random() * 200 }, 160); }
         if (over) {                                                                                // vainqueur(s) : auréole pulsée
@@ -1113,7 +1115,10 @@ export default (function () {
         const x = px(clampG(p.head.x, GW)), y = px(clampG(p.head.y, GH)), s = CELL * 0.45;
         ctx.save(); ctx.strokeStyle = tstyle(colSeat(p.seat)).deadEdge; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x - s, y - s); ctx.lineTo(x + s, y + s); ctx.moveTo(x + s, y - s); ctx.lineTo(x - s, y + s); ctx.stroke(); ctx.restore();
       }
-      if (me && me.playing && me.alive && !over && headPos[mySeat] && snap.gs !== 'countdown') drawMeMarker(headPos[mySeat].x, headPos[mySeat].y, now);
+      if (me && me.playing && me.alive && !over && headPos[mySeat] && snap.gs !== 'countdown') {
+        const h = headPos[mySeat]; drawMeMarker(h.x, h.y, now);
+        ECHO.dessiner(ctx, h.x + (h.dx || 0) * CELL * 0.6, h.y + (h.dy || 0) * CELL * 0.6, Math.max(9, CELL * 1.7), h.dx || 0, h.dy || 0, '#ffffff', now, !FX);
+      }
     }
     drawFx(now, kdt);
     drawDusk(dtm);                                       // étalonnage par-dessus l'arène ; HUD, alertes et voiles restent nets
@@ -1192,11 +1197,12 @@ export default (function () {
     if (e.key === ' ' && snap && snap.gs !== 'play' && snap.gs !== 'paused') return send({ t: 'start' });
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) return send({ t: 'pause' });
     if ((e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !boostHeld) { boostHeld = true; send({ t: 'boost', on: true }); return; }
-    const d = DIR_KEYS[e.code]; if (d && !e.repeat) send({ t: 'dir', d });   // la répétition auto renvoyait la même direction ~30×/s pour rien
+    const d = DIR_KEYS[e.code]; if (d && !e.repeat) { send({ t: 'dir', d }); echoVirage(d); }   // la répétition auto renvoyait la même direction ~30×/s pour rien
   };
   const onKeyUp = e => { if (e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') { boostHeld = false; send({ t: 'boost', on: false }); } };
   const onBlur = () => { if (boostHeld) { boostHeld = false; send({ t: 'boost', on: false }); } };
-  function dpad(id, d) { const el = $(id); if (!el) return; el.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t: 'dir', d }); }); }
+  function dpad(id, d) { const el = $(id); if (!el) return; el.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t: 'dir', d }); echoVirage(d); }); }
+  function echoVirage(d) { const me = snap && mySeat >= 0 && snap.players ? snap.players[mySeat] : null, h = headPos[mySeat]; if (me && me.alive && h) ECHO.appui(d, h.dx || 0, h.dy || 0, !!me.inv); }
 
   // Les boutons du DOM sont STATIQUES et le module est un singleton (import() en cache) : init() est
   // rappelé à chaque retour sur le jeu. Sans ce drapeau, chaque retour rebranchait les écouteurs sans

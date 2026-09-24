@@ -79,7 +79,7 @@ export function createTank(room) {
 
   function lbEntry(name) {
     const b = board(GID);
-    return b[name] || (b[name] = { name, games: 0, wins: 0, kills: 0, dmg: 0, deaths: 0, survSum: 0, bestSurvivalSec: 0 });
+    return (Object.hasOwn(b, name) && b[name]) || (b[name] = { name, games: 0, wins: 0, kills: 0, dmg: 0, deaths: 0, survSum: 0, bestSurvivalSec: 0 });
   }
   function recordRound() {
     for (const p of players) {
@@ -380,7 +380,11 @@ export function createTank(room) {
       round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, winTarget, gen: arenaStyle, ff,
       ag: G,                                                                       // côté de la grille : le client recale ARENA = ag × BLK
       grid: sendGrid ? g : undefined,
-      shells: shells.map(s => ({ x: Math.round(s.x), y: Math.round(s.y), vx: Math.round(s.vx * 10) / 10, vy: Math.round(s.vy * 10) / 10, o: s.o, p: s.pWood > 0 || s.pMetal > 0, h: !!s.homing })),
+      shells: shells.map(s => {                      // p / h : présents seulement s'ils sont vrais (absent = faux, lu par vérité côté client)
+        const o = { x: Math.round(s.x), y: Math.round(s.y), vx: Math.round(s.vx * 10) / 10, vy: Math.round(s.vy * 10) / 10, o: s.o };
+        if (s.pWood > 0 || s.pMetal > 0) o.p = true; if (s.homing) o.h = true;
+        return o;
+      }),
       mines: mines.map(m => ({ x: m.x, y: m.y, o: m.owner, armed: tick >= m.arm })),
       pickups: pickups.map(k => ({ x: k.x, y: k.y, t: k.type })),
       barrels: barrels.map(b => ({ x: Math.round(b.x), y: Math.round(b.y) })),

@@ -392,9 +392,10 @@ sur toutes les sockets. Gain CPU serveur → moins de gigue de tick → plus flu
 **2. Omission des clés inchangées** — le hub compare chaque clé de premier niveau à la diffusion précédente et
 n'envoie que ce qui a bougé ; le client fusionne sur l'état précédent du jeu (`stateCache` dans `app.js`, **un seul
 point pour les 5 jeux**). Générique : aucun code de jeu modifié.
-- `fx` est **toujours** envoyé (`ALWAYS`) : c'est du ponctuel, le fusionner rejouerait les impacts en boucle.
-- Instantané **complet** forcé toutes les 2 s, à chaque arrivée et à chaque changement de jeu → un client ne peut
-  pas rester désynchronisé.
+- `fx` n'est jamais comparé (`ALWAYS`) : c'est du ponctuel, le fusionner rejouerait les impacts en boucle. Depuis le
+  24/09 il est **omis quand il est vide**, et le client remet `fx = []` quand il manque.
+- Instantané **complet** forcé à chaque arrivée, à chaque changement de jeu et de `gs`, et toutes les **10 s** en jeu
+  (2 s jusqu'au 24/09) → un client ne peut pas rester désynchronisé.
 - La fusion crée un **nouvel objet** à chaque fois : les instantanés déjà empilés dans les tampons d'interpolation
   ne doivent jamais être modifiés après coup.
 
@@ -882,6 +883,57 @@ Test permanent : `SMOKE_FAULT=1` (posé par `npm test` seulement) fait lever une
 - `npm test` couvre les deux (54 vérifications) : trame de 70 Ko coupée, message de 30 Ko accepté,
   rythme humain (30/s) jamais bridé, inondation coupée sans toucher les autres joueurs.
 
+## Fiabilité, quota et « Rejouer » (24/09)
+Lot issu de la revue « propositions » (8 agents), validé par l'utilisateur : tout le point 1 + deux points du 2.
+- **Trois façons de tuer le serveur, fermées** (reproduites sur une copie, jamais sur la prod ; `npm test` échoue sur
+  l'ancien code) : `{t:'pick', id:'constructor'}` (clé héritée d'Object → TypeError hors filet), une requête brute
+  `GET http://[` (`new URL` dans un gestionnaire async non géré), et un pseudo `constructor`/`__proto__` (classements
+  indexés par pseudo : pollution d'`Object.prototype`, puis mort 12 s après un départ en pleine manche). Correctifs :
+  `own(GAMES, id)` ; pseudo qui serait une clé héritée → suffixé `_` à la source (`hub.js`, message `name`) ;
+  `hasOwn` dans les 6 `lbEntry`, `bumpDaily`, `getAvatar`, `DIRS[m.d]` ; agrégats en `Object.create(null)` ;
+  gestionnaire HTTP sous filet (400) ; `garde(ou, fn)` fait passer par `incident()` **tous** les appels au code des
+  jeux hors tick/onMessage (arrivée, départ — y compris dans le minuteur de grâce —, renommage, départ forcé, défi du
+  jour) ; `try/catch` autour de `conn._msg` (`ws.js`) et `unhandledRejection` journalisé (`server.js`).
+- **Classement : plus jamais écrasé après un chargement raté** (`leaderboard.js` réécrit). Rien n'est écrit tant que
+  la lecture n'a pas réussi (`charge`) ; relances 5 s / 30 s / 2 min ; à la réussite, les manches jouées entre-temps
+  sont **fusionnées** (best*/most* → max, fastest*/fewest* → min, compteurs → somme ; historique concaténé) et tout est
+  rediffusé. Écritures regroupées (1 s pour le classement, 10 s pour les avatars, une seule en vol) ; en local, `.tmp`
+  + `rename` (atomique) et un fichier illisible est renommé `.corrompu`. `lbreset` : clé admin seulement (`ADMIN_ONLY`),
+  plus l'hôte de repli. `LEADERBOARD_FILE` (env) : le test de fumée écrit dans un dossier temporaire, et son serveur
+  ne reçoit **aucune** variable `UPSTASH_*` (des manches s'y terminent désormais pour de vrai).
+- **Connexions fantômes** : `ws.js` envoie un ping (0x89) toutes les 15 s ; une connexion muette depuis 45 s, ou dont
+  la file dépasse 512 Ko, est coupée. Ce n'est pas un réveil de Render (rien ne part vers un client non connecté).
+  Un jeton porté par un membre **encore connecté** (même onglet revenu avant la chute de sa socket fantôme, onglet
+  dupliqué) : la nouvelle connexion **reprend** le membre (même id, même siège) ; l'ancienne reçoit `{t:'remplace'}`,
+  est fermée sans déclencher de départ, et le client affiche « Ouvert dans un autre onglet — touche ici pour
+  reprendre » sans se reconnecter. Une grâce existante sur un jeton est soldée (`onLeave`) au lieu d'être écrasée.
+  Hôte de repli = **plus ancien rang d'arrivée** (`ident.rang`), plus la position dans `members` : un F5 ne coûte plus
+  le rôle. Jeton client en **sessionStorage** (propre à l'onglet, survit au F5) : deux onglets = deux joueurs.
+  Salle plafonnée à 24 membres (`{t:'plein'}`, le client réessaie au bout de 30 s).
+- **Amplificateurs de quota** (le seau borne le nombre de messages, pas ce qu'ils déclenchent — un avatar renvoyé en
+  boucle coûtait 1,1 Mo/s par témoin) : `differer()` applique avatar (5 s), pseudo (1 s) et « Prêt » (250 ms) tout de
+  suite si le précédent est ancien, sinon une fois à l'échéance avec la dernière valeur ; valeur identique = rien.
+  Écho du ping : `ts` numérique seulement. `dayreq` 1/s. `daily` venant d'un client refusé (`SYS_ONLY`). Émotes en
+  liste blanche. Jeton `crypto.randomBytes`. Origine de l'upgrade WebSocket : doit être le même hôte (`Host` ou
+  `X-Forwarded-Host`) ; absente = acceptée (clients non navigateurs, test de fumée).
+- **Débit en jeu** : complet toutes les **10 s** en jeu (au lieu de 2) et à chaque changement de `gs` ; `fx` omis quand
+  il est vide (le client remet `s.fx = part.fx || []` — indispensable, sinon les effets se rejoueraient) ; `g` seulement
+  dans les complets (le client prend `m.g || activeId`) ; booléens faux omis (Pong `gh`/`iv`, Tanks `p`/`h`,
+  Bomberman `r` — lus par vérité). Mesuré : ~98 % des messages sans `g`, 79 à 96 % sans `fx`. Au passage : un
+  instantané de l'ANCIEN jeu partait étiqueté du nouveau lors d'une transition de tournoi — il est jeté.
+- **« Rejouer » vaut « Prêt »** (`hub.js`, aucun jeu modifié) : un `start` d'un joueur pas prêt le marque prêt ; celui
+  qui complète la salle lance. Garde de 2 s après une fin de manche (`GARDE_FIN`) : un Espace encore tenu (tir, bombe)
+  ne marque personne. Le dernier « Prêt » (bouton ou Rejouer) lance la manche tout seul (≥ 2 joueurs, jeu au repos,
+  pas pendant une transition de tournoi). Le refus nomme les retardataires (« ⏳ On attend Léa, Max »). En fin de
+  manche et après un changement de bots, les spectateurs prennent les sièges libres dans l'ordre d'arrivée.
+- **Tron et Snake : file de 2 virages** (`virage()` dans les deux serveurs, `pendingDir` + `nextDir`) : « haut puis
+  gauche » dans le même tick perdait les DEUX virages ; on compare maintenant au dernier virage prévu (même direction
+  ignorée, direction opposée = correction du dernier virage, demi-tour sur soi-même ignoré), un virage consommé par
+  tick. Sous ⇄ (Tron), la file est tenue dans le repère des touches et l'inversion appliquée à la consommation, comme
+  avant. **Écho immédiat** côté client (`public/echo-virage.js`) : un chevron devant sa propre tête jusqu'à la
+  confirmation par l'instantané (450 ms au plus), jamais pour un demi-tour refusé.
+- `npm test` : **81 vérifications** (nouveau bloc « robustesse »).
+
 ## Limites connues (assumées)
 - ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».
 - Hébergement Render en **Europe (Frankfurt)** — confirmé par l'utilisateur, donc ~15-25 ms de ping : le ping
@@ -889,7 +941,8 @@ Test permanent : `SMOKE_FAULT=1` (posé par `npm test` seulement) fait lever une
 - ~~Dérive de la boucle serveur~~ **FAIT — pas de temps fixe** (voir section dédiée) : ce n'était pas cosmétique,
   les jeux tournaient **10 à 15 % au ralenti**, et d'autant plus qu'il y avait de monde.
 - Identité par **pseudo** sans comptes (mêmes pseudos = stats fusionnées). Reconnexion best-effort.
-- Spectateurs restent spectateurs même si un siège se libère (bouton 🪑 « Prendre un siège » hors partie).
+- ~~Spectateurs restent spectateurs même si un siège se libère~~ **FAIT (24/09)** : assis automatiquement en fin de
+  manche (le bouton 🪑 reste).
 - ~~Pas de TLS/auth/rate-limit (LAN de confiance)~~ : le site est **public** depuis Render (TLS fourni par
   Render). Taille et débit des messages sont désormais plafonnés (voir « Protections du serveur »).
   Toujours pas de comptes : identité par pseudo.
@@ -900,7 +953,8 @@ Test permanent : `SMOKE_FAULT=1` (posé par `npm test` seulement) fait lever une
 - ~~Optimisation différée~~ **FAIT — delta réseau** : `grid` (Tank/Bomb) et `geo` (Pong) ne sont émis **que s'ils changent** (+ refresh 2×/s : arrivants/auto-réparation ; toujours émis hors play). Champ `undefined` → omis du JSON → le client **réutilise le précédent** (fusion en tête de `onState` ; `geo:null` = vraiment vide). Gain ≈ 40 Ko/s/client (Pong) + 7 (Tank) + 5 (Bomb). Les chemins Tron/Snake changent chaque tick (pas de delta possible).
 - ~~`identities` non purgé~~ **FAIT** : plafonné à 400, les plus anciens sautent (Map = ordre d'insertion), en
   épargnant les jetons connectés ou en attente de reprise. Sans effet visible : le client renvoie son pseudo.
-- Multi-onglets de test : localStorage partagé → même token/pseudo par défaut (mettre un pseudo distinct par onglet).
+- Multi-onglets de test : le jeton est propre à l'onglet (sessionStorage, 24/09) ; le **pseudo** reste partagé
+  (localStorage) — mettre un pseudo distinct par onglet.
 - **Ce que `npm test` ne couvre pas** : le ressenti de jeu à plusieurs humains, le mobile (surtout le vieil iPhone),
   la lisibilité des motifs à 8-10, et les fins de manche longues (mort subite de Bomberman jusqu'au bout).
   Ces choses-là n'ont jamais été trouvées par l'automatisation — toujours par les testeurs.

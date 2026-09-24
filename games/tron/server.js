@@ -59,7 +59,7 @@ export function createTron(room) {
 
   function lbEntry(name) {
     const b = board(GID);
-    return b[name] || (b[name] = { name, games: 0, wins: 0, kills: 0, dmg: 0, deaths: 0, survSum: 0, bestSurvivalSec: 0 });
+    return (Object.hasOwn(b, name) && b[name]) || (b[name] = { name, games: 0, wins: 0, kills: 0, dmg: 0, deaths: 0, survSum: 0, bestSurvivalSec: 0 });
   }
   function recordRound() {
     for (const p of players) {
@@ -84,7 +84,7 @@ export function createTron(room) {
   function makePlayers() {
     return Array.from({ length: MAX_SEATS }, (_, seat) => ({
       seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false, bot: false,
-      dir: DIRS.right, pendingDir: null, cells: [], boost: BOOST_MAX, boostHeld: false, speedUntil: 0, ghostUntil: 0,
+      dir: DIRS.right, pendingDir: null, nextDir: null, cells: [], boost: BOOST_MAX, boostHeld: false, speedUntil: 0, ghostUntil: 0,
       invertUntil: 0, breaker: false,
       kills: 0, place: 0, elimTick: -1, score: 0,
     }));
@@ -114,7 +114,7 @@ export function createTron(room) {
       const y = Math.max(1, Math.min(GH - 2, Math.round(cy + R * Math.sin(ang))));
       const tx = -Math.sin(ang), ty = Math.cos(ang);
       const dir = Math.abs(tx) >= Math.abs(ty) ? { x: Math.sign(tx) || 1, y: 0 } : { x: 0, y: Math.sign(ty) || 1 };
-      p.dir = dir; p.pendingDir = null; p.cells = [{ x, y }];
+      p.dir = dir; p.pendingDir = null; p.nextDir = null; p.cells = [{ x, y }];
       p.alive = true; p.boost = BOOST_MAX; p.boostHeld = false; p.speedUntil = 0; p.ghostUntil = 0; p.invertUntil = 0; p.breaker = false;
       p.kills = 0; p.place = 0; p.elimTick = -1;
       occupied.set(key(x, y), p.seat);
@@ -142,7 +142,7 @@ export function createTron(room) {
   function backToLobby() {            // abandon : retour au lobby en pleine partie
     if (gameState !== 'play' && gameState !== 'countdown' && gameState !== 'paused') return;
     gameState = 'lobby'; winner = null; fx = []; occupied = new Map(); pickups = []; shrinkLevel = 0;
-    for (const p of players) { p.playing = false; p.alive = false; p.cells = []; p.boostHeld = false; p.pendingDir = null; }
+    for (const p of players) { p.playing = false; p.alive = false; p.cells = []; p.boostHeld = false; p.pendingDir = null; p.nextDir = null; }
   }
   function endRound() {
     gameState = 'over'; endTick = tick;
@@ -255,7 +255,7 @@ export function createTron(room) {
     if (tick >= SHRINK_START && (tick - SHRINK_START) % shrinkEv === 0) { shrinkLevel++; applyShrink(); }
     const alive = players.filter(p => p.alive);
     for (const p of alive) if (p.bot) botThink(p);
-    for (const p of alive) { let pd = p.pendingDir; if (pd && p.invertUntil > tick) pd = { x: -pd.x, y: -pd.y }; if (pd && !(pd.x === -p.dir.x && pd.y === -p.dir.y)) p.dir = pd; p.pendingDir = null; }
+    for (const p of alive) { let pd = p.pendingDir; if (pd && p.bot && p.invertUntil > tick) pd = { x: -pd.x, y: -pd.y };   /* ⇄ : les bots le subissent ici, les humains à la saisie (virage) */ if (pd && !(pd.x === -p.dir.x && pd.y === -p.dir.y)) p.dir = pd; p.pendingDir = p.nextDir || null; p.nextDir = null; }
     // résolution SIMULTANÉE des chocs frontaux (même case) et des croisements (échange de cases), avant tout déplacement
     const fn = new Map();
     for (const p of alive) fn.set(p, { x: head(p).x + p.dir.x, y: head(p).y + p.dir.y });
@@ -315,12 +315,25 @@ export function createTron(room) {
       if (connectedCount() === 0) fullReset(); else if (gameState === 'play' && aliveCount() <= 1) endRound();
     } else if (connectedCount() === 0) fullReset();
   }
+  // File de 2 virages (24/09). Un virage n'occupait qu'une case, écrasée à chaque réception : « haut puis gauche »
+  // dans le même tick (demi-tour serré, balayage du joystick) → « gauche » écrasait « haut » puis était refusé comme
+  // demi-tour, et les DEUX virages étaient perdus. On compare désormais au DERNIER virage prévu : même direction →
+  // ignorée ; direction opposée → correction du dernier virage prévu (demi-tour sur soi-même : ignoré) ; sinon
+  // elle rejoint la file (2 au plus). Un virage est consommé par tick. Les bots n'écrivent que pendingDir.
+  const memeDir = (a, b) => a.x === b.x && a.y === b.y, dirOpp = (a, b) => a.x === -b.x && a.y === -b.y;
+  function virage(p, d) {
+    if (p.invertUntil > tick) d = { x: -d.x, y: -d.y };   // ⇄ appliqué à la SAISIE : la file est en directions réelles
+    const L = p.nextDir || p.pendingDir || p.dir;
+    if (memeDir(d, L)) return;
+    if (dirOpp(d, L)) { if (p.nextDir) p.nextDir = d; else if (p.pendingDir) p.pendingDir = d; return; }
+    if (!p.pendingDir) p.pendingDir = d; else if (!p.nextDir) p.nextDir = d;   // file pleine : ignoré
+  }
   function onRename(member) { const s = seatOf(member); if (s >= 0) players[s].name = member.name || ''; }
   function onMessage(member, m) {
     if (!m || typeof m !== 'object') return;
     const seat = seatOf(member);
     const p = seat >= 0 ? players[seat] : null;
-    if (m.t === 'dir' && p && p.alive && DIRS[m.d]) p.pendingDir = DIRS[m.d];
+    if (m.t === 'dir' && p && p.alive && typeof m.d === 'string' && Object.hasOwn(DIRS, m.d)) virage(p, DIRS[m.d]);   // hasOwn : d:'constructor' diffusait une tête {x:null}
     else if (m.t === 'boost' && p) p.boostHeld = !!m.on;
     else if (m.t === 'start') startGame();
     else if (m.t === 'pause') { if (gameState === 'play') gameState = 'paused'; else if (gameState === 'paused') gameState = 'play'; }

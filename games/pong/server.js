@@ -105,7 +105,7 @@ export function createPong(room) {
   /* ---- leaderboard (schéma propre à Pong) ---- */
   function lbEntry(name) {
     const b = board(GID);
-    return b[name] || (b[name] = { name, games: 0, wins: 0, kills: 0, dmg: 0, bounces: 0, pu: 0, deaths: 0,
+    return (Object.hasOwn(b, name) && b[name]) || (b[name] = { name, games: 0, wins: 0, kills: 0, dmg: 0, bounces: 0, pu: 0, deaths: 0,
       survSum: 0, bestSurvivalSec: 0, mostKills: 0, fastestElimSec: null, fewestTouches: null });
   }
   function recordRound() {
@@ -587,7 +587,11 @@ export function createPong(room) {
       },
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / 60), bounces: roundBounces, nParts, match: matchWonPending } : null,
       geo: geoOut,
-      balls: balls.map(b => ({ x: r1(b.x), y: r1(b.y), vx: r1(b.vx), vy: r1(b.vy), o: b.last >= 0 ? geo.edges[b.last].owner : -1, gh: !!b.ghost, iv: b.invisUntil > tick })),
+      balls: balls.map(b => {                        // gh / iv : présents seulement s'ils sont vrais (absent = faux, lu par vérité côté client)
+        const o = { x: r1(b.x), y: r1(b.y), vx: r1(b.vx), vy: r1(b.vy), o: b.last >= 0 ? geo.edges[b.last].owner : -1 };
+        if (b.ghost) o.gh = true; if (b.invisUntil > tick) o.iv = true;
+        return o;
+      }),
       powerups: powerups.map(p => ({ x: p.x | 0, y: p.y | 0, type: p.type, bad: !!p.bad })),
       bumpers: bumpers.map(bm => ({ x: r1(bm.x), y: r1(bm.y), r: bm.r, t: !!bm.until })),
       players: players.map(p => ({
@@ -664,7 +668,7 @@ export function createPong(room) {
       if (editable()) {
         const op = m.op;
         if (op === 'lives' || op === 'pu' || op === 'accel' || op === 'speed') {
-          if (op === 'lives') cfg.lives = Math.max(1, Math.min(9, cfg.lives + (m.d > 0 ? 1 : -1)));
+          if (op === 'lives') cfg.lives = Math.max(1, Math.min(9, cfg.lives + (typeof m.d === 'number' && m.d > 0 ? 1 : -1)));
           else if (op === 'pu') cfg.pu = !cfg.pu;
           else if (op === 'accel') cfg.accelEvery = cfg.accelEvery ? 0 : ACCEL_EVERY;
           else { const s = SPEED_ORDER[(SPEED_ORDER.indexOf(cfg.speedLevel) + 1) % SPEED_ORDER.length]; cfg.speedLevel = s; cfg.init = SPEED[s].init; cfg.max = SPEED[s].max; }
@@ -674,8 +678,8 @@ export function createPong(room) {
         else if (op === 'sudden') rules.sudden = SUDDEN_ORDER[(SUDDEN_ORDER.indexOf(rules.sudden) + 1) % SUDDEN_ORDER.length];
         else if (op === 'serve') rules.serve = SERVE_ORDER[(SERVE_ORDER.indexOf(rules.serve) + 1) % SERVE_ORDER.length];
         else if (op === 'handicap') rules.handicap = !rules.handicap;
-        else if (op === 'rtar') rules.roundsTarget = Math.max(1, Math.min(9, rules.roundsTarget + (m.d > 0 ? 1 : -1)));
-        else if (op === 'ktar') rules.killsTarget = Math.max(3, Math.min(30, rules.killsTarget + (m.d > 0 ? 1 : -1)));
+        else if (op === 'rtar') rules.roundsTarget = Math.max(1, Math.min(9, rules.roundsTarget + (typeof m.d === 'number' && m.d > 0 ? 1 : -1)));
+        else if (op === 'ktar') rules.killsTarget = Math.max(3, Math.min(30, rules.killsTarget + (typeof m.d === 'number' && m.d > 0 ? 1 : -1)));
         else if (op === 'negatives') rules.negatives = !rules.negatives;
         else if (op === 'botdiff') rules.botDiff = BOTDIFF_ORDER[(BOTDIFF_ORDER.indexOf(rules.botDiff) + 1) % BOTDIFF_ORDER.length];
         else if (op === 'botstyle') rules.botStyle = BOTSTYLE_ORDER[(BOTSTYLE_ORDER.indexOf(rules.botStyle) + 1) % BOTSTYLE_ORDER.length];

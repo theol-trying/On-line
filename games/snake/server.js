@@ -69,7 +69,7 @@ export function createSnake(room) {
 
   function lbEntry(name) {
     const b = board(GID);
-    return b[name] || (b[name] = { name, games: 0, wins: 0, kills: 0, deaths: 0, survSum: 0, bestSurvivalSec: 0, bestScore: 0 });
+    return (Object.hasOwn(b, name) && b[name]) || (b[name] = { name, games: 0, wins: 0, kills: 0, deaths: 0, survSum: 0, bestSurvivalSec: 0, bestScore: 0 });
   }
   function recordRound() {
     if (nParts < 2) return;                         // le solo ne compte pas
@@ -94,7 +94,7 @@ export function createSnake(room) {
   function makePlayers() {
     return Array.from({ length: MAX_SEATS }, (_, seat) => ({
       seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false, bot: false,
-      dir: DIRS.right, pendingDir: null, cells: [], grow: 0, score: 0, ghostUntil: 0,
+      dir: DIRS.right, pendingDir: null, nextDir: null, cells: [], grow: 0, score: 0, ghostUntil: 0,
       kills: 0, place: 0, elimTick: -1,
     }));
   }
@@ -146,7 +146,7 @@ export function createSnake(room) {
       hy = Math.max(INIT_LEN, Math.min(GH - 1 - INIT_LEN, hy));
       const dx = cx - hx, dy = cy - hy;
       const dir = Math.abs(dx) >= Math.abs(dy) ? { x: Math.sign(dx) || 1, y: 0 } : { x: 0, y: Math.sign(dy) || 1 };
-      p.dir = dir; p.pendingDir = null; p.cells = [];
+      p.dir = dir; p.pendingDir = null; p.nextDir = null; p.cells = [];
       for (let k = 0; k < INIT_LEN; k++) p.cells.push({ x: hx - dir.x * (INIT_LEN - 1 - k), y: hy - dir.y * (INIT_LEN - 1 - k) });
       p.alive = true; p.grow = 0; p.score = 0; p.kills = 0; p.place = 0; p.elimTick = -1; p.ghostUntil = 0;
     });
@@ -194,7 +194,7 @@ export function createSnake(room) {
   function backToLobby() {            // abandon : retour au lobby en pleine partie
     if (gameState !== 'play' && gameState !== 'countdown' && gameState !== 'paused') return;
     gameState = 'lobby'; winner = null; fx = []; food = []; rocks = new Set();
-    for (const p of players) { p.playing = false; p.alive = false; p.cells = []; p.pendingDir = null; }
+    for (const p of players) { p.playing = false; p.alive = false; p.cells = []; p.pendingDir = null; p.nextDir = null; }
   }
 
   function botSafe(x, y) {                          // IA : la case (avec wrap éventuel) est-elle praticable ?
@@ -240,7 +240,7 @@ export function createSnake(room) {
     const alive = players.filter(p => p.alive);
     for (const p of alive) if (p.bot) botThink(p);
     // applique la direction en attente (interdit le demi-tour)
-    for (const p of alive) { const pd = p.pendingDir; if (pd && !(pd.x === -p.dir.x && pd.y === -p.dir.y)) p.dir = pd; p.pendingDir = null; }
+    for (const p of alive) { const pd = p.pendingDir; if (pd && !(pd.x === -p.dir.x && pd.y === -p.dir.y)) p.dir = pd; p.pendingDir = p.nextDir || null; p.nextDir = null; }
     // têtes suivantes + croissance prévue (mange une pastille ou reste à digérer)
     const nh = new Map(), willGrow = new Map();
     for (const p of alive) { const h = head(p); let nx = h.x + p.dir.x, ny = h.y + p.dir.y; if (variant === 1) { nx = (nx + GW) % GW; ny = (ny + GH) % GH; } const n = { x: nx, y: ny }; nh.set(p, n); willGrow.set(p, p.grow > 0 || foodAt(n.x, n.y)); }
@@ -313,18 +313,31 @@ export function createSnake(room) {
   }
   function onLeave(member) {
     const seat = seatOf(member); if (seat < 0) return;
-    const p = players[seat]; p.member = null; p.pendingDir = null;
+    const p = players[seat]; p.member = null; p.pendingDir = null; p.nextDir = null;
     if (gameState === 'play' || gameState === 'countdown' || gameState === 'paused') {
       if (p.alive) { p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++; }
       if (connectedCount() === 0) fullReset();
       else if (gameState === 'play') { if (nParts >= 2 ? aliveTeams().size <= 1 : aliveCount() === 0) endRound(rush ? bestScoreTeam() : undefined); }   // même règle de gagnant qu'en update (food-rush = meilleur score)
     } else if (connectedCount() === 0) fullReset();
   }
+  // File de 2 virages (24/09). Un virage n'occupait qu'une case, écrasée à chaque réception : « haut puis gauche »
+  // dans le même tick (demi-tour serré, balayage du joystick) → « gauche » écrasait « haut » puis était refusé comme
+  // demi-tour, et les DEUX virages étaient perdus. On compare désormais au DERNIER virage prévu : même direction →
+  // ignorée ; direction opposée → correction du dernier virage prévu (demi-tour sur soi-même : ignoré) ; sinon
+  // elle rejoint la file (2 au plus). Un virage est consommé par tick. Les bots n'écrivent que pendingDir.
+  const memeDir = (a, b) => a.x === b.x && a.y === b.y, dirOpp = (a, b) => a.x === -b.x && a.y === -b.y;
+  function virage(p, d) {
+    const base = p.dir;
+    const L = p.nextDir || p.pendingDir || base;
+    if (memeDir(d, L)) return;
+    if (dirOpp(d, L)) { if (p.nextDir) p.nextDir = d; else if (p.pendingDir) p.pendingDir = d; return; }
+    if (!p.pendingDir) p.pendingDir = d; else if (!p.nextDir) p.nextDir = d;   // file pleine : ignoré
+  }
   function onRename(member) { const s = seatOf(member); if (s >= 0) players[s].name = member.name || ''; }
   function onMessage(member, m) {
     if (!m || typeof m !== 'object') return;
     const seat = seatOf(member); const p = seat >= 0 ? players[seat] : null;
-    if (m.t === 'dir' && p && p.alive && DIRS[m.d]) p.pendingDir = DIRS[m.d];
+    if (m.t === 'dir' && p && p.alive && typeof m.d === 'string' && Object.hasOwn(DIRS, m.d)) virage(p, DIRS[m.d]);   // hasOwn : d:'constructor' diffusait une tête {x:null}
     else if (m.t === 'start') startGame();
     else if (m.t === 'pause') { if (gameState === 'play') gameState = 'paused'; else if (gameState === 'paused') gameState = 'play'; }
     else if (m.t === 'abort') backToLobby();
