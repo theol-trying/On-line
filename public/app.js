@@ -313,12 +313,17 @@ try { if (localStorage.getItem('pong-lan-nochat')) document.body.classList.add('
 const estTelephone = () => window.innerWidth <= 600;              // même seuil que le bloc mobile de style.css
 const enJeuTelephone = () => estTelephone() && document.body.classList.contains('playing') && !document.body.classList.contains('out');
 const hudFloat = document.getElementById('hudFloat');
+let monSiege = -1;                                               // siège dans le jeu actif, lu dans son message d'accueil ('welcome')
 function majHorsJeu() {
   const b = document.body;
   if (!b.classList.contains('playing')) { b.classList.remove('out'); b.classList.remove('hudon'); return; }
   const racine = document.querySelector('.game-root:not(.hidden)');
   const moi = racine && racine.querySelector('.pc.me');
-  const out = !moi || moi.classList.contains('dead');
+  // Arrivé EN COURS de manche : il a un siège (donc une carte .pc.me) mais ne joue pas encore cette manche —
+  // ni éliminé ni en jeu, il se retrouvait sans chat jusqu'à la fin. On lit donc aussi l'état de la partie.
+  const st = stateCache[activeId], pj = st && st.players && monSiege >= 0 ? st.players[monSiege] : null;
+  const pasDansLaManche = !pj || pj.playing === false;
+  const out = !moi || moi.classList.contains('dead') || pasDansLaManche;
   if (out === b.classList.contains('out')) return;
   b.classList.toggle('out', out);
   // De retour en jeu (nouvelle manche, résurrection en revanche) : on libère l'écran sur-le-champ.
@@ -613,6 +618,7 @@ function connect() {
       setStatus(`${me && me.role === 'spectator' ? 'Spectateur · ' : ''}${human} connecté${human > 1 ? 's' : ''}${specs ? ' · 👁 ' + specs : ''}${jeSuisGm ? ' · 👑 game master' : ''}`, 'ok');
       renderReady();
     } else if (m.t === 'g') {
+      if (m.m && m.m.t === 'welcome' && typeof m.m.seat === 'number') monSiege = m.m.seat;   // siège dans le jeu actif (-1 = spectateur)
       const g = m.g || activeId;
       if (modReady && modId === g) { if (mod.onMessage) mod.onMessage(m.m); } else pfor(g).msgs.push(m.m);
     } else if (m.t === 'lb') {
