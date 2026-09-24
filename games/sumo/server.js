@@ -70,7 +70,7 @@ export function createSumo(room) {
 
   function lbEntry(name) {
     const b = board(GID);
-    return b[name] || (b[name] = { name, games: 0, wins: 0, kills: 0, dmg: 0, deaths: 0, survSum: 0, bestSurvivalSec: 0 });
+    return (Object.hasOwn(b, name) && b[name]) || (b[name] = { name, games: 0, wins: 0, kills: 0, dmg: 0, deaths: 0, survSum: 0, bestSurvivalSec: 0 });
   }
   function recordRound() {
     for (const p of players) {

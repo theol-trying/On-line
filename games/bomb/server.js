@@ -87,7 +87,7 @@ export function createBomb(room) {
 
   function lbEntry(name) {
     const b = board(GID);
-    return b[name] || (b[name] = { name, games: 0, wins: 0, kills: 0, dmg: 0, deaths: 0, survSum: 0, bestSurvivalSec: 0 });
+    return (Object.hasOwn(b, name) && b[name]) || (b[name] = { name, games: 0, wins: 0, kills: 0, dmg: 0, deaths: 0, survSum: 0, bestSurvivalSec: 0 });
   }
   function recordRound() {
     if (nParts < 2) return;
@@ -530,7 +530,7 @@ export function createBomb(room) {
       round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, sd, gen: genStyle, ff, revenge,
       gw: GW, gh: GH,                                                              // taille de grille : le client recale CELL et ARENA
       grid: sendGrid ? g : undefined,
-      bombs: bombs.map(b => ({ x: b.gx, y: b.gy, f: b.fuse, p: b.power, r: !!b.remote })),
+      bombs: bombs.map(b => { const o = { x: b.gx, y: b.gy, f: b.fuse, p: b.power }; if (b.remote) o.r = true; return o; }),   // r : présent seulement s'il est vrai
       blasts: blasts.map(bl => ({ x: bl.gx, y: bl.gy })),
       pickups: pickups.map(pk => ({ x: pk.gx, y: pk.gy, t: pk.type, b: !!pk.bad })),
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, solo: nParts < 2 } : null,

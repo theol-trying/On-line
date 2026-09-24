@@ -12,7 +12,8 @@ import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // retour
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
 import { lumiere, creerLumieres } from '../../lumiere.js';        // lueurs sur la pelouse : pommes spéciales, fantômes, repas, éclats de mort
 import { crepuscule, creerDuel } from '../../crepuscule.js';                 // le jardin passe du jour au crépuscule quand la manche s'achève
-import { creerJournal, blocFin } from '../../finpartie.js';       // écran de fin : longueur au fil de la manche + meilleure action
+import { creerJournal, blocFin } from '../../finpartie.js';
+import { creerEcho } from '../../echo-virage.js';                   // chevron immédiat du virage enregistré (file de 2 virages côté serveur)       // écran de fin : longueur au fil de la manche + meilleure action
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel();   // Snake annonce déjà son duel final (music.sting + message) : pas de second bandeau
@@ -164,7 +165,8 @@ export default (function () {
   const foodBorn = new Map();                       // case → { born, gen } : apparition « pop » de la nourriture
   let foodGen = 0;
   const headAng = new Float64Array(MAX_SEATS), angSet = new Uint8Array(MAX_SEATS);   // orientation lissée des têtes
-  const HX = new Float64Array(MAX_SEATS), HY = new Float64Array(MAX_SEATS), HON = new Uint8Array(MAX_SEATS);   // têtes dessinées cette image
+  const HX = new Float64Array(MAX_SEATS), HY = new Float64Array(MAX_SEATS), HON = new Uint8Array(MAX_SEATS);
+  const HDX = new Int8Array(MAX_SEATS), HDY = new Int8Array(MAX_SEATS), ECHO = creerEcho();   // cap affiché de chaque tête (écho du virage)   // têtes dessinées cette image
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0, NOW = 0, sndPan = 0, sndGain = 1;
   let rocksRef = null, rocksKey = '';
   // éclairage : flashs éphémères plafonnés + file d'attente (les effets tombent ~90 ms plus tard, avec l'interpolation)
@@ -668,7 +670,7 @@ export default (function () {
     const tp = (now + seat * 1531) % (near ? 900 : 2600), tongue = soft && tp < 260 ? Math.sin(tp / 260 * Math.PI) : 0;
     const blink = soft && ((now + seat * 977) % 4300) < 130;
     drawHead(C, hx, hy, headAng[seat], col, seat, ga, blink, tongue, lx / ll, ly / ll);
-    HX[seat] = hx; HY[seat] = hy; HON[seat] = 1;
+    HX[seat] = hx; HY[seat] = hy; HON[seat] = 1; HDX[seat] = Math.sign(dx); HDY[seat] = Math.sign(dy);
   }
   // repères : « c'est moi » (anneau pulsé + flèche au départ), couronne des vainqueurs en fin de manche
   function drawMarkers(now) {
@@ -689,6 +691,7 @@ export default (function () {
     const x = HX[mySeat], y = HY[mySeat];
     ctx.save(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1.2, C * (A.contrast ? 0.14 : 0.1)); ctx.globalAlpha = soft ? 0.55 + 0.4 * Math.sin(now / 200) : 0.85;
     ctx.beginPath(); ctx.arc(x, y, C * 0.82, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+    ECHO.dessiner(ctx, x, y, C, HDX[mySeat], HDY[mySeat], '#ffffff', now, !soft);
     const cd = snap.gs === 'countdown';
     if (cd || (snap.gs === 'play' && now - playSince < 2500)) {                     // flèche : au départ seulement (elle masquerait la case devant soi)
       const k = Math.max(5, C * 0.5), bob = soft ? Math.abs(Math.sin(now / 160)) * C * 0.3 : 0, below = y < C * 2.6, s = below ? -1 : 1;
@@ -1172,9 +1175,10 @@ export default (function () {
     unlockAudio();
     if (e.key === ' ' && snap && snap.gs !== 'play' && snap.gs !== 'paused') return send({ t: 'start' });
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) return send({ t: 'pause' });
-    const d = DIR_KEYS[e.code]; if (d && !e.repeat) send({ t: 'dir', d });   // la répétition auto renvoyait la même direction ~30×/s pour rien
+    const d = DIR_KEYS[e.code]; if (d && !e.repeat) { send({ t: 'dir', d }); echoVirage(d); }   // la répétition auto renvoyait la même direction ~30×/s pour rien
   };
-  function dpad(id, d) { const el = $(id); if (!el) return; el.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t: 'dir', d }); }); }
+  function dpad(id, d) { const el = $(id); if (!el) return; el.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t: 'dir', d }); echoVirage(d); }); }
+  function echoVirage(d) { const me = snap && mySeat >= 0 && snap.players ? snap.players[mySeat] : null; if (me && me.alive && HON[mySeat]) ECHO.appui(d, HDX[mySeat], HDY[mySeat], false); }
 
   // Les boutons du DOM sont STATIQUES et le module est un singleton (import() en cache) : init() est
   // rappelé à chaque retour sur le jeu. Sans ce drapeau, chaque retour rebranchait les écouteurs sans

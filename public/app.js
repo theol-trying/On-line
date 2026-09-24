@@ -4,7 +4,12 @@ import { initJoystick, joystickPour } from './joystick.js';   // manette tactile
 import { creerVitrine } from './vitrine.js';                  // accueil : les 6 jeux en cartes animées
 
 let ws = null;
-let you = { id: null, name: '', token: localStorage.getItem('pong-lan-token') || '' };
+// Jeton PROPRE À L'ONGLET (sessionStorage : survit au F5, pas partagé avec un autre onglet). En localStorage, deux
+// onglets partageaient le même jeton, donc le même joueur, tous deux hôtes, et laissaient un siège fantôme en partant.
+// Un onglet DUPLIQUÉ recopie le jeton : le hub fait alors reprendre le joueur par le nouvel onglet (message « remplace »).
+const lireJeton = () => { try { return sessionStorage.getItem('pong-lan-token') || ''; } catch (e) { return ''; } };
+const garderJeton = t => { try { sessionStorage.setItem('pong-lan-token', t); } catch (e) {} };
+let you = { id: null, name: '', token: lireJeton() };
 let myName = (localStorage.getItem('pong-lan-name') || '').slice(0, 12);
 let gamesMeta = [], activeId = null;
 let mod = null, modId = null, modReady = false, loadingId = null;
@@ -154,7 +159,7 @@ const globalBody = document.getElementById('globalBody');
 if (globalBtn) globalBtn.onclick = () => { togglePanel(globalPanel); renderGlobal(); };
 function renderGlobal() {
   if (!globalBody) return;
-  const agg = {};
+  const agg = Object.create(null);                 // indexé par pseudo : aucune clé héritée
   for (const gid in boards) for (const e of (boards[gid] || [])) {
     const a = agg[e.name] || (agg[e.name] = { name: e.name, games: 0, wins: 0, kills: 0, jeux: 0 });
     a.games += e.games || 0; a.wins += e.wins || 0; a.kills += e.kills || 0; a.jeux++;
@@ -593,6 +598,7 @@ document.addEventListener('visibilitychange', () => {
   if (enVeille) { enVeille = false; connect(); }
 });
 
+let coupure = '';                                            // raison d'une fermeture annoncée par le hub ('remplace' | 'plein')
 function connect() {
   setStatus('Connexion…', '');
   const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';   // wss en ligne (HTTPS Render), ws en LAN local
@@ -602,7 +608,7 @@ function connect() {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.t === 'hello') {
       you = { id: m.you.id, name: m.you.name, token: m.you.token };
-      if (m.you.token) localStorage.setItem('pong-lan-token', m.you.token);
+      if (m.you.token) garderJeton(m.you.token);
       gamesMeta = m.games || []; activeId = m.active;
       statusDot.className = 'ok'; renderMenu(); loadModule(activeId);
     } else if (m.t === 'room') {
@@ -656,14 +662,22 @@ function connect() {
         if (globalPanel && !globalPanel.classList.contains('hidden')) renderGlobal();
       }
     } else if (m.t === 'notready') {
-      if (!window.__lastNR || performance.now() - window.__lastNR > 1500) { window.__lastNR = performance.now(); note('⏳ En attente que tous les joueurs soient prêts'); } // anti-spam (Espace en auto-répétition)
+      // « Rejouer » compte comme « Prêt » : on dit QUI la salle attend (pseudos assainis par le hub, affichés en texte)
+      const w = Array.isArray(m.wait) ? m.wait.filter(x => typeof x === 'string').slice(0, 6).map(x => x.slice(0, 12)) : [];
+      if (!window.__lastNR || performance.now() - window.__lastNR > 1500) { window.__lastNR = performance.now(); note(w.length ? '⏳ On attend ' + w.join(', ') : '⏳ En attente que tous les joueurs soient prêts'); } // anti-spam (Espace en auto-répétition)
+    } else if (m.t === 'remplace') {
+      coupure = 'remplace';                                  // ce joueur a été repris par un autre onglet : ne pas se reconnecter (sinon ping-pong)
+    } else if (m.t === 'plein') {
+      coupure = 'plein';
     } else if (m.t === 'state') {
       // Le hub omet les clés inchangées depuis la diffusion précédente : on les reprend de l'état
       // précédent de CE jeu. Nouvel objet à chaque fois — les instantanés déjà empilés dans le
       // tampon d'interpolation des jeux ne doivent jamais être modifiés après coup.
-      const g = m.g; const part = { ...m }; delete part.t; delete part.g;
+      // `g` ne voyage que dans les instantanés complets ; un delta appartient au jeu actif (annoncé par `room`).
+      const g = m.g || activeId; const part = { ...m }; delete part.t; delete part.g;
       const prevS = stateCache[g];
       const s = prevS ? Object.assign({}, prevS, part) : part;
+      s.fx = part.fx || [];                                   // fx absent = aucun effet (le reprendre de l'état précédent le rejouerait)
       // `pd` = delta par joueur : [index, {champs modifiés}]. On reconstruit un tableau players COMPLET,
       // en créant de NOUVEAUX objets pour les joueurs modifiés — les instantanés déjà empilés dans les
       // tampons d'interpolation des jeux gardent ainsi leurs valeurs d'origine.
@@ -687,6 +701,12 @@ function connect() {
     }
   };
   ws.onclose = () => {
+    if (coupure === 'remplace') {                            // repris par un autre onglet : on n'y revient que sur demande
+      setStatus('Ouvert dans un autre onglet — touche ici pour reprendre', 'off');
+      msgTxt.onclick = () => { msgTxt.onclick = null; coupure = ''; connect(); };
+      return;
+    }
+    if (coupure === 'plein') { coupure = ''; setStatus('Salle pleine — nouvel essai dans 30 s', 'off'); setTimeout(connect, 30000); return; }
     if (enVeille) { setStatus('En veille — revenez sur l\'onglet pour reprendre', 'off'); return; }   // coupure voulue : pas de reconnexion
     setStatus('Déconnecté — reconnexion…', 'off'); setTimeout(connect, 1000);
   };

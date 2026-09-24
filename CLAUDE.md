@@ -41,8 +41,12 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
   travaillés, surtout à Bomberman). L'avatar reste sur les cartes joueurs (HUD) et les classements.
 - **Briques graphiques partagées** (à réutiliser, pas à réinventer dans un jeu) : `lumiere.js` (lueurs additives sur le sol), `crepuscule.js`
   (étalonnage jour → crépuscule en mort subite), `finpartie.js` (journal de manche → courbe + meilleure
-  action, textes échappés), `vitrine.js` (accueil en cartes animées). Un nouveau jeu doit aussi avoir sa
-  mini-scène dans `vitrine.js`.
+  action, textes échappés), `vitrine.js` (accueil en cartes animées), `echo-virage.js` (chevron immédiat du
+  virage enregistré, jeux à pas discret). Un nouveau jeu doit aussi avoir sa mini-scène dans `vitrine.js`.
+- **Clés venant du réseau** (pseudo, id de jeu, direction…) : jamais `obj[cle]` nu sur un objet ordinaire —
+  `Object.hasOwn` côté serveur (`Object.prototype.hasOwnProperty.call` côté client) ou `Object.create(null)`.
+  Un simple `{t:'pick', id:'constructor'}` tuait le serveur (corrigé le 24/09). Tout appel au code d'un jeu hors
+  tick/onMessage passe par `garde()` de `hub.js`.
 - Le snapshot renvoyé par `tick()` **doit** contenir `gs` (utilisé par le throttle du hub).
 
 ## Lancer et tester
@@ -55,8 +59,10 @@ HUB_TRACE=1 node server.js    # journalise chaque diffusion
 
 `npm test` (`test/smoke.mjs`, zéro dépendance) démarre le serveur sur le port 3999, joue une
 manche dans chaque jeu et vérifie : pas de plantage, l'état « play » atteint, la reconstitution
-du protocole delta, les tailles d'arène, le ratio de raquette de Pong, et l'arrivée d'un joueur
-en cours de partie. Sort en code 1 au moindre échec. Il affiche aussi la **cadence réelle** de
+du protocole delta, les tailles d'arène, le ratio de raquette de Pong, l'arrivée d'un joueur
+en cours de partie, les protections et un bloc « robustesse » (messages qui tuaient le serveur, reprise
+de connexion, amplificateurs, « Rejouer = Prêt », file de virages). Son serveur écrit dans un dossier
+temporaire et ne reçoit jamais `UPSTASH_*`. Sort en code 1 au moindre échec. Il affiche aussi la **cadence réelle** de
 chaque jeu — un écart au `tickHz` signale une régression de la boucle serveur.
 
 `node --check` ne détecte **pas** les `ReferenceError` à l'exécution : c'est exactement ce qui a

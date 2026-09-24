@@ -4,7 +4,7 @@ import os from 'os';
 import { readFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
-import { initLeaderboard, board, history } from './leaderboard.js';
+import { initLeaderboard, board, history, flush } from './leaderboard.js';
 import { attach, GAME_META } from './hub.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -12,7 +12,17 @@ const PORT = process.env.PORT || 3000;
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
-initLeaderboard(join(__dirname, 'leaderboard.json'));
+// LEADERBOARD_FILE : le test de fumée écrit dans un dossier temporaire, jamais dans le vrai fichier.
+initLeaderboard(process.env.LEADERBOARD_FILE || join(__dirname, 'leaderboard.json'));
+// Une promesse rejetée sans gestionnaire tuerait le processus (Node ≥ 15) : on la journalise.
+process.on('unhandledRejection', e => console.error('[serveur] promesse rejetée non gérée : ' + ((e && e.stack) || e)));
+// Redéploiement Render = SIGTERM (30 s avant SIGKILL) : les sauvegardes regroupées en attente partent avant de sortir.
+let arret = false;
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => {
+  if (arret) return; arret = true;
+  const fin = setTimeout(() => process.exit(0), 8000); fin.unref();
+  flush().catch(() => {}).finally(() => process.exit(0));
+});
 
 const STATS_CSS = `<style>body{font-family:system-ui,sans-serif;background:#0e1024;color:#eef0fb;padding:24px;}
 table{border-collapse:collapse;width:100%;max-width:760px;}th,td{padding:6px 10px;border-bottom:1px solid #2a2e44;text-align:left;}
@@ -21,7 +31,7 @@ li{color:#c7cbe0;margin:3px 0;}a{color:#5db4ff;}</style>`;
 function statsHtml(gid) {
   const tabs = ['<a href="/stats?game=global"><b>🏅 Global</b></a>', ...GAME_META.map(g => `<a href="/stats?game=${g.id}">${esc(g.name)}</a>`)].join(' · ');
   if (gid === 'global') {                              // vue cross-jeux : agrégat par pseudo + champion de chaque jeu
-    const agg = {};
+    const agg = Object.create(null);                   // indexé par pseudo : aucune clé héritée
     for (const g of GAME_META) for (const e of Object.values(board(g.id))) {
       const a = agg[e.name] || (agg[e.name] = { name: e.name, games: 0, wins: 0, kills: 0, jeux: 0 });
       a.games += e.games || 0; a.wins += e.wins || 0; a.kills += e.kills || 0; a.jeux++;
@@ -51,7 +61,12 @@ function statsHtml(gid) {
 </body></html>`;
 }
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
+  // Filet : une requête brute « GET http://[ » faisait lever new URL() dans le gestionnaire async ; le rejet
+  // n'était pas géré et le processus mourait. Toute erreur ici donne maintenant un 400, jamais une panne.
+  servir(req, res).catch(() => { try { if (!res.headersSent) res.writeHead(400); res.end(); } catch {} });
+});
+async function servir(req, res) {
   const u = new URL(req.url, 'http://x');
   const path = u.pathname;
   const gid = u.searchParams.get('game') || 'pong';
@@ -71,7 +86,7 @@ const server = http.createServer(async (req, res) => {
   } catch {
     res.writeHead(404); res.end('Not found');
   }
-});
+}
 
 attach(server);
 
