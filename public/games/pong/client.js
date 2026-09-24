@@ -22,8 +22,11 @@ import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // messag
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux jeux (mode plein écran compris)
 // Couche graphique commune aux 6 jeux, posée PAR-DESSUS la refonte (rien de ce qui précède n'est retiré) :
 import { lumiere, creerLumieres } from '../../lumiere.js';       // balles qui éclairent le sol, éclairs aux renvois / bumpers / vies perdues
-import { crepuscule } from '../../crepuscule.js';               // mort subite : l'arène glisse du jour au crépuscule
+import { crepuscule, creerDuel } from '../../crepuscule.js';               // mort subite : l'arène glisse du jour au crépuscule
 import { creerJournal, blocFin } from '../../finpartie.js';      // écran de fin : courbe des vies + meilleure action
+
+// Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
+const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
 
 const SHAPE = { 2: 'Face à face', 3: 'Triangle', 4: 'Carré', 5: 'Pentagone', 6: 'Hexagone', 7: 'Heptagone', 8: 'Octogone', 9: 'Ennéagone', 10: 'Décagone' };
 // Glyphes TEXTE : uniquement pour les messages DOM (gamemsg) — le canvas dessine ses propres pictogrammes (picto()).
@@ -1357,8 +1360,8 @@ export default (function () {
   // Pris dans le terrain d'origine (geo0) : la zone déjà mangée par le rétrécissement s'assombrit avec le reste.
   const SD_RAMP = 26000;                                                 // ms pour atteindre le crépuscule complet (plafonné par la brique)
   function drawDusk(E) {
-    if (!(sdAcc > 0) || !fbox) return;
-    const t = Math.min(1, sdAcc / SD_RAMP);
+    const t = Math.max(sdAcc > 0 ? Math.min(1, sdAcc / SD_RAMP) : 0, DUEL.t(snap, performance.now(), duelAnnonce));   // mort subite (option) OU duel final
+    if (!(t > 0.005) || !fbox) return;
     const force = (TH.add ? 0.85 : 0.55) * (A.contrast ? 0.7 : 1) * (A.reduceFx ? 0.5 : 1);   // les raquettes vivent sur les BORDS, là où la vignette mord : on reste en deçà
     ctx.save(); ctx.beginPath();
     if (geo0 && geo0.length === E.length * 2) { ctx.moveTo(geo0[0], geo0[1]); for (let i = 2; i < geo0.length; i += 2) ctx.lineTo(geo0[i], geo0[i + 1]); ctx.closePath(); }

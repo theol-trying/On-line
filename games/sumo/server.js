@@ -18,10 +18,18 @@ const RESTITUTION = 0.9, MIN_PUSH = 2.2, CREDIT_TICKS = 90;
 // bonus au sol
 const PU_TYPES = ['heavy', 'dash', 'shock', 'grip'];
 const PU_EVERY = 5 * TICK_HZ, MAX_PU = 2, PU_R = 14, PU_ZONE = 0.7;
-const HEAVY_TICKS = 8 * TICK_HZ, HEAVY_MASS = 1.7, HEAVY_R = 1.25;
-const BOOST_TICKS = 6 * TICK_HZ, BOOST_MUL = 1.4;
-const SHOCK_R = 130, SHOCK_IMP = 10;
-const GRIP_TICKS = 6 * TICK_HZ, GRIP_HIT_MUL = 0.5;
+// Bonus / malus — version A validée par l'utilisateur le 24/09 (avec ses ajustements). Chaque ramassage aide
+// celui qui prend l'objet ET pénalise tous ses ADVERSAIRES (coéquipiers épargnés).
+// Onigiri : croissance PAR PALIERS, sans minuterie, remise à zéro à chaque manche. Plus on mange, plus on pèse et
+// plus on pousse fort — mais moins vite et moins souvent : un gros lutteur se sort mal, mais s'esquive.
+const LVL_MAX = 5, LVL_MASS = 0.25, LVL_POW = 0.25, LVL_R = 0.08, LVL_SPD = 0.06, LVL_CD = 0.15, ONIGIRI_P = 0.4;
+// Élan : charge rechargée 2× plus vite pendant 15 s (et rechargée tout de suite) ; adversaires ESSOUFFLÉS : ×1,2, 8 s.
+const BOOST_TICKS = 15 * TICK_HZ, BOOST_CD_MUL = 0.5, TIRED_TICKS = 8 * TICK_HZ, TIRED_CD_MUL = 1.2;
+// Onde de choc : plus large et plus forte ; les adversaires touchés sont SONNÉS 1,2 s (plus aucune action).
+const SHOCK_R = 180, SHOCK_IMP = 13, STUN_TICKS = Math.round(1.2 * TICK_HZ);
+// Pieds collés : recul −60 % pendant 12 s ; adversaires sur SOL GLISSANT 8 s : ils glissent 1,5× plus loin
+// (la distance de glisse vaut 1 / (1 − frottement) : 1 / 0,14 × 1,5 → frottement 0,907).
+const GRIP_TICKS = 12 * TICK_HZ, GRIP_HIT_MUL = 0.4, SLIP_TICKS = 8 * TICK_HZ, SLIP_FRICTION = 1 - (1 - FRICTION) / 1.5;
 // mort subite : le cordon de paille se resserre lentement après 25 s, franchement après 90 s, jusqu'à 45 % du rayon (cf. ringFloor).
 // Vitesses exprimées en fraction du rayon initial par seconde → même durée de manche quelle que soit la taille d'arène.
 const SD_START = 25 * TICK_HZ, SD_FAST = 90 * TICK_HZ, RING_MIN = 0.45;
@@ -89,7 +97,8 @@ export function createSumo(room) {
       seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false, bot: false,
       x: 0, y: 0, vx: 0, vy: 0, a: 0, mx: 0, my: 0,
       inp: { up: false, down: false, left: false, right: false }, wantDash: false, wantBrace: false,
-      dashUntil: 0, dashReadyAt: 0, braceUntil: 0, braceReadyAt: 0, heavyUntil: 0, gripUntil: 0, boostUntil: 0,
+      dashUntil: 0, dashReadyAt: 0, braceUntil: 0, braceReadyAt: 0, lvl: 0, gripUntil: 0, boostUntil: 0,
+      tiredUntil: 0, stunUntil: 0, slipUntil: 0, dashCdLen: DASH_CD,
       lastBy: -1, lastTick: -9999, botNext: 0, botIdle: 0,
       kills: 0, dmg: 0, place: 0, elimTick: -1, outBy: -1, score: 0,
     }));
@@ -110,12 +119,15 @@ export function createSumo(room) {
   const seatOf = member => { for (const p of players) if (p.member === member) return p.seat; return -1; };
   const aliveTeams = () => new Set(players.filter(p => p.alive).map(p => p.team));
   const foe = (p, q) => p.team !== q.team;          // en FFA chaque lutteur a sa propre « équipe » (team = rang), donc ce test suffit aux deux modes
-  const heavy = p => p.heavyUntil > tick;
+  const heavy = p => p.lvl > 0;
+  const stunned = p => p.stunUntil > tick;
+  const slippy = p => p.slipUntil > tick;
+  const lourdeur = p => 1 - LVL_SPD * p.lvl;         // vitesse et accélération : un gros lutteur tourne comme un camion
   const bracing = p => p.braceUntil > tick;
   const dashing = p => p.dashUntil > tick;
   const grip = p => p.gripUntil > tick;
-  const radius = p => PR * (heavy(p) ? HEAVY_R : 1);
-  const mass = p => (heavy(p) ? HEAVY_MASS : 1) * (bracing(p) ? BRACE_MASS : 1);
+  const radius = p => PR * (1 + LVL_R * p.lvl);
+  const mass = p => (1 + LVL_MASS * p.lvl) * (bracing(p) ? BRACE_MASS : 1);
   const cxy = () => ar / 2;
   // plancher du cercle : 45 % du rayon INITIAL calculé pour le nombre de lutteurs ENCORE EN LICE. À 10 au départ, 45 % de 432 laisse
   // 194 u à deux survivants : un duel de bots n'y finit jamais (mesuré). Le cordon se resserre donc à chaque sortie, jusqu'à 108 u en duel.
@@ -129,7 +141,8 @@ export function createSumo(room) {
       p.x = c + R * Math.cos(ang); p.y = c + R * Math.sin(ang);
       p.vx = 0; p.vy = 0; p.a = ang + Math.PI;             // face au centre
       p.mx = 0; p.my = 0; p.inp = { up: false, down: false, left: false, right: false }; p.wantDash = false; p.wantBrace = false;
-      p.dashUntil = 0; p.dashReadyAt = 0; p.braceUntil = 0; p.braceReadyAt = 0; p.heavyUntil = 0; p.gripUntil = 0; p.boostUntil = 0;
+      p.dashUntil = 0; p.dashReadyAt = 0; p.braceUntil = 0; p.braceReadyAt = 0; p.lvl = 0; p.gripUntil = 0; p.boostUntil = 0;
+      p.tiredUntil = 0; p.stunUntil = 0; p.slipUntil = 0; p.dashCdLen = DASH_CD;   // paliers d'onigiri remis à zéro à chaque manche
       p.lastBy = -1; p.lastTick = -9999; p.botNext = 0; p.botIdle = 0;
       p.alive = true; p.kills = 0; p.dmg = 0; p.place = 0; p.elimTick = -1; p.outBy = -1;
     });
@@ -180,17 +193,19 @@ export function createSumo(room) {
 
   function tryDash(p) {
     p.wantDash = false;
-    if (tick < p.dashReadyAt) return;
+    if (stunned(p) || tick < p.dashReadyAt) return;
     let dx = p.mx, dy = p.my;
     if (!dx && !dy) { dx = Math.cos(p.a); dy = Math.sin(p.a); }   // aucune direction tenue : on charge droit devant
-    const imp = DASH_IMP * (p.boostUntil > tick ? BOOST_MUL : 1);
+    const imp = DASH_IMP;
     p.vx += dx * imp; p.vy += dy * imp; p.a = Math.atan2(dy, dx);
-    p.dashUntil = tick + DASH_TICKS; p.dashReadyAt = tick + DASH_CD;
+    // recharge : +15 % par palier d'onigiri, ×0,5 sous Élan, ×1,2 essoufflé
+    const len = Math.round(DASH_CD * (1 + LVL_CD * p.lvl) * (p.boostUntil > tick ? BOOST_CD_MUL : 1) * (p.tiredUntil > tick ? TIRED_CD_MUL : 1));
+    p.dashUntil = tick + DASH_TICKS; p.dashReadyAt = tick + len; p.dashCdLen = len;
     fx.push({ type: 'dash', seat: p.seat, x: r1(p.x), y: r1(p.y) });
   }
   function tryBrace(p) {
     p.wantBrace = false;
-    if (tick < p.braceReadyAt) return;
+    if (stunned(p) || tick < p.braceReadyAt) return;
     p.braceUntil = tick + BRACE_TICKS; p.braceReadyAt = tick + BRACE_CD;
     fx.push({ type: 'brace', seat: p.seat, x: r1(p.x), y: r1(p.y) });
   }
@@ -201,13 +216,13 @@ export function createSumo(room) {
   }
   function move(p) {
     const D = SMDIFF[botDiff] || SMDIFF[1];
-    let acc = ACC * (bracing(p) ? BRACE_ACC : 1) * (p.bot ? D.acc : 1);
+    let acc = ACC * lourdeur(p) * (bracing(p) ? BRACE_ACC : 1) * (p.bot ? D.acc : 1);
     const sp0 = Math.hypot(p.vx, p.vy);
-    if (p.mx || p.my) { p.vx += p.mx * acc; p.vy += p.my * acc; p.a = Math.atan2(p.my, p.mx); }
-    const fr = grip(p) ? GRIP_FRICTION : FRICTION;
+    if (!stunned(p) && (p.mx || p.my)) { p.vx += p.mx * acc; p.vy += p.my * acc; p.a = Math.atan2(p.my, p.mx); }
+    const fr = grip(p) ? GRIP_FRICTION : slippy(p) ? SLIP_FRICTION : FRICTION;
     p.vx *= fr; p.vy *= fr;
     // plafond de vitesse sur la seule PROPULSION : une charge ou un choc peut dépasser VMAX, mais tenir la touche ne l'y maintient pas
-    const sp = Math.hypot(p.vx, p.vy), cap = Math.max(VMAX, sp0 * fr);
+    const sp = Math.hypot(p.vx, p.vy), cap = Math.max(VMAX * lourdeur(p), sp0 * fr);
     if (sp > cap) { p.vx *= cap / sp; p.vy *= cap / sp; }
     p.x += p.vx; p.y += p.vy;
   }
@@ -221,8 +236,8 @@ export function createSumo(room) {
     p.x -= nx * ov * ip / is; p.y -= ny * ov * ip / is;
     q.x += nx * ov * iq / is; q.y += ny * ov * iq / is;
     // multiplicateurs de choc SUBI : charge adverse × 1.7, pieds collés × 0.5
-    const kp = (dashing(q) ? DASH_HIT_MUL : 1) * (grip(p) ? GRIP_HIT_MUL : 1);
-    const kq = (dashing(p) ? DASH_HIT_MUL : 1) * (grip(q) ? GRIP_HIT_MUL : 1);
+    const kp = (dashing(q) ? DASH_HIT_MUL * (1 + LVL_POW * q.lvl) : 1) * (grip(p) ? GRIP_HIT_MUL : 1);   // la charge d'un lourd frappe plus fort
+    const kq = (dashing(p) ? DASH_HIT_MUL * (1 + LVL_POW * p.lvl) : 1) * (grip(q) ? GRIP_HIT_MUL : 1);
     const vn = (q.vx - p.vx) * nx + (q.vy - p.vy) * ny;      // < 0 : ils se rapprochent
     let force = 0;
     if (vn < 0) {
@@ -253,20 +268,29 @@ export function createSumo(room) {
       }
     }
   }
+  // Malus infligé aux ADVERSAIRES de celui qui ramasse (coéquipiers épargnés) — un fx par victime, pour son message.
+  function malus(p, kind, ticks) {
+    for (const q of players) {
+      if (q === p || !q.alive || !foe(p, q)) continue;
+      if (kind === 'tired') q.tiredUntil = tick + ticks; else q.slipUntil = tick + ticks;
+      fx.push({ type: 'malus', t: kind, seat: q.seat, by: p.seat });
+    }
+  }
   function collectPickups(p) {
     for (let i = pickups.length - 1; i >= 0; i--) {
       const pk = pickups[i];
       if (Math.hypot(pk.x - p.x, pk.y - p.y) > radius(p) + PU_R) continue;
       pickups.splice(i, 1);
-      if (pk.t === 'heavy') p.heavyUntil = tick + HEAVY_TICKS;
-      else if (pk.t === 'dash') { p.dashReadyAt = tick; p.boostUntil = tick + BOOST_TICKS; }
-      else if (pk.t === 'grip') p.gripUntil = tick + GRIP_TICKS;
-      fx.push({ type: 'pickup', seat: p.seat, t: pk.t, x: r1(pk.x), y: r1(pk.y) });
+      if (pk.t === 'heavy') p.lvl = Math.min(LVL_MAX, p.lvl + 1);              // onigiri : un palier de plus, pour toute la manche
+      else if (pk.t === 'dash') { p.dashReadyAt = tick; p.boostUntil = tick + BOOST_TICKS; malus(p, 'tired', TIRED_TICKS); }
+      else if (pk.t === 'grip') { p.gripUntil = tick + GRIP_TICKS; malus(p, 'slip', SLIP_TICKS); }
+      fx.push({ type: 'pickup', seat: p.seat, t: pk.t, x: r1(pk.x), y: r1(pk.y), lvl: p.lvl });
       if (pk.t === 'shock') {                            // onde de choc immédiate : repousse tout le monde autour, dégressif avec la distance
         for (const q of players) {
-          if (q === p || !q.alive) continue;
+          if (q === p || !q.alive || !foe(p, q)) continue;   // coéquipiers épargnés
           const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy);
           if (d >= SHOCK_R) continue;
+          q.stunUntil = tick + STUN_TICKS; fx.push({ type: 'malus', t: 'stun', seat: q.seat, by: p.seat });
           const nx = d > 1e-6 ? dx / d : 1, ny = d > 1e-6 ? dy / d : 0;
           const imp = SHOCK_IMP * (1 - 0.5 * d / SHOCK_R) / mass(q) * (grip(q) ? GRIP_HIT_MUL : 1);
           q.vx += nx * imp; q.vy += ny * imp;
@@ -284,7 +308,7 @@ export function createSumo(room) {
       const x = c + rr * Math.cos(ang), y = c + rr * Math.sin(ang);
       if (players.some(p => p.alive && Math.hypot(p.x - x, p.y - y) < radius(p) + PU_R + 20)) continue;   // pas sous les pieds de quelqu'un
       if (pickups.some(pk => Math.hypot(pk.x - x, pk.y - y) < PU_R * 4)) continue;
-      pickups.push({ x, y, t: PU_TYPES[Math.floor(Math.random() * PU_TYPES.length)] });
+      pickups.push({ x, y, t: Math.random() < ONIGIRI_P ? 'heavy' : PU_TYPES[1 + Math.floor(Math.random() * 3)] });   // l'onigiri tombe plus souvent (≈ 40 %)
       return;
     }
   }
@@ -384,8 +408,9 @@ export function createSumo(room) {
       players: players.map(p => ({
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot,
         x: r1(p.x), y: r1(p.y), vx: r1(p.vx), vy: r1(p.vy), a: r2(p.a), r: r1(radius(p)),
-        dcd: cd(p.dashReadyAt, DASH_CD), dashing: dashing(p), brace: bracing(p), bcd: cd(p.braceReadyAt, BRACE_CD),
-        heavy: heavy(p), grip: grip(p), boost: p.boostUntil > tick,
+        dcd: cd(p.dashReadyAt, p.dashCdLen || DASH_CD), dashing: dashing(p), brace: bracing(p), bcd: cd(p.braceReadyAt, BRACE_CD),
+        heavy: heavy(p), lvl: p.lvl, grip: grip(p), boost: p.boostUntil > tick,
+        tired: p.tiredUntil > tick, slip: slippy(p), stun: stunned(p),
         kills: p.kills, place: p.place, elimTick: p.elimTick, outBy: p.outBy,
       })),
     };
