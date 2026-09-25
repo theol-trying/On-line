@@ -933,6 +933,27 @@ Lot issu de la revue « propositions » (8 agents), validé par l'utilisateur : 
   avant. **Écho immédiat** côté client (`public/echo-virage.js`) : un chevron devant sa propre tête jusqu'à la
   confirmation par l'instantané (450 ms au plus), jamais pour un demi-tour refusé.
 - `npm test` : **81 vérifications** (nouveau bloc « robustesse »).
+- **Revue adversariale du lot** (5 relecteurs avec sondes réelles, 24 constats) : 20 corrigés le 24/09 — rafale de
+  pings (un seul pong par salve, au plus 1/s ; file d'écriture contrôlée à chaque envoi), plafond de 24 remplaçable
+  par UN script (→ 60), `coupure` client jamais remise à zéro, relance « plein » qui ignorait la veille, ordre
+  d'assise par rang (l'hôte reconnecté finissait spectateur), « Prêt » conservés après un changement de jeu (le
+  nouveau jeu partait non réglé), forcestart pendant une transition de tournoi, garde de 2 s étendue au joueur seul
+  (vraie fin de manche seulement, pas un abandon), spectateurs assis juste AVANT le départ (en fin de manche ils
+  héritaient de la ligne d'un partant), complet sur changement de `gs` borné à 1 / 2 s (pause en rafale ×5 le
+  débit), types vérifiés (name/chat/png/dir/opt), ⇄ de Tron appliqué à la saisie, écho retiré sur une correction ;
+  classement : effacements avant lecture conservés, écriture ratée retentée, `flush()` au SIGTERM, avatars.json à
+  côté du fichier quel que soit son nom, fusion transactionnelle, BOM toléré.
+- **Compléments (25/09)** : un siège de bot est pris par un humain hors partie (`!p.bot || editable()`, les 6 jeux —
+  `startGame` redistribue les bots) ; plafond **par provenance** de 16 (`conn.adresse` : `CF-Connecting-IP`, sinon
+  1re entrée de `X-Forwarded-For`, sinon l'adresse de la socket — une valeur falsifiée ne peut que contourner le
+  plafond, jamais bloquer quelqu'un d'autre) ; Espace en répétition automatique ne relance plus la manche (5 clients,
+  le Sumo le faisait déjà). `npm test` : **85 vérifications** (bloc « compléments » : rafale de pings, siège de bot
+  libéré, `flush()`).
+- **Contre-vérification (25/09, 1 agent sceptique avec sondes)** : 3 défauts corrigés — un arrivant prenait le siège
+  d'un bot même avec un siège vide libre, et héritait de sa ligne d'écran de fin (vainqueur compris) et de ses points
+  de match → siège vide d'abord, siège de bot remis à neuf (`repriseSiegeBot`) ; les en-têtes d'adresse n'étaient pas
+  réservés au proxy (en LAN, on pouvait bloquer l'adresse d'un autre) → crus seulement si `RENDER` ; `flush()` ne
+  retentait pas une écriture ratée au SIGTERM → 3 tentatives espacées d'1 s.
 
 ## Limites connues (assumées)
 - ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».

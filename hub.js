@@ -47,6 +47,7 @@ const RECONNECT_GRACE = 12000;                 // délai pour reprendre son siè
 const pendingLeaves = new Map();               // token -> { member, timer } : joueurs déconnectés dont le siège est gardé
 const newToken = () => crypto.randomBytes(16).toString('hex');
 const MEMBRES_MAX = 60;                        // dernier rempart mémoire : au-delà, « salle pleine ». Pas plus bas : UN script qui ouvre N sockets muettes remplirait la salle et la fermerait à tous (revue du 24/09)
+const PAR_ADRESSE = 16;                        // par provenance : une soirée sur un même Wi-Fi (10 sièges au plus + quelques spectateurs) passe largement
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 // `identities` ne servait qu'à grossir : un jeton par visiteur, jamais relâché. Sur un serveur qui
 // tourne des mois, c'est une fuite lente. On plafonne en supprimant les plus anciens (une Map itère
@@ -515,8 +516,10 @@ function onConnection(conn, token) {
     accueillir(vivant, conn);
     return;
   }
-  // 3. Salle pleine : le client est prévenu et ne réessaie que plus tard (pas de reconnexion en boucle).
-  if (members.length >= MEMBRES_MAX) {
+  // 3. Salle pleine — au total, ou pour CETTE provenance (un script qui ouvre N sockets muettes ne ferme plus la salle
+  //    aux autres) : le client est prévenu et ne réessaie que plus tard (pas de reconnexion en boucle).
+  const memeAdresse = conn.adresse ? members.filter(m => m.conn.adresse === conn.adresse).length : 0;
+  if (members.length >= MEMBRES_MAX || memeAdresse >= PAR_ADRESSE) {
     conn.send(JSON.stringify({ t: 'plein', max: MEMBRES_MAX }));
     setTimeout(() => { try { conn.socket.end(); } catch {} }, 200).unref();
     return;

@@ -1354,7 +1354,7 @@ export default (function () {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
     const playing = snap && (snap.gs === 'play' || snap.gs === 'paused');
-    if (e.key === ' ') { if (snap && snap.gs !== 'play' && snap.gs !== 'paused') { send({ t: 'start' }); return; } setIn('fire', true); return; }
+    if (e.key === ' ') { if (snap && snap.gs !== 'play' && snap.gs !== 'paused') { if (!e.repeat) send({ t: 'start' }); return; } setIn('fire', true); return; }   // Espace TENU au moment de la fin : pas un « Rejouer »
     if ((e.code === 'KeyE' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && playing) { send({ t: 'mine' }); return; }
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && playing) { send({ t: 'pause' }); return; }
     const a = KEYMAP[e.code]; if (a && !e.repeat) setIn(a, true);

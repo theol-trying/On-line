@@ -1273,7 +1273,7 @@ export default (function () {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
     const playing = snap && (snap.gs === 'play' || snap.gs === 'paused');
-    if (e.key === ' ') { if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); else send({ t: 'bomb' }); return; }
+    if (e.key === ' ') { if (snap && snap.gs !== 'play' && snap.gs !== 'paused') { if (!e.repeat) send({ t: 'start' }); } else send({ t: 'bomb' }); return; }   // Espace TENU au moment de la fin : pas un « Rejouer »
     if (e.code === 'KeyB' && playing) { send({ t: 'bomb' }); return; }
     if ((e.code === 'KeyX' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && playing) { send({ t: 'action' }); return; }
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && playing) { send({ t: 'pause' }); return; }
