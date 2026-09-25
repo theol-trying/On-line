@@ -111,7 +111,8 @@ async function jouer(id, participants, attentes = {}) {
     else if (id === 'tron' || id === 'snake') c.jeu({ t: 'dir', d: ['up', 'down', 'left', 'right'][(Math.random() * 4) | 0] });
     else if (id === 'foot') {                          // course tenue + un tir ou un tacle de temps en temps
       c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });
-      if (Math.random() < 0.15) c.jeu({ t: 'shoot' }); if (Math.random() < 0.1) c.jeu({ t: 'tackle' });
+      if (Math.random() < 0.1) c.jeu({ t: 'shoot' }); if (Math.random() < 0.1) c.jeu({ t: 'tackle' });
+      if (Math.random() < 0.15) c.jeu({ t: 'charge', on: Math.random() < 0.5 });   // tir chargé : Espace enfoncé / relâché
     }
     else if (id === 'sumo') {                          // état tenu des 4 directions + une charge de temps en temps
       c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });
