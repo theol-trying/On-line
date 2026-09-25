@@ -14,12 +14,16 @@ const COUNTDOWN_TICKS = 3 * TICK_HZ;
 // vite, sinon personne ne le rattraperait jamais
 const ACC = 0.9, VMAX = 5.4, FRICTION = 0.84, CARRY_SPD = 0.88, TURN = 0.42;
 // ballon : frottement de pelouse, rebonds amortis sur les murs et les poteaux
-const BALL_FR = 0.975, BALL_VMAX = 22, WALL_REST = 0.72, POST_REST = 0.85;
-// tir : le tireur ne reprend pas son propre tir aussitôt (GRAB_BLOCK) ; au-delà de STICK_MAX, un ballon qui touche un
-// joueur REBONDIT au lieu de se coller : sinon un défenseur planté devant sa cage arrêterait tous les tirs
-const SHOT_SPD = 17, SHOT_CD = 10, GRAB_BLOCK = 9, STICK_MAX = 11, DEFLECT_REST = 0.55;
-// tacle : glissade brève ; sur le PORTEUR, le ballon saute et il est sonné ; sur un autre, simple bousculade
-const TACKLE_IMP = 8.5, TACKLE_TICKS = 8, TACKLE_CD = 42, STUN_TICKS = 16, STEAL_SPD = 7, STEAL_BLOCK = 16, BUMP = 3.5;
+// Rééquilibrage du 25/09 (retour de test : « on ne fait que se tacler, la balle rebondit souvent dans un but ») :
+// ballon qui meurt plus vite et murs plus amortis — un ballon perdu ne fait plus le flipper jusqu'à une cage.
+const BALL_FR = 0.968, BALL_VMAX = 22, WALL_REST = 0.5, POST_REST = 0.7;
+// tir CHARGÉ : Espace maintenu, tir au relâchement — de 7 u/tick (passe) à 21 (boulet) en 0,9 s ; le porteur court à 70 %
+// pendant la charge. Le tireur ne reprend pas son propre tir aussitôt (GRAB_BLOCK). Au-delà de STICK_MAX, un ballon qui
+// touche un joueur REBONDIT au lieu de se coller : seul un tir franchement chargé passe un défenseur.
+const SHOT_MIN = 7, SHOT_MAX = 21, CHARGE_TICKS = 27, CHARGE_SPD = 0.7, SHOT_SPREAD = 0.12, SHOT_CD = 10, GRAB_BLOCK = 9, STICK_MAX = 13.5, DEFLECT_REST = 0.45;
+// tacle : glissade brève qui ASSOMME l'adversaire touché (1 s : ni course, ni ballon) SANS toucher au ballon — il reste
+// sur place, à qui le ramasse. Tacle raté (personne touché, ballon non pris) : le tacleur reste à terre 0,5 s. Recharge 2 s.
+const TACKLE_IMP = 8, TACKLE_TICKS = 8, TACKLE_CD = 60, STUN_TICKS = 30, MISS_TICKS = 15, BUMP = 1.5;
 const LIVES_CYCLE = [3, 5, 1, 2];               // réglage « vies » du game master (le premier est le défaut)
 const GOAL_FREEZE = 40;                         // ~1,3 s de célébration, puis engagement au centre
 // mort subite : après 90 s les cages s'élargissent (de 42 à 62 % du côté en 60 s) ; filet absolu à 6 min
@@ -85,7 +89,8 @@ export function createFoot(room) {
       seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false, bot: false, edge: -1,
       x: 0, y: 0, vx: 0, vy: 0, a: 0, mx: 0, my: 0, sx: 0, sy: 0,
       inp: { up: false, down: false, left: false, right: false }, wantShoot: false, wantTackle: false,
-      tackleUntil: 0, tackleReadyAt: 0, tackleDx: 0, tackleDy: 0, tkHit: null, stunUntil: 0, grabBlock: 0, shotReadyAt: 0,
+      tackleUntil: 0, tackleReadyAt: 0, tackleDx: 0, tackleDy: 0, tkHit: null, tkAny: false, stunUntil: 0, downUntil: 0, grabBlock: 0, shotReadyAt: 0,
+      chargeHeld: false, chargeStart: -1, chargeRelease: false, botShootAt: 0,
       lives: 0, goals: 0, kills: 0, place: 0, elimTick: -1, elimBy: -1, score: 0,
       botNext: 0, botTgt: -1, botAim: 0,
     }));
@@ -153,7 +158,8 @@ export function createFoot(room) {
     ball = newBall();
     for (const p of players) if (p.alive) {
       p.x = p.sx; p.y = p.sy; p.vx = 0; p.vy = 0; p.a = Math.atan2(cxy() - p.y, cxy() - p.x);
-      p.stunUntil = 0; p.tackleUntil = 0; p.grabBlock = 0; p.wantShoot = false; p.wantTackle = false;
+      p.stunUntil = 0; p.tackleUntil = 0; p.downUntil = 0; p.grabBlock = 0; p.wantShoot = false; p.wantTackle = false;
+      p.chargeStart = -1; p.chargeRelease = false; p.botShootAt = 0; if (p.bot) p.chargeHeld = false;
     }
   }
 
@@ -238,9 +244,9 @@ export function createFoot(room) {
   function turnToward(p, ta, rate) { let d = ta - p.a; d = Math.atan2(Math.sin(d), Math.cos(d)); p.a += Math.max(-rate, Math.min(rate, d)); }
   function move(p) {
     const D = FTDIFF[botDiff] || FTDIFF[1], carry = ball.owner === p.seat;
-    const acc = ACC * (p.bot ? D.spd : 1), vmax = VMAX * (carry ? CARRY_SPD : 1) * (p.bot ? D.spd : 1);
+    const acc = ACC * (p.bot ? D.spd : 1), vmax = VMAX * (carry ? CARRY_SPD * (p.chargeStart >= 0 ? CHARGE_SPD : 1) : 1) * (p.bot ? D.spd : 1);
     const sp0 = Math.hypot(p.vx, p.vy);
-    if (!stunned(p) && (p.mx || p.my)) { p.vx += p.mx * acc; p.vy += p.my * acc; turnToward(p, Math.atan2(p.my, p.mx), carry ? TURN * 0.8 : TURN); }
+    if (!stunned(p) && p.downUntil <= tick && (p.mx || p.my)) { p.vx += p.mx * acc; p.vy += p.my * acc; turnToward(p, Math.atan2(p.my, p.mx), carry ? TURN * 0.8 : TURN); }
     p.vx *= FRICTION; p.vy *= FRICTION;
     const sp = Math.hypot(p.vx, p.vy), cap = Math.max(vmax, sp0 * FRICTION);   // un tacle peut dépasser la vitesse de course
     if (sp > cap) { p.vx *= cap / sp; p.vy *= cap / sp; }
@@ -258,38 +264,47 @@ export function createFoot(room) {
     const vn = (q.vx - p.vx) * nx + (q.vy - p.vy) * ny;
     if (vn < 0) { const j = -1.3 * vn / 2; p.vx -= nx * j; p.vy -= ny * j; q.vx += nx * j; q.vy += ny * j; }
   }
+  // direction du tir : celle TENUE si on en tient une (joystick, flèches), sinon le regard ; pow ∈ [0, 1] (charge)
+  function tirer(p, pow) {
+    let dx = p.mx, dy = p.my; if (!dx && !dy) { dx = Math.cos(p.a); dy = Math.sin(p.a); }
+    const err = (Math.random() * 2 - 1) * SHOT_SPREAD * pow * pow, ce = Math.cos(err), se = Math.sin(err);   // un boulet est moins précis qu'une passe
+    const ex = dx * ce - dy * se; dy = dx * se + dy * ce; dx = ex;
+    const spd = SHOT_MIN + (SHOT_MAX - SHOT_MIN) * pow;
+    ball.owner = -1; ball.vx = dx * spd + p.vx * 0.3; ball.vy = dy * spd + p.vy * 0.3;
+    p.grabBlock = tick + GRAB_BLOCK; p.shotReadyAt = tick + SHOT_CD; p.a = Math.atan2(dy, dx); touch(p);
+    emit({ type: 'shot', seat: p.seat, x: r1(ball.x), y: r1(ball.y), f: r2(pow) });
+  }
   function actions(p) {
-    if (p.wantShoot) {
-      p.wantShoot = false;
-      if (ball.owner === p.seat && !stunned(p) && tick >= p.shotReadyAt) {
-        // direction : celle TENUE si on en tient une (joystick, flèches), sinon le regard
-        let dx = p.mx, dy = p.my; if (!dx && !dy) { dx = Math.cos(p.a); dy = Math.sin(p.a); }
-        ball.owner = -1; ball.vx = dx * SHOT_SPD + p.vx * 0.4; ball.vy = dy * SHOT_SPD + p.vy * 0.4;
-        p.grabBlock = tick + GRAB_BLOCK; p.shotReadyAt = tick + SHOT_CD; p.a = Math.atan2(dy, dx); touch(p);
-        emit({ type: 'shot', seat: p.seat, x: r1(ball.x), y: r1(ball.y) });
-      }
+    const owner = ball.owner === p.seat, libre = !stunned(p) && p.downUntil <= tick;
+    // charge : Espace peut être pressé AVANT d'avoir le ballon (reprise de volée) — elle démarre à la prise
+    if (!owner) { p.chargeStart = -1; if (p.bot) { p.botShootAt = 0; p.chargeHeld = false; } }
+    else if (p.chargeHeld && p.chargeStart < 0 && libre) p.chargeStart = tick;
+    if (p.chargeRelease) {
+      p.chargeRelease = false;
+      if (owner && p.chargeStart >= 0 && libre && tick >= p.shotReadyAt) tirer(p, Math.min(1, (tick - p.chargeStart) / CHARGE_TICKS));
+      p.chargeStart = -1;
     }
+    if (p.wantShoot) { p.wantShoot = false; if (owner && libre && tick >= p.shotReadyAt) { tirer(p, 0.55); p.chargeStart = -1; } }   // tir direct (message « shoot »)
     if (p.wantTackle) {
       p.wantTackle = false;
-      if (!stunned(p) && tick >= p.tackleReadyAt && ball.owner !== p.seat) {
+      if (libre && tick >= p.tackleReadyAt && !owner) {
         let dx = p.mx, dy = p.my; if (!dx && !dy) { dx = Math.cos(p.a); dy = Math.sin(p.a); }
         p.vx += dx * TACKLE_IMP; p.vy += dy * TACKLE_IMP; p.a = Math.atan2(dy, dx);
-        p.tackleUntil = tick + TACKLE_TICKS; p.tackleReadyAt = tick + TACKLE_CD; p.tackleDx = dx; p.tackleDy = dy; p.tkHit = {};
+        p.tackleUntil = tick + TACKLE_TICKS; p.tackleReadyAt = tick + TACKLE_CD; p.tackleDx = dx; p.tackleDy = dy; p.tkHit = {}; p.tkAny = false;
         emit({ type: 'slide', seat: p.seat, x: r1(p.x), y: r1(p.y) });
       }
     }
   }
   function tackleHits(p) {                          // pendant la glissade : le premier contact avec chaque adversaire compte
     for (const q of players) {
+      if (p.tkAny) return;                           // une seule victime par tacle
       if (q === p || !q.alive || !foe(p, q) || p.tkHit[q.seat]) continue;
       if (Math.hypot(q.x - p.x, q.y - p.y) > PR * 2 + 6) continue;
-      p.tkHit[q.seat] = 1;
+      p.tkHit[q.seat] = 1; p.tkAny = true;
       const steal = ball.owner === q.seat;
       q.vx += p.tackleDx * BUMP; q.vy += p.tackleDy * BUMP;
-      if (steal) {                                   // le ballon saute dans le sens du tacle ; le porteur est sonné
-        ball.owner = -1; ball.vx = p.tackleDx * STEAL_SPD + q.vx * 0.2; ball.vy = p.tackleDy * STEAL_SPD + q.vy * 0.2;
-        q.grabBlock = tick + STEAL_BLOCK; q.stunUntil = tick + STUN_TICKS; touch(p);
-      }
+      q.stunUntil = tick + STUN_TICKS; q.grabBlock = tick + STUN_TICKS; q.chargeStart = -1;   // assommé : ni course, ni ballon
+      if (steal) { ball.owner = -1; ball.vx = 0; ball.vy = 0; ball.last = p.seat; ball.lastTick = tick; }   // le ballon RESTE où il était
       emit({ type: 'tackle', seat: q.seat, by: p.seat, steal, x: r1((p.x + q.x) / 2), y: r1((p.y + q.y) / 2) });
     }
   }
@@ -342,10 +357,10 @@ export function createFoot(room) {
         ball.last = p.seat; ball.lastTick = tick;     // simple déviation : le crédit du but reste au tireur (kick)
         return;
       }
-      if (stunned(p) || tick < p.grabBlock) continue;
+      if (stunned(p) || p.downUntil > tick || tick < p.grabBlock) continue;
       if (d < bd) { bd = d; best = p; }
     }
-    if (best) { ball.owner = best.seat; ball.vx = 0; ball.vy = 0; touch(best); emit({ type: 'grab', seat: best.seat }); }
+    if (best) { if (tackling(best)) best.tkAny = true; ball.owner = best.seat; ball.vx = 0; ball.vy = 0; touch(best); emit({ type: 'grab', seat: best.seat }); }
   }
   function updateBall(alive) {
     if (ball.owner >= 0) {                           // conduite : le ballon devant les pieds du porteur
@@ -383,7 +398,8 @@ export function createFoot(room) {
   }
   function botThink(p) {
     const D = FTDIFF[botDiff] || FTDIFF[1];
-    if (tick < p.botNext) return;
+    const vif = ball.owner < 0 && Math.hypot(ball.vx, ball.vy) > 8 && D.keeper;   // ballon qui file : on réagit à chaque tick
+    if (tick < p.botNext && !vif) return;
     p.botNext = tick + D.every;
     const myE = geo.edges[p.edge];
     let gx = 0, gy = 0;
@@ -396,7 +412,10 @@ export function createFoot(room) {
         const d = Math.hypot(gx, gy) || 1, face = (Math.cos(p.a) * gx + Math.sin(p.a) * gy) / d;
         const press = players.some(q => q.alive && foe(p, q) && Math.hypot(q.x - p.x, q.y - p.y) < 60);
         const range = e.apo * 2 * D.shoot * 0.55;
-        if ((d < range || (press && d < range * 1.6)) && face > 0.9) p.wantShoot = true;
+        if ((d < range || (press && d < range * 1.6)) && face > 0.9 && !p.botShootAt) {
+          const pow = Math.max(0.4, Math.min(0.9, 0.3 + 0.55 * d / range));   // frappe dosée : plus fort de loin, rarement à fond
+          p.chargeHeld = true; p.botShootAt = tick + Math.max(1, Math.round(pow * CHARGE_TICKS));
+        }
       }
     } else if (ball.owner >= 0) {
       const o = players[ball.owner];
@@ -449,7 +468,12 @@ export function createFoot(room) {
       return;
     }
     const alive = players.filter(p => p.alive);
-    for (const p of alive) { if (p.bot) botThink(p); else humanDir(p); if (stunned(p)) { p.mx = 0; p.my = 0; } }
+    for (const p of alive) {
+      if (p.bot) { botThink(p); if (p.botShootAt && tick >= p.botShootAt) { p.botShootAt = 0; p.chargeHeld = false; p.chargeRelease = true; } }
+      else humanDir(p);
+      if (stunned(p) || p.downUntil > tick) { p.mx = 0; p.my = 0; }
+      if (p.tackleUntil && tick >= p.tackleUntil) { p.tackleUntil = 0; if (!p.tkAny) { p.downUntil = tick + MISS_TICKS; emit({ type: 'miss', seat: p.seat, x: r1(p.x), y: r1(p.y) }); } }   // tacle raté : à terre
+    }
     for (const p of alive) actions(p);
     for (const p of alive) move(p);
     for (let i = 0; i < alive.length; i++) for (let j = i + 1; j < alive.length; j++) collide(alive[i], alive[j]);
@@ -470,7 +494,8 @@ export function createFoot(room) {
       players: players.map(p => ({
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot, edge: p.edge,
         x: r1(p.x), y: r1(p.y), a: r2(p.a), lives: p.lives, goals: p.goals, kills: p.kills,
-        tk: tackling(p), tcd: r2(1 - Math.max(0, p.tackleReadyAt - tick) / TACKLE_CD), st: stunned(p),
+        tk: tackling(p), tcd: r2(1 - Math.max(0, p.tackleReadyAt - tick) / TACKLE_CD), st: stunned(p), dn: p.downUntil > tick,
+        ch: p.chargeStart >= 0 ? r2(Math.min(1, (tick - p.chargeStart) / CHARGE_TICKS)) : 0,
         place: p.place, elimTick: p.elimTick, elimBy: p.elimBy,
       })),
     };
@@ -512,7 +537,11 @@ export function createFoot(room) {
     const seat = seatOf(member);
     const p = seat >= 0 ? players[seat] : null;
     if (m.t === 'input' && p) p.inp = { up: !!m.up, down: !!m.down, left: !!m.left, right: !!m.right };   // état TENU, envoyé à chaque changement
-    else if (m.t === 'shoot' && p && p.alive && gameState === 'play') p.wantShoot = true;   // traité au tick suivant (ordre déterministe)
+    else if (m.t === 'charge' && p && p.alive) {     // Espace enfoncé / relâché (tir chargé) ; cancel : fenêtre quittée, pas de tir
+      if (m.on) p.chargeHeld = true;
+      else { p.chargeHeld = false; if (m.cancel) p.chargeStart = -1; else p.chargeRelease = true; }
+    }
+    else if (m.t === 'shoot' && p && p.alive && gameState === 'play') p.wantShoot = true;   // tir direct à mi-puissance (traité au tick suivant)
     else if (m.t === 'tackle' && p && p.alive && gameState === 'play') p.wantTackle = true;
     else if (m.t === 'start') startGame();
     else if (m.t === 'pause') { if (gameState === 'play') gameState = 'paused'; else if (gameState === 'paused') gameState = 'play'; }

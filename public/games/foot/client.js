@@ -115,6 +115,7 @@ export default (function () {
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       if (!p.playing) { lv.textContent = 'prêt'; return; }
       if (!p.alive) { lv.textContent = p.elimBy >= 0 && p.elimBy !== i ? '✖ éliminé par ' + nameOf(p.elimBy) : '✖ éliminé'; return; }
+      if (p.dn) { lv.textContent = vies(p.lives | 0, tot) + ' · à terre'; return; }
       const st = [vies(p.lives | 0, tot)];
       if (snap.ball && snap.ball.o === i) st.push('⚽ au pied');
       st.push(p.tk ? '👟 TACLE !' : p.tcd >= 1 ? '👟 prêt' : '👟 ' + Math.round((p.tcd || 0) * 100) + '%');
@@ -251,7 +252,8 @@ export default (function () {
   function psound(k, x, arg) { sndPan = Math.max(-1, Math.min(1, (x / AR - 0.5) * 1.7)); sound(k, arg); sndPan = 0; }
   function sound(k, arg) {
     if (!actx) return;
-    if (k === 'kick') { tone(150, 0.09, 'sine', 0.2, 0, 60); noise(0.06, 'bandpass', 900, 0.12); }                  // frappe : « poc » sourd + cuir
+    if (k === 'kick') { const f = arg == null ? 0.5 : arg; tone(110 + 90 * f, 0.08 + 0.06 * f, 'sine', 0.12 + 0.14 * f, 0, 55); noise(0.05 + 0.05 * f, 'bandpass', 700 + 700 * f, 0.08 + 0.1 * f); }   // frappe : « poc » sourd + cuir, plus sec quand c'est chargé
+    else if (k === 'miss') noise(0.2, 'lowpass', 500, 0.08);
     else if (k === 'grab') tone(210, 0.05, 'sine', 0.06, 0, 120);
     else if (k === 'slide') noise(0.28, 'bandpass', 2600, 0.07, 0, 0.8);                                          // glissade dans l'herbe
     else if (k === 'tackle') { tone(110, 0.12, 'sine', 0.14, 0, 55); noise(0.08, 'lowpass', 700, 0.1); }
@@ -278,17 +280,16 @@ export default (function () {
   function playFx(f) {
     if (!f) return;
     const now = performance.now();
-    if (f.type === 'shot') { psound('kick', f.x); grass(f.x, f.y, 5, 1.4); if (!A.reduceFx) LUM.ajouter(f.x, f.y, 44, '#fff4d0', 200, 0.4); return; }
+    if (f.type === 'shot') { const pw = +f.f || 0; psound('kick', f.x, pw); grass(f.x, f.y, 3 + Math.round(6 * pw), 1 + pw); if (!A.reduceFx) { LUM.ajouter(f.x, f.y, 30 + 40 * pw, '#fff4d0', 200, 0.25 + 0.3 * pw); if (pw > 0.8) shakeMag = Math.max(shakeMag, 2.5); } return; }
+    if (f.type === 'miss') { psound('miss', f.x); grass(f.x, f.y, 6, 1); if (f.seat === mySeat) msgPerso('👟', 'Tacle raté : à terre !', { bad: true }); return; }
     if (f.type === 'grab') { if (snap && snap.ball) psound('grab', snap.ball.x); return; }
     if (f.type === 'slide') { psound('slide', f.x); grass(f.x, f.y, 10, 1.6); return; }
     if (f.type === 'tackle') {
-      psound('tackle', f.x); grass(f.x, f.y, f.steal ? 16 : 7, 2.2);
-      if (f.steal) {
-        if (!A.reduceFx) { shakeMag = Math.max(shakeMag, f.seat === mySeat || f.by === mySeat ? 5 : 2.5); waves.push({ x: f.x, y: f.y, r0: 6, r1: 34, born: now, life: 320, col: '242,246,238', lw: 3 }); }
-        if (f.seat === mySeat) msgPerso('👟', 'Taclé ! Ballon perdu', { bad: true });
-        else if (f.by === mySeat) msgPerso('👟', 'Ballon récupéré !', { color: K.gold });
-        if (J.actif()) J.moment(now, f.by, 'a taclé ' + nameOf(f.seat) + ' et récupéré le ballon', 2);
-      }
+      psound('tackle', f.x); grass(f.x, f.y, f.steal ? 14 : 8, 2);
+      if (!A.reduceFx) { shakeMag = Math.max(shakeMag, f.seat === mySeat || f.by === mySeat ? 5 : 2); waves.push({ x: f.x, y: f.y, r0: 6, r1: 34, born: now, life: 320, col: '242,246,238', lw: 3 }); }
+      if (f.seat === mySeat) msgPerso('💫', f.steal ? 'Taclé : assommé, ballon perdu !' : 'Taclé : assommé 1 s', { bad: true });
+      else if (f.by === mySeat) msgPerso('👟', f.steal ? 'Porteur assommé : le ballon est libre !' : 'Adversaire assommé', { color: K.gold });
+      if (f.steal && J.actif()) J.moment(now, f.by, 'a assommé ' + nameOf(f.seat) + ' pour lui prendre le ballon', 2);
       return;
     }
     if (f.type === 'deflect') { psound('grab', f.x); return; }
@@ -488,11 +489,12 @@ export default (function () {
     const c = AR / 2, sx = x < c ? 1 : -1, sy = y < c ? 1 : -1;
     ctx.beginPath(); oval(ctx, x + sx * r * 0.7, y + sy * r * 0.3, r * 1.15, r * 0.7); ctx.fill();
     ctx.beginPath(); oval(ctx, x + sx * r * 0.2, y + sy * r * 0.75, r * 0.7, r * 1.1); ctx.fill();
-    if (snap.ball && snap.ball.o === p.seat) {        // porteur : anneau doré au sol
+    if (snap.ball && snap.ball.o === p.seat) {        // porteur : anneau doré au sol ; en charge, un arc qui se remplit (ambre → rouge)
       ctx.strokeStyle = 'rgba(255,210,74,0.8)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2); ctx.stroke();
+      if (p.ch > 0) { ctx.strokeStyle = rgbStr(mix([255, 194, 74], [232, 65, 58], p.ch)); ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.arc(x, y, r + 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p.ch); ctx.stroke(); ctx.lineCap = 'butt'; }
     }
     ctx.save(); ctx.translate(x, y); ctx.rotate(a);
-    const slide = p.tk;
+    const slide = p.tk || p.dn;                        // glissade, ou encore à terre après un tacle raté
     // crampons (devant = +x)
     ctx.fillStyle = '#141414';
     if (slide) { ctx.beginPath(); oval(ctx, r * 1.25, r * 0.3, r * 0.42, r * 0.22); ctx.fill(); ctx.beginPath(); oval(ctx, r * 0.2, -r * 0.55, r * 0.34, r * 0.2); ctx.fill(); }
@@ -645,7 +647,8 @@ export default (function () {
         ctx.fillStyle = v >= 1 ? col : 'rgba(242,246,238,0.65)'; ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.fillText(lab + (pret ? ' · ' + pret : ''), x + bw / 2, y - 3);
       };
-      gauge(x1, aLui ? 1 : 0, K.gold, 'TIR (Espace)', aLui ? 'BALLON AU PIED' : '');
+      if (me.ch > 0) gauge(x1, 0.999 * me.ch + 0.001, rgbStr(mix([255, 194, 74], [232, 65, 58], me.ch)), 'TIR', Math.round(me.ch * 100) + ' %' + (me.ch >= 1 ? ' · BOULET' : ''));
+      else gauge(x1, aLui ? 1 : 0, K.gold, 'TIR (maintiens Espace)', aLui ? 'BALLON AU PIED' : '');
       gauge(x2, me.tcd, K.chalk, 'TACLE (E)', me.tcd >= 1 ? 'PRÊT' : '');
     }
     if (snap && snap.gs === 'countdown') {             // tableau d'affichage : 3 · 2 · 1 · COUP D'ENVOI
@@ -685,13 +688,16 @@ export default (function () {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
     if (e.repeat) return;
-    if (e.key === ' ') { if (snap && (snap.gs === 'lobby' || snap.gs === 'over')) send({ t: 'start' }); else if (snap && snap.gs === 'play') send({ t: 'shoot' }); return; }
+    if (e.key === ' ') { if (snap && (snap.gs === 'lobby' || snap.gs === 'over')) send({ t: 'start' }); else if (snap && (snap.gs === 'play' || snap.gs === 'countdown')) charge(true); return; }
     if ((e.code === 'KeyE' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && isPlay()) { send({ t: 'tackle' }); return; }
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && isPlay()) { send({ t: 'pause' }); return; }
     const d = DIR_KEYS[e.code]; if (d) setIn(d, true);
   };
-  const onKeyUp = e => { const d = DIR_KEYS[e.code]; if (d) setIn(d, false); };
-  const onBlur = () => { let ch = false; for (const k in input) if (input[k]) { input[k] = false; ch = true; } if (ch) pushInput(); };
+  const onKeyUp = e => { if (e.key === ' ') { charge(false); return; } const d = DIR_KEYS[e.code]; if (d) setIn(d, false); };
+  const onBlur = () => { let ch = false; for (const k in input) if (input[k]) { input[k] = false; ch = true; } if (ch) pushInput(); if (chargeOn) { chargeOn = false; send({ t: 'charge', on: false, cancel: true }); } };
+  // tir chargé : Espace (ou le bouton ⚽) enfoncé = charge, relâché = tir ; la puissance est mesurée par le SERVEUR
+  let chargeOn = false;
+  function charge(on) { if (on === chargeOn) return; chargeOn = on; send({ t: 'charge', on }); }
   function hold(id, k) { const el = $(id); if (!el) return; const on = e => { e.preventDefault(); unlockAudio(); setIn(k, true); }; const off = e => { e.preventDefault(); setIn(k, false); }; el.addEventListener('pointerdown', on); el.addEventListener('pointerup', off); el.addEventListener('pointerleave', off); el.addEventListener('pointercancel', off); }
   function tap(id, t) { const el = $(id); if (!el) return; el.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t }); }); }
 
@@ -721,7 +727,8 @@ export default (function () {
     const helpBtn = $('ftHelp'), helpPanel = $('ftHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
     if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && !isPlay() && snap.gs !== 'countdown') send({ t: 'start' }); });
     if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
-    if (premiere) { hold('ftUp', 'up'); hold('ftDown', 'down'); hold('ftLeft', 'left'); hold('ftRight', 'right'); tap('ftShoot', 'shoot'); tap('ftTackle', 'tackle'); }
+    if (premiere) { hold('ftUp', 'up'); hold('ftDown', 'down'); hold('ftLeft', 'left'); hold('ftRight', 'right'); tap('ftTackle', 'tackle');
+      const sb = $('ftShoot'); if (sb) { const on = e => { e.preventDefault(); unlockAudio(); charge(true); }, off = e => { e.preventDefault(); charge(false); }; sb.addEventListener('pointerdown', on); sb.addEventListener('pointerup', off); sb.addEventListener('pointerleave', off); sb.addEventListener('pointercancel', off); } }
     applyColors();
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
@@ -733,6 +740,7 @@ export default (function () {
     destroyed = true; music.stop(); cancelAnimationFrame(rafId); J.fin(); LUM.vider();
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
     for (const k in input) input[k] = false;
+    chargeOn = false;                                     // (rien envoyé : le hub a peut-être déjà changé de jeu)
   }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };

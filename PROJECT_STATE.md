@@ -231,6 +231,22 @@ collé au personnage qui le prend en premier. Pas de bonus/malus pour le moment,
   chapeau, but éliminatoire, tacle gagnant. Joystick en mode 8 (`CARTES.foot`) + boutons ⚽ tir et 👟 tacle.
   Vitrine d'accueil : 7 cartes (7 en ligne sur PC, 4 + 3 ailleurs).
 
+### Rééquilibrage après le 1er test (25/09)
+Retour utilisateur : « on ne fait que se tacler pour dégager la balle et elle rebondit souvent dans un but ». Changements
+(les valeurs plus haut dans cette fiche sont remplacées par celles-ci) :
+- **Tacle** : il **assomme 1 s** le PREMIER adversaire touché (ni course, ni ballon) et **ne touche plus au ballon** (il
+  reste sur place, à qui le ramasse). Tacle raté (personne touché, ballon non pris) = **à terre 0,5 s** (fx `miss`,
+  `dn` dans le snapshot). Recharge **2 s** (au lieu de 1,4). Mesuré sur bots à 10 : 110 tacles par manche au lieu de 830.
+- **Tir chargé** : Espace (ou bouton ⚽) enfoncé = charge, relâché = tir (`{t:'charge', on}`, `cancel` si la fenêtre perd le
+  focus). Puissance mesurée par le SERVEUR : de 7 u/tick (passe) à 21 (boulet) en 0,9 s ; dispersion ∝ puissance²
+  (±7° à fond) ; porteur à 70 % pendant la charge ; on peut presser avant d'avoir le ballon (la charge part à la prise).
+  `ch` (0..1) dans le snapshot → arc de charge autour du porteur et jauge. `{t:'shoot'}` reste un tir direct à 0,55.
+- **Moins de flipper** : frottement du ballon 0,968 (au lieu de 0,975), rebonds des murs 0,5 (au lieu de 0,72), poteaux
+  0,7 ; cages **36 %** du côté (au lieu de 42), 58 % au plus en prolongations ; un ballon ne rebondit sur un joueur
+  qu'au-delà de 13,5 u/tick (un tir franchement chargé). Contre son camp : quasi disparus en simulation.
+- **IA** : frappe dosée selon la distance (0,4 à 0,9, rarement à fond), réflexe à chaque tick quand un ballon libre
+  file (arrêts, interceptions). Manches mesurées : ~20 s à 2, ~30 s à 3, ~70 s à 5, ~3 min à 10.
+
 ## ZQSD / WASD dans tous les jeux (25/09)
 Les 7 jeux lisent le clavier par `e.code` (position PHYSIQUE) : `KeyW`/`KeyA` sont les touches Z/Q d'un clavier
 AZERTY, donc ZQSD marchait déjà en AZERTY. `KeyZ`/`KeyQ` ajoutés partout : Z Q S D marche aussi sur un clavier réglé
