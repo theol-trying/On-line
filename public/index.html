@@ -7,7 +7,7 @@
 <title>Plateforme LAN</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Black+Ops+One&family=Dela+Gothic+One&family=Fredoka:wght@500;600;700&family=Orbitron:wght@600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Black+Ops+One&family=Dela+Gothic+One&family=Fredoka:wght@500;600;700&family=Orbitron:wght@600;800&family=Russo+One&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="game-pong">
@@ -85,7 +85,7 @@
     </div>
 
     <div class="help">
-      Déplace ta raquette avec <b>↑ ↓</b> / <b>← →</b> (ou <b>W/S</b>, <b>A/D</b>, boutons ▲▼).
+      Déplace ta raquette avec <b>↑ ↓</b> / <b>← →</b> (ou <b>Z/S</b>, <b>Q/D</b> — W/S, A/D en QWERTY —, boutons ▲▼).
       <b>Espace</b> = lancer · <b>P / Échap</b> = pause.
     </div>
 
@@ -170,7 +170,7 @@
       <button id="trLbBtn">🏆 Classement</button>
     </div>
     <div class="help">
-      Direction : <b>↑ ↓ ← →</b> / <b>W A S D</b> · <b>Maj</b> = boost (jauge) · <b>Espace</b> = lancer · <b>P / Échap</b> = pause.
+      Direction : <b>↑ ↓ ← →</b> / <b>Z Q S D</b> (W A S D) · <b>Maj</b> = boost (jauge) · <b>Espace</b> = lancer · <b>P / Échap</b> = pause.
       Bonus : » vitesse · ◌ fantôme · ✄ coupe ta traînée. L'arène se referme avec le temps !
     </div>
     <div class="gpad">
@@ -224,7 +224,7 @@
       <button id="tkLbBtn">🏆 Classement</button>
     </div>
     <div class="help">
-      Tourne <b>← →</b> (A/D), avance/recule <b>↑ ↓</b> (W/S), tire <b>Espace</b>, pose une mine <b>E / Maj</b>.
+      Tourne <b>← →</b> (Q/D), avance/recule <b>↑ ↓</b> (Z/S), tire <b>Espace</b>, pose une mine <b>E / Maj</b>.
       <b>P / Échap</b> = pause. Tirs à rebonds, murs cassables, power-ups » ⋔ ⛉ 👟 ➳ ◈ !
     </div>
     <div class="gpad">
@@ -291,7 +291,7 @@
       <button id="bmLbBtn">🏆 Classement</button>
     </div>
     <div class="help">
-      Déplace-toi <b>↑ ↓ ← →</b> / <b>W A S D</b>, bombe <b>Espace</b> (B), action <b>X / Maj</b> (lancer/détonateur).
+      Déplace-toi <b>↑ ↓ ← →</b> / <b>Z Q S D</b> (W A S D), bombe <b>Espace</b> (B), action <b>X / Maj</b> (lancer/détonateur).
       <b>P / Échap</b> = pause. Bonus 💣🔥👟🦵📡👻🧤🛡 · malus 🔀🐌⏱ · l'arène se referme (mort subite) !
     </div>
     <div class="gpad">
@@ -357,7 +357,7 @@
       <button id="snLbBtn">🏆 Classement</button>
     </div>
     <div class="help">
-      Dirige ton serpent <b>↑ ↓ ← →</b> / <b>W A S D</b> (ou le pavé tactile). <b>Espace</b> = lancer · <b>P / Échap</b> = pause.
+      Dirige ton serpent <b>↑ ↓ ← →</b> / <b>Z Q S D</b> (W A S D) (ou le pavé tactile). <b>Espace</b> = lancer · <b>P / Échap</b> = pause.
       Mange les pastilles 🍎 pour grandir ; toucher un mur ou un serpent (le tien ou un autre) = mort. Le dernier en vie gagne !
     </div>
     <div class="gpad solo">
@@ -410,7 +410,7 @@
       <button id="smLbBtn">🏆 Classement</button>
     </div>
     <div class="help">
-      Déplace ton lutteur <b>↑ ↓ ← →</b> / <b>W A S D</b> · <b>Espace</b> = charge 💨 · <b>Maj</b> ou <b>E</b> = ancrage ⚓ · <b>P / Échap</b> = pause.
+      Déplace ton lutteur <b>↑ ↓ ← →</b> / <b>Z Q S D</b> (W A S D) · <b>Espace</b> = charge 💨 · <b>Maj</b> ou <b>E</b> = ancrage ⚓ · <b>P / Échap</b> = pause.
       Pousse les autres hors du dohyō : le dernier dans le cercle gagne. Le cercle rétrécit avec le temps !
     </div>
     <div class="gpad">
@@ -444,6 +444,60 @@
         <div class="legrow"><span>👣</span><b>Pieds collés</b> — presque inamovible : tu encaisses les chocs 60 % moins fort pendant 12 s. Tes adversaires ont le <b>sol glissant</b> ❄ : ils glissent 1,5× plus loin pendant 8 s</div>
         <div class="note">Les malus n'atteignent jamais tes coéquipiers.</div>
         <div class="note">Celui qui t'a touché en dernier (dans les 3 s) est crédité de ta sortie. Une sortie provoquée par un coéquipier ne compte pour personne.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== racine du jeu FOOT ===== -->
+  <div id="foot-root" class="game-root hidden">
+    <div class="stage"><div class="canvas-wrap">
+      <canvas id="ftc" width="600" height="600"></canvas>
+      <div id="ftBanner" class="banner-mid"></div>
+      <div id="ftEnd" class="endscreen hidden"></div>
+    </div></div>
+    <div id="ftHud" class="hud"></div>
+    <div class="bar">
+      <button id="ftStart" class="primary" disabled>▶ Coup d'envoi</button>
+      <button id="ftPause" disabled>⏸ Pause</button>
+      <span class="sep"></span>
+      <button class="gm" id="ftBots">🤖 Bots : 0</button>
+      <button class="gm" id="ftDiff">🎯 IA : Normale</button>
+      <button class="gm" id="ftLives">❤ Vies : 3</button>
+      <button class="gm" id="ftMode" disabled>⚔ FFA</button>
+      <button id="ftHelp">❔ Règles</button>
+      <button id="ftLbBtn">🏆 Classement</button>
+    </div>
+    <div class="help">
+      Cours avec <b>↑ ↓ ← →</b> ou <b>Z Q S D</b> (W A S D) · <b>Espace</b> = tir ⚽ · <b>E</b> ou <b>Maj</b> = tacle 👟 · <b>P / Échap</b> = pause.
+      Défends ta cage et marque dans celles des autres : chaque but encaissé coûte une vie.
+    </div>
+    <div class="gpad">
+      <div class="dirs">
+        <button id="ftUp" class="touch" aria-label="haut">▲</button>
+        <div class="drow"><button id="ftLeft" class="touch" aria-label="gauche">◀</button><button id="ftDown" class="touch" aria-label="bas">▼</button><button id="ftRight" class="touch" aria-label="droite">▶</button></div>
+      </div>
+      <div class="acts">
+        <button id="ftShoot" class="touch fire" aria-label="tir">⚽</button>
+        <button id="ftTackle" class="touch" aria-label="tacle">👟</button>
+      </div>
+    </div>
+    <button id="ftPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
+    <div id="ftLbPanel" class="settings hidden" style="width:min(94vw,460px);">
+      <div class="shead"><h3>🏆 Classement — Foot</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody"><div id="ftLbBody"></div></div>
+    </div>
+    <div id="ftHelpPanel" class="settings hidden" style="width:min(94vw,420px);">
+      <div class="shead"><h3>Règles — Foot</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody">
+        <h4>Principe</h4>
+        <div class="legrow"><span>🥅</span><b>Une cage par joueur</b> — comme les raquettes de Pong, chacun défend un côté du terrain. Un seul ballon, au centre</div>
+        <div class="legrow"><span>❤</span><b>Vies</b> — chaque but encaissé en coûte une (3 par défaut, réglable). À zéro, tu es éliminé et ta cage se ferme : ton côté devient un mur. Le dernier joueur (ou la dernière équipe) gagne</div>
+        <div class="legrow"><span>⏳</span><b>Prolongations</b> — après 90 s, les cages s'agrandissent peu à peu : le match finit toujours</div>
+        <h4>Gestes</h4>
+        <div class="legrow"><span>⚽</span><b>Conduite</b> — le ballon <b>reste collé</b> au premier qui le touche. Le porteur court un peu moins vite</div>
+        <div class="legrow"><span>💥</span><b>Tir</b> — touche <b>Espace</b> (ou bouton ⚽), ballon au pied : il part dans la direction tenue. Un tir puissant <b>rebondit</b> sur les joueurs au lieu d'être capté</div>
+        <div class="legrow"><span>👟</span><b>Tacle</b> — touche <b>E</b> ou <b>Maj</b> (ou bouton 👟) : glissade brève. Sur le porteur, le ballon saute et il est sonné un instant. Recharge ~1,4 s</div>
+        <div class="note">Le but est crédité au dernier adversaire qui a joué le ballon. Un ballon que tu pousses toi-même dans ta cage est un contre son camp.</div>
       </div>
     </div>
   </div>

@@ -82,7 +82,7 @@ const DISP = "Orbitron, 'Segoe UI', system-ui, sans-serif";   // police d'affich
 // fond animé : fines lignes de néon qui tombent (pluie de code) — coupé par reduceFx
 const AMB_RAIN = Array.from({ length: 14 }, () => ({ x: Math.random(), v: 30 + Math.random() * 70, l: 18 + Math.random() * 40, ph: Math.random() * 1000 }));
 const INTERP_MS = 80;
-const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
+const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', KeyZ: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', KeyQ: 'left', ArrowRight: 'right', KeyD: 'right' };   // ZQSD / WASD : KeyW/KeyA = touches Z/Q en AZERTY ; KeyZ/KeyQ pour un clavier réglé en QWERTY
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function hexRgb(h) { const n = parseInt(String(h).slice(1, 7), 16) || 0; return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }

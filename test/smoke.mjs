@@ -109,6 +109,10 @@ async function jouer(id, participants, attentes = {}) {
   const boucle = setInterval(() => {
     if (id === 'pong') c.jeu({ t: 'input', up: Math.random() < 0.5, dn: Math.random() < 0.5 });
     else if (id === 'tron' || id === 'snake') c.jeu({ t: 'dir', d: ['up', 'down', 'left', 'right'][(Math.random() * 4) | 0] });
+    else if (id === 'foot') {                          // course tenue + un tir ou un tacle de temps en temps
+      c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });
+      if (Math.random() < 0.15) c.jeu({ t: 'shoot' }); if (Math.random() < 0.1) c.jeu({ t: 'tackle' });
+    }
     else if (id === 'sumo') {                          // état tenu des 4 directions + une charge de temps en temps
       c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });
       if (Math.random() < 0.15) c.jeu({ t: 'dash' });
@@ -386,6 +390,7 @@ cadences.tron = await jouer('tron', 10, { arene: { lire: s => 'grille ' + s.gw, 
 cadences.snake = await jouer('snake', 10, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 58' } });
 cadences.tank = await jouer('tank', 8, { arene: { lire: s => 'grille ' + s.ag, valeur: 'grille 19' } });
 cadences.bomb = await jouer('bomb', 8, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 17' } });
+cadences.foot = await jouer('foot', 10, { arene: { lire: s => 'arène ' + s.ar + ' · ' + (s.geo && s.geo.e ? s.geo.e.length : 0) + ' côtés', valeur: 'arène 1080 · 10 côtés' } });   // un côté (une cage) par joueur
 cadences.sumo = await jouer('sumo', 10, { arene: { lire: s => 'arène ' + s.ar, valeur: 'arène 1080' } });   // k = 1.8 → 600 × 1.8
 await arriveeEnCours();
 await protections();

@@ -24,7 +24,7 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
   mémoire** → une seule instance Render.
 - **Ajouter un jeu** = `games/<id>/server.js` + `public/games/<id>/{client.js,shared.js}`,
   puis l'enregistrer dans l'objet `GAMES` de `hub.js` — c'est le minimum pour qu'il tourne.
-  Pour une identité complète comme les 6 jeux actuels (le Sumo, ajouté le 23/09, sert de modèle) :
+  Pour une identité complète comme les 7 jeux actuels (le Sumo sert de modèle ; le Foot, ajouté le 25/09, l'a suivi) :
   racine `#<id>-root` dans `index.html` (canvas dans un `.stage`), `body.game-<id>` + onglet + fond
   plein écran dans `style.css`, `setGameSkin`/`GAME_SUB`/`GAME_TITLE`/`CELEB` dans `app.js`, `CARTES`
   dans `joystick.js`, un `jouer('<id>', …)` dans `test/smoke.mjs`, une fiche dans `PROJECT_STATE.md`.
@@ -52,7 +52,7 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
 ## Lancer et tester
 
 ```
-npm test                      # test de fumée : les 6 jeux, de vrais clients WebSocket — À LANCER AVANT CHAQUE PUSH
+npm test                      # test de fumée : les 7 jeux, de vrais clients WebSocket — À LANCER AVANT CHAQUE PUSH
 node server.js                # :3000, ou preview_start via .claude/launch.json
 HUB_TRACE=1 node server.js    # journalise chaque diffusion
 ```

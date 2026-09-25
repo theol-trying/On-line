@@ -24,6 +24,8 @@ const CARTES = {
   // Sumo : mouvement continu en 8 directions (diagonales normalisées côté serveur) — un joystick 4 voies
   // interdirait de contourner un adversaire en biais, geste de base pour le déborder vers le bord.
   sumo:  { mode: 8, haut: 'smUp', bas: 'smDown', gauche: 'smLeft', droite: 'smRight' },
+  // Foot : course continue en 8 directions, comme le Sumo (le tir part dans la direction tenue)
+  foot:  { mode: 8, haut: 'ftUp', bas: 'ftDown', gauche: 'ftLeft', droite: 'ftRight' },
 };
 
 let jeu = null, projeteur = null;                      // projeteur(dx, dy) → id | null (Pong : dépend du bord)

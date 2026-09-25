@@ -1436,7 +1436,7 @@ export default (function () {
 
   /* ---- inputs ---- */
   function keyToAction(code) {
-    if (['ArrowUp', 'ArrowLeft', 'KeyW', 'KeyA'].includes(code)) return 'up';
+    if (['ArrowUp', 'ArrowLeft', 'KeyW', 'KeyA', 'KeyZ', 'KeyQ'].includes(code)) return 'up';   // ZQSD / WASD : KeyW/KeyA = touches Z/Q en AZERTY ; KeyZ/KeyQ pour un clavier réglé en QWERTY
     if (['ArrowDown', 'ArrowRight', 'KeyS', 'KeyD'].includes(code)) return 'dn';
     return null;
   }

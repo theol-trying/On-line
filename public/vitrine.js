@@ -310,6 +310,35 @@ const SCENES = {
       lutteur(cx + off + r * 0.98, -1, '#3f7bd8');
     },
   },
+
+  foot: {
+    fixe: 0.55,
+    fond(c, w, h, st) {
+      for (let x = 0, k = 0; x < w; x += w / 8, k++) { c.fillStyle = k % 2 ? '#34994a' : '#2e8b3e'; c.fillRect(x, 0, w / 8 + 1, h); }   // bandes de tonte
+      const u = h / 10; st.u = u;
+      c.strokeStyle = 'rgba(242,246,238,.8)'; c.lineWidth = Math.max(1, u * 0.18);
+      c.strokeRect(u * 0.6, u * 0.6, w - u * 1.2, h - u * 1.2);
+      c.beginPath(); c.moveTo(w / 2, u * 0.6); c.lineTo(w / 2, h - u * 0.6); c.stroke();
+      c.beginPath(); c.arc(w / 2, h / 2, h * 0.2, 0, TAU); c.stroke();
+      c.fillStyle = 'rgba(0,0,0,.3)'; c.fillRect(0, h * 0.34, u * 0.6, h * 0.32); c.fillRect(w - u * 0.6, h * 0.34, u * 0.6, h * 0.32);   // bouches de but
+      c.strokeStyle = '#ffffff'; c.lineWidth = Math.max(1, u * 0.22); c.strokeRect(-1, h * 0.34, u * 0.6 + 1, h * 0.32); c.strokeRect(w - u * 0.6, h * 0.34, u * 0.6 + 1, h * 0.32);
+      c.fillStyle = 'rgba(255,246,216,.16)'; disque(c, w * 0.05, 0, h * 0.5); disque(c, w * 0.95, 0, h * 0.5);   // projecteurs
+    },
+    image(c, w, h, t, st) {
+      const u = st.u, per = 3.2, k = (t % per) / per, gauche = Math.floor(t / per) % 2 === 0;
+      // un joueur conduit le ballon vers la cage d'en face, frappe au milieu du cycle, le ballon file au filet
+      const x0 = w * (gauche ? 0.3 : 0.7), dir = gauche ? 1 : -1, y0 = h * 0.5 + Math.sin(t * 2.1) * h * 0.12;
+      const px = x0 + dir * w * 0.14 * Math.min(1, k * 2), py = y0;
+      let bx, by;
+      if (k < 0.5) { bx = px + dir * u * 1.4; by = py; }
+      else { const q = (k - 0.5) / 0.5, e = 1 - (1 - q) * (1 - q), gx = gauche ? w - u * 0.3 : u * 0.3; bx = px + dir * u * 1.4 + (gx - px - dir * u * 1.4) * e; by = py + (h * 0.5 - py) * e; }
+      const joueur = (x, y, col) => { c.fillStyle = 'rgba(0,0,0,.28)'; ombre(c, x + u * 0.25, y + u * 0.3, u * 0.75, u * 0.55); c.fillStyle = col; ombre(c, x, y, u * 0.55, u * 0.8); c.fillStyle = '#f0c8a0'; disque(c, x + dir * u * 0.1, y, u * 0.34); };
+      joueur(px, py, gauche ? '#4a9ee0' : '#e06240');
+      joueur(w * (gauche ? 0.9 : 0.1), h * 0.5 + Math.sin(t * 3) * h * 0.18, gauche ? '#e06240' : '#4a9ee0');   // le gardien d'en face
+      c.fillStyle = 'rgba(0,0,0,.3)'; disque(c, bx + u * 0.15, by + u * 0.2, u * 0.4);
+      c.fillStyle = '#fbfbf7'; disque(c, bx, by, u * 0.42); c.fillStyle = '#1b1b1b'; disque(c, bx + Math.cos(t * 9) * u * 0.12, by + Math.sin(t * 9) * u * 0.1, u * 0.15);
+    },
+  },
 };
 const SCENE_VIDE = { fixe: 0, fond(c, w, h) { c.fillStyle = '#12142a'; c.fillRect(0, 0, w, h); }, image() {} };
 
