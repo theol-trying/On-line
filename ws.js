@@ -135,6 +135,11 @@ export function attachWebSocket(server, onConnection) {
     );
     let token = null;
     try { token = new URL(req.url, 'http://x').searchParams.get('t'); } catch {}
-    onConnection(makeConn(socket), token);
+    const conn = makeConn(socket);
+    // Adresse du visiteur (plafond par provenance, cf. hub.js). En ligne, Render passe par Cloudflare : CF-Connecting-IP
+    // porte l'adresse réelle ; à défaut, la PREMIÈRE entrée de X-Forwarded-For. En LAN : l'adresse de la socket.
+    const derriereProxy = !!process.env.RENDER;          // en LAN, personne ne réécrit ces en-têtes : on ne les croit pas
+    conn.adresse = String((derriereProxy && (req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0])) || socket.remoteAddress || '').trim().slice(0, 64);
+    onConnection(conn, token);
   });
 }

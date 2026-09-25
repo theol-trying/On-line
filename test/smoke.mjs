@@ -14,7 +14,7 @@
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import net from 'net';
 
@@ -303,6 +303,74 @@ async function robustesse() {
   b2.ws.close(); await wait(300);
 }
 
+/* ---------- compléments du 25/09 : rafale de pings, sièges de bots, sauvegarde à l'arrêt ---------- */
+// Socket WebSocket écrite à la main : l'API WebSocket ne sait pas envoyer de trames ping.
+function socketBrute() {
+  return new Promise(r => {
+    const s = net.connect(PORT, '127.0.0.1', () => s.write(`GET / HTTP/1.1\r\nHost: localhost:${PORT}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+      'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n'));
+    const o = { s, pongs: 0, ouvert: false };
+    let buf = Buffer.alloc(0);
+    s.on('data', d => {
+      buf = Buffer.concat([buf, d]);
+      if (!o.ouvert) { const i = buf.indexOf('\r\n\r\n'); if (i < 0) return; o.ouvert = true; buf = buf.subarray(i + 4); r(o); }
+      for (;;) {                                           // trames serveur (non masquées)
+        if (buf.length < 2) break;
+        let len = buf[1] & 0x7f, off = 2;
+        if (len === 126) { if (buf.length < 4) break; len = buf.readUInt16BE(2); off = 4; }
+        else if (len === 127) { if (buf.length < 10) break; len = Number(buf.readBigUInt64BE(2)); off = 10; }
+        if (buf.length < off + len) break;
+        if ((buf[0] & 0x0f) === 0xA) o.pongs++;
+        buf = buf.subarray(off + len);
+      }
+    });
+    s.on('error', () => r(o));
+  });
+}
+async function complements() {
+  console.log('\n▶ compléments : rafale de pings, sièges de bots, sauvegarde à l\'arrêt');
+  // 1. 50 000 pings d'un coup : un seul pong (au plus un par seconde), et la boucle ne gèle pas pour les autres
+  const temoin = client('Temoin'); await temoin.ouvert; await wait(300);
+  const brute = await socketBrute();
+  brute.s.write(Buffer.alloc(100000, Buffer.from([0x89, 0x00])));
+  await wait(150);
+  const t0 = Date.now(); temoin.pngTs = undefined; temoin.envoie({ t: 'png', ts: 7 });
+  await attendre(() => temoin.pngTs === 7, 2000);
+  const rtt = Date.now() - t0;
+  await wait(600);
+  ok('une rafale de pings ne reçoit qu\'un pong', brute.pongs <= 2, brute.pongs + ' pongs');
+  ok('la boucle ne gèle pas pendant la rafale', temoin.pngTs === 7 && rtt < 400, 'écho du ping en ' + rtt + ' ms');
+  brute.s.destroy(); temoin.ws.close(); await wait(300);
+
+  // 2. Bots retirés hors partie : le spectateur prend un de leurs sièges (avant : il restait dehors jusqu'à la manche suivante)
+  const h = client('HoteT'); await h.ouvert; await wait(300);
+  h.envoie({ t: 'pick', id: 'tank' }); await wait(400);
+  for (let i = 0; i < 7; i++) { h.jeu({ t: 'bots' }); await wait(40); }   // 1 humain + 7 bots = les 8 sièges
+  await wait(200);
+  h.jeu({ t: 'start' }); await attendre(() => h.dernier && h.dernier.gs === 'countdown', 2000);
+  const sp = client('Specta'); await sp.ouvert; await wait(500);
+  const roleSp = () => { const p = h.room && h.room.players.find(x => x.id === sp.moi); return p ? p.role : '?'; };
+  const avant = roleSp();
+  h.jeu({ t: 'abort' }); await wait(400);
+  h.jeu({ t: 'bots' }); await wait(500);                                  // 7 → 0 bot
+  ok('un bot retiré hors partie libère son siège pour le spectateur', avant === 'spectator' && roleSp() === 'player',
+    'rôle ' + avant + ' → ' + roleSp());
+  h.ws.close(); sp.ws.close(); await wait(400);
+
+  // 3. flush() : les écritures regroupées partent tout de suite (SIGTERM d'un redéploiement Render). Module importé
+  //    ICI, avec un environnement sans Upstash : il ne peut écrire que dans le dossier temporaire.
+  for (const k of ['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'LEADERBOARD_KEY', 'AVATAR_KEY']) delete process.env[k];
+  const L = await import(new URL('../leaderboard.js', import.meta.url).href);
+  const f = join(TMP, 'flush', 'leaderboard.json');
+  (await import('fs')).mkdirSync(join(TMP, 'flush'), { recursive: true });
+  L.initLeaderboard(f); await wait(300);                                  // fichier absent : lecture « réussie », écriture permise
+  L.board('pong').Flush = { name: 'Flush', games: 3 }; L.save();          // regroupée : partirait dans ~1 s
+  await L.flush();
+  let lu = null; try { lu = JSON.parse(readFileSync(f, 'utf8')); } catch {}
+  ok('à l\'arrêt, la sauvegarde en attente part immédiatement', !!(lu && lu.pong && lu.pong.board.Flush && lu.pong.board.Flush.games === 3),
+    lu ? JSON.stringify(lu).slice(0, 80) : 'fichier absent');
+}
+
 /* ---------- déroulé ---------- */
 console.log(`Test de fumée — serveur sur le port ${PORT}\n`);
 if (!await demarrerServeur()) {
@@ -322,6 +390,7 @@ cadences.sumo = await jouer('sumo', 10, { arene: { lire: s => 'arène ' + s.ar, 
 await arriveeEnCours();
 await protections();
 await robustesse();
+await complements();
 
 console.log('\n▶ état final du serveur');
 ok('le serveur a survécu à tous les jeux', serveurVivant(), srvSorti !== null ? 'sorti avec le code ' + srvSorti : '');

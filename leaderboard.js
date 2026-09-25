@@ -102,10 +102,15 @@ function ecrivain(nom, cle, chemin, delai, pret, donnees) {
     planifier,
     reprendre() { if (retenu) { retenu = false; planifier(); } },
     async vider() {
-      const attente = !!t || encore || retenu;
-      if (t) { clearTimeout(t); t = null; }
-      if (enVol) await enVol;
-      if (attente && pret()) { encore = false; retenu = false; await ecrire(); }
+      for (let essai = 0; essai < 3; essai++) {
+        if (enVol) await enVol;                          // l'écriture en cours d'abord (elle peut échouer : on le voit ensuite)
+        if (!(t || encore || retenu) || !pret()) return;
+        if (t) { clearTimeout(t); t = null; }
+        encore = false; retenu = false;
+        await ecrire();
+        if (!t) return;                                  // réussie (un échec reprogramme t)
+        await new Promise(r => setTimeout(r, 1000));
+      }
     },
   };
 }

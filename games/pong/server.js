@@ -614,15 +614,22 @@ export function createPong(room) {
   }
 
   /* ---- interface du module de jeu (appelée par le hub) ---- */
+  // Siège d'un bot pris par un humain entre deux manches : on efface ce que le BOT y avait gagné (ligne de l'écran de
+  // fin, victoire, points de match), sinon l'arrivant apparaissait vainqueur d'une manche qu'il n'a pas jouée.
+  function repriseSiegeBot(p) {
+    p.playing = false; p.alive = false; p.place = 0; p.kills = 0;
+    if ('score' in p) p.score = 0; if ('matchKills' in p) p.matchKills = 0;
+  }
   function onJoin(member) {
     const cur = seatOf(member); if (cur >= 0) return { role: 'player', seat: cur, hello: { t: 'welcome', seat: cur, maxLives: cfg.lives } }; // déjà assis (reconnexion within grace) : idempotent
     let seat = -1;
     const rid = seatByMid[member.id];
     if (rid != null && players[rid] && !players[rid].member && !players[rid].bot) seat = rid; // reprise du siège
-    if (seat < 0) { const free = players.find(p => !p.member && !p.bot); if (free) seat = free.seat; }
+    if (seat < 0) { const free = players.find(p => !p.member && !p.bot) || (editable() ? players.find(p => !p.member) : null); if (free) seat = free.seat; }
     if (seat < 0) return { role: 'spectator', hello: { t: 'welcome', seat: -1, maxLives: cfg.lives } }; // plus de place => spectateur
     const p = players[seat];
-    p.member = member; p.mid = member.id; p.name = member.name || '';
+    if (p.bot) repriseSiegeBot(p);   /* hors partie, un siège de bot se libère (startGame redistribue les bots) : remis à neuf */
+    p.member = member; p.bot = false; p.mid = member.id; p.name = member.name || '';
     seatByMid[member.id] = seat;
     if (editable()) lobbyConfigure();
     return { role: 'player', seat, hello: { t: 'welcome', seat, maxLives: cfg.lives } };

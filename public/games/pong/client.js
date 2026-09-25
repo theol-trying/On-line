@@ -1472,7 +1472,7 @@ export default (function () {
   const onKeyDown = e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
-    if (e.key === ' ' && snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' });
+    if (e.key === ' ' && !e.repeat && snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' });
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) send({ t: 'pause' });
     if (!e.repeat) setKey(e.code, true);
   };
