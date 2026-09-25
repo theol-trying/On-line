@@ -960,6 +960,14 @@ body.game-sumo .pc.me{ box-shadow:0 0 0 1.5px currentColor inset,0 0 22px -6px c
 body.game-foot .pc{ background:linear-gradient(180deg,rgba(10,22,16,.94),rgba(5,12,8,.94)); border-color:rgba(242,246,238,.16);
   border-top:3px solid #ffc24a; box-shadow:0 2px 0 rgba(0,0,0,.42); }
 body.game-foot .pc.me{ box-shadow:0 0 0 1.5px currentColor inset,0 0 22px -6px currentColor,0 2px 0 rgba(0,0,0,.42); }
+/* Foot : panneau Terrain & bonus (grille de 3, pas de gap flex : vieux iOS) et troisième bouton tactile (sprint) */
+.ftTer{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); grid-gap:6px; margin:4px 0 6px; }
+.ftTer .ftTerB{ padding:7px 4px; font-size:12.5px; }
+.ftTer .ftTerB.on{ background:var(--ok); color:#1a1405; border-color:transparent; }
+body.not-gm #ftOptPanel .switch.gm{ opacity:.4; -webkit-filter:grayscale(.65); filter:grayscale(.65); cursor:not-allowed; }   /* réservé au game master */
+#foot-root .ftDuo{ display:-webkit-box; display:-ms-flexbox; display:flex; }
+#foot-root .ftDuo .touch{ margin:0 4px; }
+@media (max-width:600px){ body:not(.pad-croix) #foot-root .gpad .acts .ftDuo .touch{ width:62px; height:62px; } #foot-root .gpad .acts .ftDuo .touch{ width:56px; height:56px; } }
 
 /* ---- F. Finitions ---- */
 ::selection{ background:var(--accent); color:#0a0d18; }

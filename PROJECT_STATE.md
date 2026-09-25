@@ -263,6 +263,31 @@ Retour utilisateur : « en mode équipe il faut qu'il y ait autant de buts que d
 - Simulation de tous les modes (2 à 10 joueurs) : cages = équipes, terrain du lobby identique, sorties groupées par
   équipe, manches finies (11 à 70 s entre bots).
 
+### Plein cadre, sprint, orientation, 5 terrains, 3 bonus / 3 malus (25/09)
+Retour utilisateur : zone de jeu trop réduite, terrain à agrandir à peu de joueurs, sprint sur Maj, orientation
+peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
+- **Plein cadre** : `buildGeo` ajuste le rayon pour que la boîte englobante du polygone (+ `MARGE` = 34, filets et
+  panneaux) remplisse l'arène, et recentre le polygone sur SA boîte (`geo.cx/cy/R`, `geo.c` dans le snapshot ; un
+  triangle n'est plus centré sur le milieu du cadre). Le carré occupe ~90 % du cadre (62 % avant).
+- **Terrain plus grand à peu de joueurs** : `AR0 = 720` (600 avant) et +7 % par joueur (10 % avant) → joueurs
+  relativement plus petits à 2 ; à 10, l'arène reste proche d'avant (1123).
+- **Sprint** (Maj, `{t:'sprint', on}`, bouton 🏃) : ×1,4 vitesse, ×1,2 accélération ; endurance vidée en 1,6 s,
+  rechargée en 3 s après 0,4 s ; à vide « essoufflé » jusqu'à 30 %. Pas en chargeant un tir, sonné, à terre ou
+  englué. Bots : sprint pour presser, courir au ballon, se replacer. Le **tacle n'est plus que sur E**.
+- **Orientation** : chevron au sol devant chaque joueur (grand et ambre pour soi), nez sur la tête ; ballon au pied,
+  **ligne de visée** pointillée (direction tenue, sinon le regard ; s'allonge avec la charge, respecte l'inversion).
+- **5 terrains** (`{t:'terrain', v}` + « hasard », GM_ONLY ; `ter` = indice en vigueur dans le snapshot) :
+  stade (classique) · boue (4-6 flaques ×0,55, ballon freiné, murs 0,35, pluie) · glace (adhérence ×0,5, frottement
+  0,955, ballon 0,988, bandes 0,85) · flipper (un bumper face à chaque sommet, relance à 15 u/tick, repousse les
+  joueurs, murs 0,92, décor néon) · tempête (vent qui tourne toutes les 8 s, annoncé 2 s avant, pousse le ballon
+  0,14/tick² et les joueurs, bancs de sable ×0,72, girouette). Zones `zn`, bumpers `bmp`, vent `wind`/`wn`.
+- **3 bonus / 3 malus** (`{t:'item', k, on}`, GM_ONLY, tous actifs par défaut ; un objet toutes les 6 s, 2 au plus,
+  `pk`) : turbo (sprint illimité, +15 %, 8 s) · canon (2 tirs à pleine puissance, sans dispersion, ×1,2) · mur (sa
+  cage ×0,5, 10 s) — malus pour tous les adversaires : cage géante (×1,6, 8 s) · glu (×0,6, sans sprint, 5 s) ·
+  inversion (4 s, bots compris). Largeur de cage par équipe (`cageK`) en 7e valeur des arêtes de `geo`.
+- Panneau « 🏟 Terrain & bonus » (`#ftOptPanel`, synchronisé sur `snap.opt`). `npm test` : 97 vérifications (bloc
+  « Foot : les 5 terrains »). Simulation : tous les terrains finissent (15 s à 2, ~1 min à 4, ~2,5 min à 8).
+
 ## ZQSD / WASD dans tous les jeux (25/09)
 Les 7 jeux lisent le clavier par `e.code` (position PHYSIQUE) : `KeyW`/`KeyA` sont les touches Z/Q d'un clavier
 AZERTY, donc ZQSD marchait déjà en AZERTY. `KeyZ`/`KeyQ` ajoutés partout : Z Q S D marche aussi sur un clavier réglé
