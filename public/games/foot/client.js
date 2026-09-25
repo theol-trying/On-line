@@ -58,7 +58,7 @@ export default (function () {
   let AR = AR0, G = null, geoKey = '';                  // géométrie courante (reconstruite quand le serveur change le terrain)
   const puffs = [], waves = [], sparks = [], confs = [], texts = [];
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0;
-  let ballSpin = 0, ballPrev = null, trail = [], netHit = {}, lastBallO = -1;
+  let ballSpin = 0, ballPrev = null, trail = [], netHit = {}, lastKill = 0;
   const LUM = creerLumieres(24), J = creerJournal({ pas: 500 });
   let duskV = 0, sdT0 = 0, jRound = -1, jLast = -1e9, serie = {};
   const music = createMusic(() => actx, () => A, MUSIC_THEME);
@@ -69,6 +69,9 @@ export default (function () {
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team % TEAMCC.length] : CC[s % CC.length]; };
   const nameOf = s => { const p = snap && snap.players[s]; return p ? (p.name || ('P' + (s + 1))) : '?'; };
+  // une cage appartient à une ÉQUIPE (en chacun pour soi : une équipe d'un joueur) ; s = siège représentant de la cage
+  const cageNom = s => { const p = snap && snap.players[s]; return teamMode && p ? 'Équipe ' + (TEAM_LETTER[p.team] || '?') : nameOf(s); };
+  const maCage = f => { const me = snap && mySeat >= 0 ? snap.players[mySeat] : null, v = snap && snap.players[f.seat]; if (!me || !me.playing) return false; return f.team != null ? me.team === f.team : !!(v && v.team === me.team); };
   function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; decorKey = ''; if (A.reduceFx) LUM.vider(); }
 
   function resizeCanvas() {
@@ -135,7 +138,7 @@ export default (function () {
     endEl.classList.remove('hidden');
     const parts = m.players.filter(p => p.playing && p.place > 0).slice().sort((a, b) => a.place - b.place || (b.goals | 0) - (a.goals | 0));
     const champ = m.winner >= 0 ? parts.find(p => p.team === m.winner) : null;
-    const who = champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[m.winner] : esc(champ.name || ('P' + (champ.seat + 1)))) : null;
+    const who = champ ? (teamMode ? 'Équipe ' + (TEAM_LETTER[m.winner] || '?') : esc(champ.name || ('P' + (champ.seat + 1)))) : null;
     const title = champ ? who + ' remporte le match !' : 'Match nul — tout le monde aux tirs au but';
     const medals = ['🥇', '🥈', '🥉'];
     let mvp = null; parts.forEach(p => { if ((p.goals | 0) > 0 && (!mvp || p.goals > mvp.goals || (p.goals === mvp.goals && p.place < mvp.place))) mvp = p; });
@@ -157,7 +160,8 @@ export default (function () {
   function onLb(d) { board = (d && d.board) || []; renderLB(); }
   function onState(m) {
     if (m.ar && m.ar !== AR) { AR = m.ar; decorKey = ''; geoKey = ''; }
-    snap = m; teamMode = !!(m.mode && m.mode !== 'ffa');
+    snap = m;
+    teamMode = m.gs === 'lobby' ? !!(m.mode && m.mode !== 'ffa') : (m.nteams > 0 && m.nteams < m.players.filter(p => p.playing).length);
     syncGeo(m);
     const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
@@ -176,7 +180,7 @@ export default (function () {
     prevSd = !!m.sd;
     prevGs = m.gs;
     { let inten = 0;
-      if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length; if (m.sd || (tot >= 3 && alive <= 2)) inten = 2; }
+      if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const camps = {}; let nc = 0; m.players.forEach(p => { if (p.playing && p.alive && !camps[p.team]) { camps[p.team] = 1; nc++; } }); if (m.sd || ((m.nteams || 0) >= 3 && nc <= 2)) inten = 2; }
       music.setIntensity(inten); }
     refreshHUD();
     if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } }
@@ -208,11 +212,11 @@ export default (function () {
   }
   function momentBut(f, now) {
     if (!J.actif() || !snap) return;
-    const victim = nameOf(f.seat);
-    if (f.own || f.by < 0) { J.moment(now, f.seat, f.own ? 'contre son camp' : 'a encaissé un but', 1); return; }
+    const victim = cageNom(f.seat);
+    if (f.own || f.by < 0) { J.moment(now, f.own && f.k >= 0 ? f.k : f.seat, f.own ? 'contre son camp' : 'a encaissé un but', 1); return; }
     const s = serie[f.by] = (serie[f.by] || 0) + 1;
     if (s === 3) J.moment(now, f.by, 'coup du chapeau (3e but, sur ' + victim + ')', 9);
-    else if (f.lives === 0) J.moment(now, f.by, 'a éliminé ' + victim + ' d\'un but', 6);
+    else if (f.lives === 0) J.moment(now, f.by, 'a éliminé ' + victim + ' d\'un but', teamMode ? 7 : 6);
     else J.moment(now, f.by, 'a marqué contre ' + victim, 3 + Math.min(3, s));
   }
   function finJournal(m) {
@@ -299,17 +303,18 @@ export default (function () {
       psound('goal', f.x);
       netHit[f.seat] = { t: now, x: f.x, y: f.y };
       const col = f.by >= 0 ? colSeat(f.by) : K.chalk;
-      if (f.own) banner('CONTRE SON CAMP', K.red, nameOf(f.seat));
-      else banner('BUT !', col, f.by >= 0 ? nameOf(f.by) + ' ➜ ' + nameOf(f.seat) : '');
-      if (f.seat === mySeat) msgPerso('🥅', f.lives > 0 ? 'But encaissé — ' + f.lives + ' vie' + (f.lives > 1 ? 's' : '') + ' restante' + (f.lives > 1 ? 's' : '') : 'Dernier but encaissé : éliminé !', { bad: true });
-      else if (f.by === mySeat) msgPerso('⚽', 'BUT ! Contre ' + nameOf(f.seat), { color: K.gold });
+      if (f.own) banner('CONTRE SON CAMP', K.red, cageNom(f.seat));
+      else banner('BUT !', col, f.by >= 0 ? nameOf(f.by) + ' ➜ ' + cageNom(f.seat) : '');
+      const eq = teamMode ? ' pour l\'équipe' : '';
+      if (maCage(f)) msgPerso('🥅', f.lives > 0 ? 'But encaissé — ' + f.lives + ' vie' + (f.lives > 1 ? 's' : '') + ' restante' + (f.lives > 1 ? 's' : '') + eq : (teamMode ? 'Dernier but encaissé : équipe éliminée !' : 'Dernier but encaissé : éliminé !'), { bad: true });
+      else if (f.by >= 0 && f.by === mySeat) msgPerso('⚽', 'BUT ! Contre ' + cageNom(f.seat), { color: K.gold });
       momentBut(f, now);
       if (A.reduceFx) return;
       shakeMag = Math.max(shakeMag, 9); confetti(f.x, f.y, col, 70);
       LUM.ajouter(f.x, f.y, 180, col, 900, 0.55); LUM.ajouter(f.x, f.y, 60, '#ffffff', 400, 0.6);
       return;
     }
-    if (f.type === 'out') { music.sting('kill'); if (f.seat === mySeat) msgPerso('✖', 'Ta cage est fermée : éliminé', { bad: true }); return; }
+    if (f.type === 'out') { if (now - lastKill > 150) { lastKill = now; music.sting('kill'); } if (f.seat === mySeat) msgPerso('✖', 'Ta cage est fermée : éliminé', { bad: true }); return; }
     if (f.type === 'whistle') { whistle(f.k === 'end' ? 3 : f.k === 'kick' ? 1 : 2, f.k === 'end' || f.k === 'go'); return; }
   }
 
@@ -612,7 +617,7 @@ export default (function () {
         if (e.owner < 0 || !snap.players[e.owner] || !snap.players[e.owner].playing) return;
         const x = e.mx + e.nx * 26, y = e.my + e.ny * 26;
         ctx.save(); ctx.font = 'bold 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-        const nm = nameOf(e.owner).slice(0, 12); ctx.strokeText(nm, x, y); ctx.fillStyle = colSeat(e.owner); ctx.fillText(nm, x, y); ctx.restore();
+        const nm = cageNom(e.owner).slice(0, 12); ctx.strokeText(nm, x, y); ctx.fillStyle = colSeat(e.owner); ctx.fillText(nm, x, y); ctx.restore();
       });
     }
     // particules : herbe, confettis, ondes, étincelles de poteau
