@@ -113,6 +113,7 @@ async function jouer(id, participants, attentes = {}) {
       c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });
       if (Math.random() < 0.1) c.jeu({ t: 'shoot' }); if (Math.random() < 0.1) c.jeu({ t: 'tackle' });
       if (Math.random() < 0.15) c.jeu({ t: 'charge', on: Math.random() < 0.5 });   // tir chargé : Espace enfoncé / relâché
+      if (Math.random() < 0.15) c.jeu({ t: 'sprint', on: Math.random() < 0.6 });   // sprint : Maj tenue / relâchée
     }
     else if (id === 'sumo') {                          // état tenu des 4 directions + une charge de temps en temps
       c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });
@@ -376,6 +377,24 @@ async function complements() {
     lu ? JSON.stringify(lu).slice(0, 80) : 'fichier absent');
 }
 
+/* ---------- Foot : les 5 terrains (effets, zones, bumpers, vent, objets) ---------- */
+async function terrainsFoot() {
+  console.log('\n▶ Foot : les 5 terrains');
+  const c = client('Terrains'); await c.ouvert; await wait(300);
+  c.envoie({ t: 'pick', id: 'foot' }); await wait(400);
+  for (let i = 0; i < 5; i++) { c.jeu({ t: 'bots' }); await wait(40); }
+  const noms = ['stade', 'boue', 'glace', 'flipper', 'tempete'];
+  for (let i = 0; i < noms.length; i++) {
+    c.jeu({ t: 'terrain', v: noms[i] }); await wait(200);
+    c.etats.clear(); c.jeu({ t: 'start' }); await wait(5200);
+    const s = c.dernier || {};
+    ok('terrain « ' + noms[i] + ' » joué sans panne', serveurVivant() && c.etats.has('play') && s.ter === i && c.erreurs.length === 0,
+      'ter ' + s.ter + ', états ' + [...c.etats].join(','));
+    c.jeu({ t: 'abort' }); await wait(300);
+  }
+  c.ws.close(); await wait(300);
+}
+
 /* ---------- déroulé ---------- */
 console.log(`Test de fumée — serveur sur le port ${PORT}\n`);
 if (!await demarrerServeur()) {
@@ -391,12 +410,13 @@ cadences.tron = await jouer('tron', 10, { arene: { lire: s => 'grille ' + s.gw, 
 cadences.snake = await jouer('snake', 10, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 58' } });
 cadences.tank = await jouer('tank', 8, { arene: { lire: s => 'grille ' + s.ag, valeur: 'grille 19' } });
 cadences.bomb = await jouer('bomb', 8, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 17' } });
-cadences.foot = await jouer('foot', 10, { arene: { lire: s => 'arène ' + s.ar + ' · ' + (s.geo && s.geo.e ? s.geo.e.length : 0) + ' côtés', valeur: 'arène 1080 · 10 côtés' } });   // un côté (une cage) par joueur
+cadences.foot = await jouer('foot', 10, { arene: { lire: s => 'arène ' + s.ar + ' · ' + (s.geo && s.geo.e ? s.geo.e.length : 0) + ' côtés', valeur: 'arène 1123 · 10 côtés' } });   // un côté (une cage) par joueur
 cadences.sumo = await jouer('sumo', 10, { arene: { lire: s => 'arène ' + s.ar, valeur: 'arène 1080' } });   // k = 1.8 → 600 × 1.8
 await arriveeEnCours();
 await protections();
 await robustesse();
 await complements();
+await terrainsFoot();
 
 console.log('\n▶ état final du serveur');
 ok('le serveur a survécu à tous les jeux', serveurVivant(), srvSorti !== null ? 'sorti avec le code ' + srvSorti : '');

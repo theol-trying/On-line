@@ -464,11 +464,12 @@
       <button class="gm" id="ftDiff">🎯 IA : Normale</button>
       <button class="gm" id="ftLives">❤ Vies : 3</button>
       <button class="gm" id="ftMode" disabled>⚔ FFA</button>
+      <button id="ftOpt">🏟 Stade · 🎁 6/6</button>
       <button id="ftHelp">❔ Règles</button>
       <button id="ftLbBtn">🏆 Classement</button>
     </div>
     <div class="help">
-      Cours avec <b>↑ ↓ ← →</b> ou <b>Z Q S D</b> (W A S D) · <b>Espace</b> maintenu = tir chargé ⚽ · <b>E</b> ou <b>Maj</b> = tacle 👟 · <b>P / Échap</b> = pause.
+      Cours avec <b>↑ ↓ ← →</b> ou <b>Z Q S D</b> (W A S D) · <b>Maj</b> = sprint 🏃 · <b>Espace</b> maintenu = tir chargé ⚽ · <b>E</b> = tacle 👟 · <b>P / Échap</b> = pause.
       Défends ta cage et marque dans celles des autres : chaque but encaissé coûte une vie.
     </div>
     <div class="gpad">
@@ -478,13 +479,17 @@
       </div>
       <div class="acts">
         <button id="ftShoot" class="touch fire" aria-label="tir">⚽</button>
-        <button id="ftTackle" class="touch" aria-label="tacle">👟</button>
+        <div class="ftDuo"><button id="ftSprint" class="touch" aria-label="sprint">🏃</button><button id="ftTackle" class="touch" aria-label="tacle">👟</button></div>
       </div>
     </div>
     <button id="ftPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
     <div id="ftLbPanel" class="settings hidden" style="width:min(94vw,460px);">
       <div class="shead"><h3>🏆 Classement — Foot</h3><button class="sclose" aria-label="fermer">✕</button></div>
       <div class="sbody"><div id="ftLbBody"></div></div>
+    </div>
+    <div id="ftOptPanel" class="settings hidden" style="width:min(94vw,440px);">
+      <div class="shead"><h3>Terrain &amp; bonus — Foot</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody" id="ftOptBody"></div>
     </div>
     <div id="ftHelpPanel" class="settings hidden" style="width:min(94vw,420px);">
       <div class="shead"><h3>Règles — Foot</h3><button class="sclose" aria-label="fermer">✕</button></div>
@@ -496,7 +501,22 @@
         <h4>Gestes</h4>
         <div class="legrow"><span>⚽</span><b>Conduite</b> — le ballon <b>reste collé</b> au premier qui le touche. Le porteur court un peu moins vite</div>
         <div class="legrow"><span>💥</span><b>Tir chargé</b> — <b>maintiens Espace</b> (ou le bouton ⚽) et relâche pour frapper, dans la direction tenue : une pression brève = une passe, ~1 s = un boulet. Plus c'est chargé, moins c'est précis, et tu cours moins vite pendant la charge. Un tir fort <b>rebondit</b> sur les joueurs au lieu d'être capté</div>
-        <div class="legrow"><span>👟</span><b>Tacle</b> — touche <b>E</b> ou <b>Maj</b> (ou bouton 👟) : glissade qui <b>assomme 1 s</b> le premier adversaire touché. Le ballon, lui, <b>ne bouge pas</b> : il reste à qui le ramasse. Tacle raté = <b>à terre</b> un instant. Recharge 2 s</div>
+        <div class="legrow"><span>👟</span><b>Tacle</b> — touche <b>E</b> (ou bouton 👟) : glissade qui <b>assomme 1 s</b> le premier adversaire touché. Le ballon, lui, <b>ne bouge pas</b> : il reste à qui le ramasse. Tacle raté = <b>à terre</b> un instant. Recharge 2 s</div>
+        <div class="legrow"><span>🏃</span><b>Sprint</b> — <b>Maj</b> maintenue (ou bouton 🏃) : +40 % de vitesse tant que la barre d'endurance tient (1,6 s). Elle se recharge en 3 s ; vidée, tu es essoufflé jusqu'à 30 %. Pas de sprint en chargeant un tir</div>
+        <div class="legrow"><span>➤</span><b>Orientation</b> — le chevron devant ton joueur (ambre) montre où il regarde ; ballon au pied, la ligne pointillée montre où partira le tir</div>
+        <h4>Terrains (menu 🏟, game master)</h4>
+        <div class="legrow"><span>🏟</span><b>Stade</b> — pelouse classique</div>
+        <div class="legrow"><span>🌧</span><b>Boue</b> — sous la pluie : des flaques où l'on s'enlise et où le ballon meurt ; murs amortis</div>
+        <div class="legrow"><span>⛸</span><b>Patinoire</b> — on glisse, le ballon file, les bandes rebondissent fort</div>
+        <div class="legrow"><span>🕹</span><b>Flipper</b> — des bumpers relancent violemment le ballon et repoussent les joueurs ; murs élastiques</div>
+        <div class="legrow"><span>🌪</span><b>Tempête</b> — le vent tourne toutes les 8 s (annoncé 2 s avant, girouette en haut) et pousse le ballon ; bancs de sable</div>
+        <h4>Bonus et malus (au sol, anneau vert = bonus, rouge = malus)</h4>
+        <div class="legrow"><span>⚡</span><b>Turbo</b> — sprint illimité et +15 % de vitesse pendant 8 s</div>
+        <div class="legrow"><span>💥</span><b>Canon</b> — tes 2 prochains tirs partent à pleine puissance, sans dispersion et 20 % plus forts</div>
+        <div class="legrow"><span>🧱</span><b>Mur</b> — ta cage rétrécit de moitié pendant 10 s</div>
+        <div class="legrow"><span>🥅</span><b>Cage géante</b> — les cages de tes adversaires s'élargissent de 60 % pendant 8 s</div>
+        <div class="legrow"><span>🍯</span><b>Glu</b> — tes adversaires sont ralentis et privés de sprint pendant 5 s</div>
+        <div class="legrow"><span>🔀</span><b>Inversion</b> — les commandes de tes adversaires sont inversées pendant 4 s</div>
         <div class="note">Le but est crédité au dernier adversaire qui a joué le ballon. Un ballon que tu pousses toi-même dans ta cage est un contre son camp.</div>
       </div>
     </div>
