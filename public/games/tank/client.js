@@ -83,7 +83,7 @@ const INTERP_MS = 55;
 const DUSK_T0 = 60, DUSK_LEN = 90;
 const STREAK_MS = 5000;                                   // deux chars détruits en moins de 5 s = doublé
 const SHELL_MATCH2 = 32 * 32;                             // appariement d'un obus d'un état à l'autre (6,5 px/tick)
-const KEYMAP = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowUp: 'fwd', KeyW: 'fwd', ArrowDown: 'back', KeyS: 'back' };
+const KEYMAP = { ArrowLeft: 'left', KeyA: 'left', KeyQ: 'left', ArrowRight: 'right', KeyD: 'right', ArrowUp: 'fwd', KeyW: 'fwd', KeyZ: 'fwd', ArrowDown: 'back', KeyS: 'back' };   // ZQSD / WASD : KeyW/KeyA = touches Z/Q en AZERTY ; KeyZ/KeyQ pour un clavier réglé en QWERTY
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function hexRgb(h) { const n = parseInt(String(h).slice(1, 7), 16) || 0; return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }

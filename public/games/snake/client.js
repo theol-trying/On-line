@@ -67,7 +67,7 @@ const CAUSE_TXT = { wall: 'dans la haie', rock: 'contre un rocher', snake: 'cont
 const DISP = 'Fredoka, "Segoe UI", sans-serif';   // police d'affichage (Google Fonts, chargée par la page)
 const TITLE_COL = '#f0a93a';                        // serpent du logo
 const INTERP_MS = 90;
-const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
+const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', KeyZ: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', KeyQ: 'left', ArrowRight: 'right', KeyD: 'right' };   // ZQSD / WASD : KeyW/KeyA = touches Z/Q en AZERTY ; KeyZ/KeyQ pour un clavier réglé en QWERTY
 const TAPER = [0.38, 0.55, 0.72, 0.87];             // effilement de la queue : 4 tronçons de largeur croissante
 // ambiance (coupée par reduceFx) : lucioles, pétales qui tombent, papillons qui flânent
 const AMB_FLY = Array.from({ length: 11 }, () => ({ x: Math.random(), y: Math.random(), ph: Math.random() * 6.28, r: 1.2 + Math.random() }));

@@ -72,7 +72,7 @@ const PICK_COL = { bomb: '#8a86a6', flame: '#ff7a2a', speed: '#2fd49a', kick: '#
 // fond animé : ombres de nuages qui défilent doucement (identité cartoon) — coupé par reduceFx
 const AMB_CLOUDS = Array.from({ length: 5 }, () => ({ y: 0.05 + Math.random() * 0.85, v: 5 + Math.random() * 7, s: 22 + Math.random() * 26, ph: Math.random() * 1000 }));
 const INTERP_MS = 55;
-const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
+const KEYMAP = { ArrowUp: 'up', KeyW: 'up', KeyZ: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', KeyQ: 'left', ArrowRight: 'right', KeyD: 'right' };   // ZQSD / WASD : KeyW/KeyA = touches Z/Q en AZERTY ; KeyZ/KeyQ pour un clavier réglé en QWERTY
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const DIRV = [[1, 0], [0, 1], [-1, 0], [0, -1]];     // orientation du personnage : 0 droite, 1 bas, 2 gauche, 3 haut
 const TICK_HZ = 30, BOMB_FUSE = 90, BLAST_MS = 600, SD_MS = 10 * 1000 / TICK_HZ, DROP_MS = 380;   // miroirs d'affichage du serveur (aucune règle ici)

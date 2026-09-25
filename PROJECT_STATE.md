@@ -3,7 +3,7 @@
 > Dossier : `C:\Users\theoi\Documents\PONG\pong-line\` (source unique de vérité).
 > **Plateforme multijeux** : un hub Node.js **autoritatif** sert plusieurs jeux sélectionnables ;
 > **une seule partie active à la fois** (jeu choisi dans un lobby commun).
-> **Jeux : Pong · Tron · Tanks · Bomberman · Snake · Sumo.** **Zéro dépendance** (WebSocket implémenté à la main). Un appareil par joueur.
+> **Jeux : Pong · Tron · Tanks · Bomberman · Snake · Sumo · Foot.** **Zéro dépendance** (WebSocket implémenté à la main). Un appareil par joueur.
 > **En production** : GitHub `theol-trying/On-line` → **Render** (HTTPS/`wss://`) + **Upstash Redis** (classement + avatars).
 > Consignes projet permanentes : **zéro dépendance npm, zéro build, aucun fichier binaire** ; secrets via `process.env` uniquement.
 > L'assistant gère **git** (commit + push) depuis septembre 2026, et **Node est installé depuis le 21/09/2026** :
@@ -187,6 +187,54 @@ Pour **ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{cl
   + « OUT ». Écran titre : « SUMO » devant un ensō. Musique in-sen (0,1,5,7,8), taiko, flûte. Victoire : **pétales de sakura** (`CELEB.sumo`).
 
 ---
+
+## Jeu : FOOT  (`foot`, 2–10, tickHz 30) — ajouté le 25/09
+Demande utilisateur : « sur le même principe que Pong pour le terrain. Chaque joueur a sa cage, 1 seul ballon au
+milieu, il faut marquer dans les buts adverses pour les éliminer. Tirer avec Espace, tacler avec E. Le ballon reste
+collé au personnage qui le prend en premier. Pas de bonus/malus pour le moment, de 2 à 10 joueurs. »
+- **Terrain** (`public/games/foot/shared.js` : `AR0=600`, `PITCH=0.44`, `PR=15`, `BR=8`, `POST_R=4`, `GOAL0=0.42`,
+  `GOAL_SD=0.62`) : polygone régulier à N côtés (un par joueur ; à 2, un carré dont seuls les côtés gauche et droit ont
+  une cage, comme Pong), un côté plat en haut. Arène à l'échelle : `1 + 0.1 × (N − 2)` comme le Sumo (1080 à 10).
+- **Cage** : bouche centrée de 42 % du côté, deux poteaux (disques qui renvoient le ballon). Un but = le CENTRE du ballon
+  franchit la ligne dans la bouche d'une cage ouverte → le propriétaire perd une vie ; à zéro il est éliminé et sa cage
+  se FERME (le côté devient un mur). Vies : 3 par défaut, réglage game master `lives` (3 → 5 → 1 → 2, dans GM_ONLY).
+  Le dernier joueur (ou la dernière équipe) en lice gagne ; modes d'équipe comme le Sumo.
+- **Crédit** : `ball.kick` = dernier joueur qui a VRAIMENT joué le ballon (tir, conduite, tacle) ; une déviation ne met
+  à jour que `ball.last`. But crédité à `kick` s'il est adverse (5 s au plus) ; `kick` = victime → contre son camp.
+- **Ballon** : collé au premier qui le touche (conduite devant les pieds, selon le regard qui tourne à 0,42 rad/tick) ;
+  le porteur court à 88 %. Tir (Espace, `shoot`) : 17 u/tick dans la direction TENUE, sinon le regard ; le tireur ne le
+  reprend pas avant 9 ticks. Un ballon à plus de 11 u/tick qui touche un joueur REBONDIT au lieu de se coller (sinon un
+  défenseur planté devant sa cage arrêterait tout). Sous-pas contre l'effet tunnel, frottement 0,975, rebonds 0,72.
+  On peut rentrer le ballon en le conduisant.
+- **Tacle** (E ou Maj, `tackle`) : impulsion 8,5, 8 ticks, recharge 42. Sur le porteur : le ballon saute dans le sens
+  du tacle, le porteur est sonné 16 ticks et ne peut pas le reprendre de suite ; sur un autre, simple bousculade.
+- **Après un but** : ~1,3 s figées (célébration), puis engagement : ballon au centre, chacun devant sa cage.
+- **Prolongations** : après 90 s, les cages s'élargissent de 42 à 62 % du côté en 60 s (`gw` dans le snapshot) ;
+  filet absolu à 6 min (l'équipe qui a le plus de vies gagne, égalité sinon).
+- **Bots** (Facile/Normale/Difficile) : porteur → cage adverse ouverte la plus proche, visée dispersée selon le niveau,
+  tir anticipé sous pression ; porteur adverse → pressing et tacle, ou placement entre lui et sa cage s'il menace ;
+  ballon libre qui file vers sa cage → réflexe de gardien (Normale/Difficile) ; sinon course au ballon anticipée.
+  Simulation (`hors réseau`) : les manches finissent à toutes les tailles — ~15-25 s à 2, ~20-40 s à 3, ~1 min à 5,
+  ~3,5 min à 10 (29 buts pour 3 vies).
+- **Snapshot** : `gs, count, round, winner, fx, connected, botCount, maxBots, botDiff, mode, nteams, lives, ar, sd, gw, frz`,
+  `geo{G, e:[[ax,ay,bx,by,owner,open]…]}` (statique hors éliminations : le hub ne le renvoie pas s'il est identique),
+  `ball{x,y,o,l}`, `players` = 10 sièges `{seat,name,team,connected,playing,alive,bot,edge,x,y,a,lives,goals,kills,tk,tcd,st,
+  place,elimTick,elimBy}`. Événements : shot · grab · slide · tackle (steal) · deflect · post · wall · goal (by, own,
+  lives) · out · whistle (start/go/kick/end) · sd.
+- **Client** (identité « Stade de nuit », police Russo One) : tribunes en pointillés de couleur, panneaux publicitaires,
+  pelouse tondue en bandes découpée au polygone, craie (contour, rond central, arcs de surface, points de pénalty,
+  quarts de cercle), cages avec filet qui ondule au but, bande à la couleur du propriétaire, ses vies en ballons derrière
+  le filet ; cage fermée = planches à rayures rouges. Joueurs vus de dessus (maillot couleur + motif du siège, tête et
+  cheveux, crampons qui alternent à la course, double ombre des projecteurs, glissade, étoiles quand sonné), ballon à
+  pentagones qui roule, traînée au tir. « BUT ! » / « CONTRE SON CAMP » / « POTEAU ! », confettis, sifflet d'arbitre et
+  clameur en WebAudio, tableau d'affichage ambre pour le décompte et le titre. Journal : vies au fil du match, coup du
+  chapeau, but éliminatoire, tacle gagnant. Joystick en mode 8 (`CARTES.foot`) + boutons ⚽ tir et 👟 tacle.
+  Vitrine d'accueil : 7 cartes (7 en ligne sur PC, 4 + 3 ailleurs).
+
+## ZQSD / WASD dans tous les jeux (25/09)
+Les 7 jeux lisent le clavier par `e.code` (position PHYSIQUE) : `KeyW`/`KeyA` sont les touches Z/Q d'un clavier
+AZERTY, donc ZQSD marchait déjà en AZERTY. `KeyZ`/`KeyQ` ajoutés partout : Z Q S D marche aussi sur un clavier réglé
+en QWERTY, et W A S D reste valable. Textes d'aide mis à jour (« Z Q S D (W A S D) »).
 
 ## Communs aux jeux
 - **Équipes** FFA/2v2/2v2v2/3v3 (2v2 à 4 joueurs ; 2v2v2 & 3v3 à 6). Couleur d'équipe (palette Okabe-Ito en daltonien).

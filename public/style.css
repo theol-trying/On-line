@@ -315,7 +315,10 @@ body.playing.dock.game-bomb .stage{ --amb:#190b2e;             /* semis de confe
   background-size:64px 64px, 48px 48px, 36px 36px; background-position:0 0, 24px 18px, 10px 34px; }
 body.playing.dock.game-sumo .stage{ --amb:#1a120e;             /* le plancher laqué autour du dohyō se prolonge, lueur d'argile au centre */
   background-image:radial-gradient(55% 45% at 50% 50%, rgba(201,163,107,.10), transparent 70%), repeating-linear-gradient(90deg, rgba(0,0,0,.32) 0 2px, transparent 2px 96px), repeating-linear-gradient(90deg, rgba(255,220,170,.025) 0 1px, transparent 1px 11px); }
-body.flat.playing.dock.game-sumo .stage{ background-image:none; }   /* « Réduire les effets » : l'aplat de bois seul, sans rainures ni lueur */
+body.flat.playing.dock.game-sumo .stage{ background-image:none; }
+body.playing.dock.game-foot .stage{ --amb:#08140f;             /* nuit de stade : halo des projecteurs + bandes de tonte à peine visibles */
+  background-image:radial-gradient(60% 45% at 50% 50%, rgba(80,190,110,.10), transparent 70%), repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0 40px, transparent 40px 80px); }
+body.flat.playing.dock.game-foot .stage{ background-image:none; }   /* « Réduire les effets » : l'aplat de bois seul, sans rainures ni lueur */
 body.flat.playing.dock .stage{ -webkit-animation:none; animation:none; }
 body.flat.playing.dock.game-pong .stage{ background-image:none; }   /* Pong ne dessine pas non plus d'étoiles en effets réduits */
 @media (prefers-reduced-motion:reduce){ body.playing.dock .stage{ -webkit-animation:none; animation:none; } }
@@ -598,6 +601,31 @@ body.game-sumo .logo{ letter-spacing:.1em; background:linear-gradient(92deg,#f1e
 body.game-sumo .shead{ border-bottom-color:rgba(224,69,47,.32); }                   /* filet vermillon sous l'en-tête des panneaux */
 body.game-sumo:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.6),0 0 0 3px #4a2616 inset,0 0 46px -6px rgba(255,150,60,.22); }
 
+/* ---------- ⚽ FOOT — Stade de nuit (pelouse tondue, craie, projecteurs, tableau d'affichage ambre) ---------- */
+body.game-foot{ --bg0:#050c08; --bg1:#08140f; --panel:rgba(12,28,20,.86); --panel2:rgba(20,44,31,.6);
+  --border:rgba(242,246,238,.14); --border2:rgba(242,246,238,.3); --txt:#f2f6ee; --txt2:#a9c2b0; --accent:#ffc24a;
+  --display-font:'Russo One','Impact',sans-serif; --display-ls:.02em; }
+/* Ciel de nuit, quatre faisceaux de projecteurs en haut, pelouse en bandes au pied de la page (dégradés statiques). */
+body.game-foot::before{ background:
+  radial-gradient(26vw 22vw at 8% 0%, rgba(255,246,216,.20), transparent 64%),
+  radial-gradient(26vw 22vw at 92% 0%, rgba(255,246,216,.18), transparent 64%),
+  radial-gradient(18vw 16vw at 34% -4%, rgba(255,246,216,.10), transparent 66%),
+  radial-gradient(18vw 16vw at 66% -4%, rgba(255,246,216,.10), transparent 66%),
+  linear-gradient(0deg, rgba(46,139,62,.34), rgba(46,139,62,0) 30vh),
+  repeating-linear-gradient(90deg, rgba(0,0,0,.14) 0 9vw, transparent 9vw 18vw),
+  linear-gradient(180deg,#07110c,#0b1d14 70%,#10301d); }
+/* Russo One n'existe qu'en graisse 400 : le 800 hérité des titres produirait un faux gras. */
+body.game-foot .logo, body.game-foot .shead h3, body.game-foot .etitle, body.game-foot .bann, body.game-foot .champ,
+body.game-foot button.primary, body.game-foot #tourBar, body.game-foot #readyBar .rbtn, body.game-foot .settings h4,
+body.game-foot .gtab, body.game-foot .ghosttab, body.game-foot #xfade{ font-weight:400; }
+body.game-foot button, body.game-foot #gamemenu, body.game-foot .bar, body.game-foot #msg,
+body.game-foot .pc, body.game-foot .settings, body.game-foot .touch, body.game-foot .readybar{ border-radius:4px; }
+body.game-foot button.primary, body.game-foot .bar>button.primary{ background:linear-gradient(180deg,#34a24a,#1f7a33); color:#f2f6ee; border-color:#0f4a1e;
+  box-shadow:0 2px 0 #0a3314,0 8px 18px -8px rgba(47,191,90,.8); }
+body.game-foot .logo{ letter-spacing:.08em; color:#ffc24a; text-shadow:0 0 14px rgba(255,194,74,.55),0 2px 0 rgba(0,0,0,.6); }
+body.game-foot .shead{ border-bottom-color:rgba(255,194,74,.3); }
+body.game-foot:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.65),0 0 0 3px #0d2618 inset,0 0 52px -8px rgba(255,246,216,.22); }
+
 /* ============================================================================
    ERGONOMIE MOBILE — manette à 2 zones (croix directionnelle ⟷ actions),
    flèches Pong sous l'écran, boutons flottants discrets hors de l'aire de jeu.
@@ -729,12 +757,14 @@ body.flat .joyknob{ -webkit-box-shadow:none; box-shadow:none; }
 #gamemenu .gtab[data-id="snake"]{ font-family:'Fredoka','Segoe UI',sans-serif; color:#8fd98a; border-radius:16px; }
 #gamemenu .gtab[data-id="bomb"]{ font-family:'Baloo 2','Segoe UI',sans-serif; color:#ff9ed0; border-radius:16px; }
 #gamemenu .gtab[data-id="sumo"]{ font-family:'Dela Gothic One','Impact',sans-serif; font-weight:400; letter-spacing:.04em; color:#f08a6e; border-radius:6px; }
+#gamemenu .gtab[data-id="foot"]{ font-family:'Russo One','Impact',sans-serif; font-weight:400; letter-spacing:.03em; color:#7ee08f; border-radius:4px; }
 #gamemenu .gtab.on[data-id="pong"]{ background:linear-gradient(92deg,#ff5db4,#7c3cff); color:#fff; }
 #gamemenu .gtab.on[data-id="tron"]{ background:linear-gradient(92deg,#1fe0ff,#0a86ff); color:#021018; }
 #gamemenu .gtab.on[data-id="tank"]{ background:linear-gradient(180deg,#8a7a2e,#5e4a1c); color:#fff6dc; box-shadow:0 2px 0 #2a2010; }
 #gamemenu .gtab.on[data-id="snake"]{ background:linear-gradient(92deg,#3da34d,#8fd14f); color:#06210a; }
 #gamemenu .gtab.on[data-id="bomb"]{ background:linear-gradient(92deg,#ff5aa0,#ffb13c); color:#2a0c33; }
 #gamemenu .gtab.on[data-id="sumo"]{ background:linear-gradient(180deg,#ea5a3f,#b8321f); color:#fff4e6; box-shadow:0 2px 0 #5a160c; }
+#gamemenu .gtab.on[data-id="foot"]{ background:repeating-linear-gradient(90deg,#2e8b3e 0 14px,#34994a 14px 28px); color:#f2f6ee; box-shadow:0 2px 0 #0a3314; text-shadow:0 1px 0 rgba(0,0,0,.4); }
 
 /* ---- C. États « ON » par identité ---- */
 body.game-pong{ --ok:#ff5db4; --okTxt:#ffb3dd; }
@@ -742,7 +772,8 @@ body.game-tron{ --ok:#1fe0ff; --okTxt:#aef4ff; }
 body.game-tank{ --ok:#e0a92e; --okTxt:#ffe2a1; }
 body.game-snake{ --ok:#5fc36a; --okTxt:#c2f0b8; }
 body.game-bomb{ --ok:#ff7ac0; --okTxt:#ffd3ea; }
-body.game-sumo{ --ok:#e0b23c; --okTxt:#ffe6a6; }   /* or, pas vermillon : un état ON rouge se lirait comme une erreur */
+body.game-sumo{ --ok:#e0b23c; --okTxt:#ffe6a6; }
+body.game-foot{ --ok:#ffc24a; --okTxt:#ffe6a6; }   /* ambre du tableau d'affichage */   /* or, pas vermillon : un état ON rouge se lirait comme une erreur */
 
 /* ---- D. Fonds de page — au niveau du Sumo (23/09) ----
    Même recette que le dohyō : une MATIÈRE (pas un simple dégradé), des SOURCES DE LUMIÈRE, un BANDEAU
@@ -926,6 +957,9 @@ body.game-sumo .pc{ background:linear-gradient(180deg,rgba(64,44,31,.94),rgba(36
   border-top:3px solid #e0452f; box-shadow:0 2px 0 rgba(0,0,0,.42); }                        /* banderole nobori : liseré vermillon */
 /* La règle ci-dessus (plus spécifique que .pc.me) écraserait le halo « c'est toi » : on le repose. */
 body.game-sumo .pc.me{ box-shadow:0 0 0 1.5px currentColor inset,0 0 22px -6px currentColor,0 2px 0 rgba(0,0,0,.42); }
+body.game-foot .pc{ background:linear-gradient(180deg,rgba(10,22,16,.94),rgba(5,12,8,.94)); border-color:rgba(242,246,238,.16);
+  border-top:3px solid #ffc24a; box-shadow:0 2px 0 rgba(0,0,0,.42); }
+body.game-foot .pc.me{ box-shadow:0 0 0 1.5px currentColor inset,0 0 22px -6px currentColor,0 2px 0 rgba(0,0,0,.42); }
 
 /* ---- F. Finitions ---- */
 ::selection{ background:var(--accent); color:#0a0d18; }
@@ -944,10 +978,10 @@ body.flat #xfade{ text-shadow:none; }
    Chaque carte reste un .gtab : police, couleur, rayon et état .on par jeu viennent
    des règles « A. Onglets multi-identités » ci-dessus ; le grisage non-game-master
    (body.not-gm) aussi. Grille avec grid-gap (pas de gap en flex : vieux iOS).
-   PC : 6 en ligne · fenêtre étroite : 3 × 2 · téléphone : 3 × 2 compact.
+   PC : 7 en ligne · fenêtre étroite : 4 + 3 · téléphone : 4 + 3 compact.
    ============================================================================ */
 .shellrow.avitrine{ width:100%; max-width:1080px; }
-#gamemenu.vitrine{ display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); grid-gap:8px; gap:8px;
+#gamemenu.vitrine{ display:grid; grid-template-columns:repeat(7, minmax(0,1fr)); grid-gap:8px; gap:8px;
   -webkit-box-flex:1; -ms-flex:1 1 100%; flex:1 1 100%; width:100%; padding:8px; }
 #gamemenu .vcard{ display:block; position:relative; min-width:0; padding:5px 5px 7px; text-align:center; line-height:1.15;
   background:rgba(8,10,22,.5); border:1px solid var(--border2); overflow:hidden;
@@ -960,7 +994,7 @@ body.not-gm #gamemenu .vcard:not(.on):hover{ -webkit-transform:none; transform:n
 body.flat #gamemenu .vcard{ -webkit-transition:none; transition:none; }
 .vscene{ display:block; width:100%; height:68px; border-radius:7px; background:#0c0e1c; }
 #gamemenu .vcard[data-id="tron"] .vscene{ border-radius:1px; }
-#gamemenu .vcard[data-id="tank"] .vscene, #gamemenu .vcard[data-id="sumo"] .vscene{ border-radius:3px; }
+#gamemenu .vcard[data-id="tank"] .vscene, #gamemenu .vcard[data-id="sumo"] .vscene, #gamemenu .vcard[data-id="foot"] .vscene{ border-radius:3px; }
 #gamemenu .vcard[data-id="snake"] .vscene, #gamemenu .vcard[data-id="bomb"] .vscene{ border-radius:11px; }
 .vname{ display:block; margin-top:6px; font-size:15px; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .vsub{ display:block; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; min-height:2.5em; margin-top:3px;
@@ -968,11 +1002,11 @@ body.flat #gamemenu .vcard{ -webkit-transition:none; transition:none; }
 .vnb{ display:inline-block; margin-top:5px; padding:3px 8px; border-radius:20px; background:rgba(0,0,0,.2);
   font:600 10px/1 system-ui,-apple-system,"Segoe UI",sans-serif; letter-spacing:normal; text-transform:none; }
 @media (max-width:900px){
-  .shellrow.avitrine{ max-width:660px; }
-  #gamemenu.vitrine{ grid-template-columns:repeat(3, minmax(0,1fr)); }
+  .shellrow.avitrine{ max-width:760px; }
+  #gamemenu.vitrine{ grid-template-columns:repeat(4, minmax(0,1fr)); }
   .vscene{ height:74px; }
 }
-@media (max-width:600px){                          /* téléphone : 3 × 2 compact, l'accroche passe dans le title */
+@media (max-width:600px){                          /* téléphone : 4 + 3 compact, l'accroche passe dans le title */
   #gamemenu.vitrine{ grid-gap:6px; gap:6px; padding:6px; }
   #gamemenu .vcard{ padding:4px 4px 5px; }
   .vscene{ height:48px; }

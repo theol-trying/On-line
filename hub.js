@@ -9,8 +9,9 @@ import tank from './games/tank/server.js';
 import bomb from './games/bomb/server.js';
 import snake from './games/snake/server.js';
 import sumo from './games/sumo/server.js';
+import foot from './games/foot/server.js';
 
-const GAMES = { [pong.meta.id]: pong, [tron.meta.id]: tron, [tank.meta.id]: tank, [bomb.meta.id]: bomb, [snake.meta.id]: snake, [sumo.meta.id]: sumo };   // registre : ajouter un jeu = l'importer et l'ajouter ici
+const GAMES = { [pong.meta.id]: pong, [tron.meta.id]: tron, [tank.meta.id]: tank, [bomb.meta.id]: bomb, [snake.meta.id]: snake, [sumo.meta.id]: sumo, [foot.meta.id]: foot };   // registre : ajouter un jeu = l'importer et l'ajouter ici
 const META = Object.values(GAMES).map(g => g.meta);
 const DEFAULT_ID = pong.meta.id;
 
@@ -88,7 +89,7 @@ function hostId() {
   return (p || plusAncien(members) || {}).id || null;
 }
 // Réglages de partie réservés au game master (messages routés vers les jeux via {t:'g',m}).
-const GM_ONLY = new Set(['mode', 'preset', 'opt', 'bots', 'botdiff', 'arena', 'wintarget', 'ff', 'gen', 'variant', 'rush', 'revenge', 'fade', 'lbreset']);
+const GM_ONLY = new Set(['mode', 'preset', 'opt', 'bots', 'botdiff', 'arena', 'wintarget', 'ff', 'gen', 'variant', 'rush', 'revenge', 'fade', 'lbreset', 'lives']);   // lives : nombre de vies du Foot
 // …et parmi eux, ceux qui touchent à la mémoire DURABLE du site : réservés au détenteur de la clé admin, jamais à
 // l'hôte de repli (le premier arrivant, quand l'admin est absent, pouvait effacer le classement de Pong).
 const ADMIN_ONLY = new Set(['lbreset']);

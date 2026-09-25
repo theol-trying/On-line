@@ -66,7 +66,7 @@ const MALUS_MSG = {
 };
 const SHOCK_MSG = { i: '💥', t: 'Onde de choc !' };
 const SHRINK_MSG = { i: '⚠', t: 'Le dohyō rétrécit !' };
-const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
+const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', KeyZ: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', KeyQ: 'left', ArrowRight: 'right', KeyD: 'right' };   // ZQSD / WASD : KeyW/KeyA = touches Z/Q en AZERTY ; KeyZ/KeyQ pour un clavier réglé en QWERTY
 // lueurs (composition additive) : teintes claires, les couleurs sombres des jetons n'ajouteraient presque rien
 const PU_LUM = { heavy: '#ffd9a0', dash: '#ff7a55', shock: '#7fb0ff', grip: '#8fe0a0' };
 const puLum = t => Object.prototype.hasOwnProperty.call(PU_LUM, t) ? PU_LUM[t] : '#ffffff';   // `t` vient du réseau : jamais une clé du prototype

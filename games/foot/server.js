@@ -1,0 +1,532 @@
+// Jeu FOOT — terrain polygonal vu de dessus, UNE CAGE PAR JOUEUR (même principe que les raquettes de Pong),
+// un seul ballon au centre. Chaque but encaissé coûte une vie ; à zéro, le joueur est éliminé et sa cage se
+// ferme (son côté devient un mur). Le dernier joueur (ou la dernière équipe) en lice gagne la manche.
+// Ballon collé au premier qui le touche ; Espace = tir, E = tacle (le tacle fait sauter le ballon du porteur).
+// Physique continue à 30 Hz, comme le Sumo dont ce fichier reprend la structure. Pas de bonus/malus (v1).
+import { AR0, PITCH, PR, BR, POST_R, GOAL0, GOAL_SD } from '../../public/games/foot/shared.js';
+import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
+
+const GID = 'foot';
+const MAX_SEATS = 10;
+const TICK_HZ = 30;
+const COUNTDOWN_TICKS = 3 * TICK_HZ;
+// course : plus vive et plus glissante que le Sumo (on court, on ne pousse pas) ; le PORTEUR court 12 % moins
+// vite, sinon personne ne le rattraperait jamais
+const ACC = 0.9, VMAX = 5.4, FRICTION = 0.84, CARRY_SPD = 0.88, TURN = 0.42;
+// ballon : frottement de pelouse, rebonds amortis sur les murs et les poteaux
+const BALL_FR = 0.975, BALL_VMAX = 22, WALL_REST = 0.72, POST_REST = 0.85;
+// tir : le tireur ne reprend pas son propre tir aussitôt (GRAB_BLOCK) ; au-delà de STICK_MAX, un ballon qui touche un
+// joueur REBONDIT au lieu de se coller : sinon un défenseur planté devant sa cage arrêterait tous les tirs
+const SHOT_SPD = 17, SHOT_CD = 10, GRAB_BLOCK = 9, STICK_MAX = 11, DEFLECT_REST = 0.55;
+// tacle : glissade brève ; sur le PORTEUR, le ballon saute et il est sonné ; sur un autre, simple bousculade
+const TACKLE_IMP = 8.5, TACKLE_TICKS = 8, TACKLE_CD = 42, STUN_TICKS = 16, STEAL_SPD = 7, STEAL_BLOCK = 16, BUMP = 3.5;
+const LIVES_CYCLE = [3, 5, 1, 2];               // réglage « vies » du game master (le premier est le défaut)
+const GOAL_FREEZE = 40;                         // ~1,3 s de célébration, puis engagement au centre
+// mort subite : après 90 s les cages s'élargissent (de 42 à 62 % du côté en 60 s) ; filet absolu à 6 min
+const SD_START = 90 * TICK_HZ, SD_GROW = 60 * TICK_HZ, TIME_CAP = 360 * TICK_HZ;
+const CREDIT_TICKS = 150;                       // but crédité au dernier toucheur adverse des 5 dernières secondes
+// IA : Facile / Normale / Difficile — cadence, vitesse, dispersion du tir, envie de tacler, portée de tir, gardien
+const FTDIFF = [
+  { every: 6, spd: 0.8, noise: 0.7, tackleP: 0.25, shoot: 0.55, keeper: false },
+  { every: 3, spd: 0.95, noise: 0.35, tackleP: 0.6, shoot: 0.7, keeper: true },
+  { every: 2, spd: 1, noise: 0.15, tackleP: 0.9, shoot: 0.82, keeper: true },
+];
+const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2, '4v4': 2, '2v2v2v2': 4, '3v3v3': 3, '5v5': 2, '2v2v2v2v2': 5 };
+const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
+function validModes(N) {                        // modes d'équipe selon le nombre EXACT de participants (5 équipes au plus)
+  const v = ['ffa'];
+  if (N === 4) v.push('2v2');
+  if (N === 6) v.push('2v2v2', '3v3');
+  if (N === 8) v.push('4v4', '2v2v2v2');
+  if (N === 9) v.push('3v3v3');
+  if (N === 10) v.push('5v5', '2v2v2v2v2');
+  return v;
+}
+// Arène à l'échelle : la taille d'un joueur ne change pas, c'est le terrain qui grandit (+10 % par joueur au-delà de 2).
+const scaleFor = n => 1 + 0.1 * (Math.max(2, Math.min(MAX_SEATS, n)) - 2);
+const r1 = v => Math.round(v * 10) / 10;
+const r2 = v => Math.round(v * 100) / 100;
+
+export function createFoot(room) {
+  let players, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, botCount, botDiff, lives;
+  let ar, geo, ball, freezeUntil, sdOn;
+  let seatByMid = {};
+  // Effets : pendant un tick ils partent dans fx ; entre deux ticks (lancement, départ d'un joueur) ils attendent dans
+  // pend, sinon update() les effacerait avant la diffusion.
+  let pend = [], dansTick = false;
+  const emit = o => { (dansTick ? fx : pend).push(o); };
+
+  function lbEntry(name) {
+    const b = board(GID);
+    return (Object.hasOwn(b, name) && b[name]) || (b[name] = { name, games: 0, wins: 0, kills: 0, goals: 0, deaths: 0, survSum: 0, bestSurvivalSec: 0 });
+  }
+  function recordRound() {
+    for (const p of players) {
+      if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
+      const e = lbEntry(p.name);
+      e.games++;
+      if (winner >= 0 && p.team === winner) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });
+      e.kills += p.kills; e.goals = (e.goals || 0) + p.goals;
+      const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / TICK_HZ;
+      e.survSum += surv;
+      if (surv > e.bestSurvivalSec) e.bestSurvivalSec = surv;
+      if (p.elimTick >= 0) e.deaths++;
+    }
+    const champ = winner >= 0 ? players.find(p => p.playing && p.team === winner) : null;
+    pushHistory(GID, { when: Date.now(), mode, preset: 'foot',
+      winner: champ ? (nteams < nParts ? 'Équipe ' + 'ABCDE'[winner] : (champ.name || ('P' + (champ.seat + 1)))) : 'Égalité',
+      durationSec: Math.round(endTick / TICK_HZ), nParts });
+    save(); markDirty(GID);
+  }
+
+  function makePlayers() {
+    return Array.from({ length: MAX_SEATS }, (_, seat) => ({
+      seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false, bot: false, edge: -1,
+      x: 0, y: 0, vx: 0, vy: 0, a: 0, mx: 0, my: 0, sx: 0, sy: 0,
+      inp: { up: false, down: false, left: false, right: false }, wantShoot: false, wantTackle: false,
+      tackleUntil: 0, tackleReadyAt: 0, tackleDx: 0, tackleDy: 0, tkHit: null, stunUntil: 0, grabBlock: 0, shotReadyAt: 0,
+      lives: 0, goals: 0, kills: 0, place: 0, elimTick: -1, elimBy: -1, score: 0,
+      botNext: 0, botTgt: -1, botAim: 0,
+    }));
+  }
+  function setArena(n) { ar = Math.round(AR0 * scaleFor(n)); }
+  const cxy = () => ar / 2;
+  function fullReset() {
+    players = makePlayers();
+    gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; pend = [];
+    mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; botCount = 0; botDiff = 1; lives = LIVES_CYCLE[0];
+    seatByMid = {}; freezeUntil = 0; sdOn = false;
+    setArena(2); geo = buildGeo(2); ball = newBall();
+    apercu();
+  }
+  function newBall() { const c = cxy(); return { x: c, y: c, vx: 0, vy: 0, owner: -1, last: -1, lastTick: -9999, kick: -1, kickTick: -9999 }; }
+
+  const connectedCount = () => players.filter(p => p.member).length;
+  const maxBots = () => MAX_SEATS - connectedCount();
+  const partCount = () => Math.min(connectedCount() + botCount, MAX_SEATS);
+  const canStart = () => connectedCount() >= 1 && partCount() >= 2;
+  const editable = () => gameState === 'lobby' || gameState === 'over';
+  const seatOf = member => { for (const p of players) if (p.member === member) return p.seat; return -1; };
+  const aliveTeams = () => new Set(players.filter(p => p.alive).map(p => p.team));
+  const foe = (p, q) => p.team !== q.team;          // en FFA chaque joueur a sa propre « équipe » (team = rang)
+  const stunned = p => p.stunUntil > tick;
+  const tackling = p => p.tackleUntil > tick;
+
+  /* ---------- terrain : polygone régulier, un côté par joueur (2 joueurs : carré, cages face à face) ---------- */
+  function buildGeo(N) {
+    const G = N <= 2 ? 4 : N, c = cxy(), R = ar * PITCH;
+    const start = -Math.PI / 2 - Math.PI / G;      // un côté bien à plat en haut, quel que soit G
+    const v = [];
+    for (let k = 0; k < G; k++) { const a = start + k * 2 * Math.PI / G; v.push([c + R * Math.cos(a), c + R * Math.sin(a)]); }
+    const edges = [];
+    for (let k = 0; k < G; k++) {
+      const [ax, ay] = v[k], [bx, by] = v[(k + 1) % G];
+      const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy), tx = dx / len, ty = dy / len;
+      const mx = (ax + bx) / 2, my = (ay + by) / 2;
+      let nx = c - mx, ny = c - my; const nl = Math.hypot(nx, ny); nx /= nl; ny /= nl;   // normale vers l'intérieur
+      edges.push({ ax, ay, bx, by, tx, ty, nx, ny, len, mx, my, apo: nl, owner: -1, open: false });
+    }
+    return { G, edges };
+  }
+  // côtés attribués : tous à partir de 3 joueurs ; à 2, les deux côtés opposés gauche / droite (comme Pong)
+  function ownerEdges(N) {
+    if (N >= 3) return Array.from({ length: N }, (_, i) => i);
+    return [0, 1, 2, 3].sort((a, b) => Math.abs(geo.edges[b].nx) - Math.abs(geo.edges[a].nx)).slice(0, N);
+  }
+  const gwFrac = () => GOAL0 + (GOAL_SD - GOAL0) * (sdOn ? Math.min(1, (tick - SD_START) / SD_GROW) : 0);
+  const half = e => e.len * gwFrac() / 2;         // demi-largeur de la bouche de but
+  // aperçu du lobby : le terrain et les cages au bon nombre (sièges humains d'abord, puis bots à venir)
+  function apercu() {
+    if (gameState !== 'lobby') return;
+    const n = Math.max(2, partCount());
+    setArena(n); geo = buildGeo(n); ball = newBall();
+    const own = ownerEdges(n), humains = players.filter(p => p.member);
+    own.forEach((ei, i) => { geo.edges[ei].owner = i < humains.length ? humains[i].seat : -2; geo.edges[ei].open = true; });   // -2 : un bot à venir
+  }
+
+  function spawnPos(p) {
+    const e = geo.edges[p.edge], d = Math.min(e.apo * 0.34, 150);
+    p.sx = e.mx + e.nx * d; p.sy = e.my + e.ny * d;
+  }
+  function kickoff() {                             // engagement : ballon au centre, chacun devant sa cage
+    ball = newBall();
+    for (const p of players) if (p.alive) {
+      p.x = p.sx; p.y = p.sy; p.vx = 0; p.vy = 0; p.a = Math.atan2(cxy() - p.y, cxy() - p.x);
+      p.stunUntil = 0; p.tackleUntil = 0; p.grabBlock = 0; p.wantShoot = false; p.wantTackle = false;
+    }
+  }
+
+  function startGame() {
+    if (!editable() || !canStart()) return;
+    for (const p of players) { p.playing = false; p.bot = false; p.alive = false; p.edge = -1; }
+    if (botCount > maxBots()) botCount = maxBots();
+    const parts = players.filter(p => p.member);
+    let bots = botCount;
+    for (const p of players) { if (bots <= 0) break; if (!p.member) { p.bot = true; parts.push(p); bots--; } } // complète avec des bots
+    parts.forEach((p, i) => { if (p.bot) p.name = '🤖 Bot ' + (i + 1); });
+    if (parts.length < 2) return;
+    const N = parts.length;
+    if (!validModes(N).includes(mode)) mode = 'ffa';
+    nteams = numTeamsFor(mode, N);
+    setArena(N); geo = buildGeo(N);
+    const own = ownerEdges(N);
+    parts.forEach((p, i) => {
+      p.playing = true; p.alive = true; p.team = i % nteams; p.edge = own[i];
+      geo.edges[own[i]].owner = p.seat; geo.edges[own[i]].open = true;
+      p.lives = lives; p.goals = 0; p.kills = 0; p.place = 0; p.elimTick = -1; p.elimBy = -1;
+      p.inp = { up: false, down: false, left: false, right: false }; p.mx = 0; p.my = 0; p.tackleReadyAt = 0; p.shotReadyAt = 0;
+      p.botNext = 0; p.botTgt = -1;
+      spawnPos(p);
+    });
+    nParts = N; deaths = 0; endTick = 0; winner = null; freezeUntil = 0; sdOn = false;
+    round++; tick = 0; countdownUntil = COUNTDOWN_TICKS; gameState = 'countdown';
+    kickoff();
+    emit({ type: 'whistle', k: 'start' });
+  }
+  function backToLobby() {            // abandon : retour au lobby en pleine partie
+    if (gameState !== 'play' && gameState !== 'countdown' && gameState !== 'paused') return;
+    gameState = 'lobby'; winner = null; fx = [];
+    for (const p of players) { p.playing = false; p.alive = false; p.vx = 0; p.vy = 0; p.edge = -1; }
+    apercu();
+  }
+  function endRound() {
+    gameState = 'over'; endTick = tick;
+    let s = aliveTeams();
+    if (s.size > 1) {                                // filet de 6 min : l'équipe qui a le plus de vies l'emporte (égalité sinon)
+      const tot = {}; for (const p of players) if (p.alive) tot[p.team] = (tot[p.team] || 0) + p.lives;
+      let best = -1, bv = -1, tie = false;
+      for (const t in tot) { if (tot[t] > bv) { bv = tot[t]; best = +t; tie = false; } else if (tot[t] === bv) tie = true; }
+      s = tie ? new Set() : new Set([best]);
+    }
+    winner = s.size === 1 ? [...s][0] : -1;
+    if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
+    players.forEach(p => { if (p.playing && p.alive) p.place = 1; });
+    emit({ type: 'whistle', k: 'end' });
+    recordRound();
+  }
+
+  function eliminate(p, by) {
+    p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++; p.elimBy = by;
+    if (by >= 0) players[by].kills++;
+    if (p.edge >= 0) geo.edges[p.edge].open = false;    // sa cage se ferme : le côté devient un mur
+    if (ball.owner === p.seat) ball.owner = -1;
+    emit({ type: 'out', seat: p.seat, by, x: r1(p.x), y: r1(p.y) });
+  }
+  function goal(e) {
+    const victim = players[e.owner];
+    const lp = ball.kick >= 0 ? players[ball.kick] : null;
+    const by = lp && lp !== victim && foe(lp, victim) && tick - ball.kickTick <= CREDIT_TICKS ? lp.seat : -1;
+    const own = ball.kick === victim.seat;             // contre son camp : c'est lui qui l'a joué en dernier
+    victim.lives = Math.max(0, victim.lives - 1);
+    if (by >= 0) players[by].goals++;
+    emit({ type: 'goal', seat: victim.seat, by, own, x: r1(ball.x), y: r1(ball.y), lives: victim.lives });
+    if (victim.lives <= 0) eliminate(victim, by);
+    ball.owner = -1; ball.vx *= 0.2; ball.vy *= 0.2;
+    freezeUntil = tick + GOAL_FREEZE;
+  }
+  // last : dernier contact (déviations comprises) ; kick : dernier joueur qui a VRAIMENT joué le ballon (tir, conduite,
+  // tacle). Le but est crédité à kick : un tir dévié par le défenseur reste au tireur, ce n'est pas un contre son camp.
+  const touch = p => { ball.last = p.seat; ball.lastTick = tick; ball.kick = p.seat; ball.kickTick = tick; };
+
+  /* ---------- joueurs ---------- */
+  function humanDir(p) {
+    const i = p.inp; let x = (i.right ? 1 : 0) - (i.left ? 1 : 0), y = (i.down ? 1 : 0) - (i.up ? 1 : 0);
+    const l = Math.hypot(x, y); if (l > 0) { x /= l; y /= l; }
+    p.mx = x; p.my = y;
+  }
+  function turnToward(p, ta, rate) { let d = ta - p.a; d = Math.atan2(Math.sin(d), Math.cos(d)); p.a += Math.max(-rate, Math.min(rate, d)); }
+  function move(p) {
+    const D = FTDIFF[botDiff] || FTDIFF[1], carry = ball.owner === p.seat;
+    const acc = ACC * (p.bot ? D.spd : 1), vmax = VMAX * (carry ? CARRY_SPD : 1) * (p.bot ? D.spd : 1);
+    const sp0 = Math.hypot(p.vx, p.vy);
+    if (!stunned(p) && (p.mx || p.my)) { p.vx += p.mx * acc; p.vy += p.my * acc; turnToward(p, Math.atan2(p.my, p.mx), carry ? TURN * 0.8 : TURN); }
+    p.vx *= FRICTION; p.vy *= FRICTION;
+    const sp = Math.hypot(p.vx, p.vy), cap = Math.max(vmax, sp0 * FRICTION);   // un tacle peut dépasser la vitesse de course
+    if (sp > cap) { p.vx *= cap / sp; p.vy *= cap / sp; }
+    p.x += p.vx; p.y += p.vy;
+    for (const e of geo.edges) {                    // les joueurs restent sur le terrain (on n'entre pas dans les filets)
+      const d = (p.x - e.ax) * e.nx + (p.y - e.ay) * e.ny;
+      if (d < PR) { p.x += e.nx * (PR - d); p.y += e.ny * (PR - d); const vn = p.vx * e.nx + p.vy * e.ny; if (vn < 0) { p.vx -= vn * e.nx; p.vy -= vn * e.ny; } }
+    }
+  }
+  function collide(p, q) {
+    const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy), rr = PR * 2;
+    if (d >= rr) return;
+    const nx = d > 1e-6 ? dx / d : 1, ny = d > 1e-6 ? dy / d : 0, ov = (rr - d) / 2;
+    p.x -= nx * ov; p.y -= ny * ov; q.x += nx * ov; q.y += ny * ov;
+    const vn = (q.vx - p.vx) * nx + (q.vy - p.vy) * ny;
+    if (vn < 0) { const j = -1.3 * vn / 2; p.vx -= nx * j; p.vy -= ny * j; q.vx += nx * j; q.vy += ny * j; }
+  }
+  function actions(p) {
+    if (p.wantShoot) {
+      p.wantShoot = false;
+      if (ball.owner === p.seat && !stunned(p) && tick >= p.shotReadyAt) {
+        // direction : celle TENUE si on en tient une (joystick, flèches), sinon le regard
+        let dx = p.mx, dy = p.my; if (!dx && !dy) { dx = Math.cos(p.a); dy = Math.sin(p.a); }
+        ball.owner = -1; ball.vx = dx * SHOT_SPD + p.vx * 0.4; ball.vy = dy * SHOT_SPD + p.vy * 0.4;
+        p.grabBlock = tick + GRAB_BLOCK; p.shotReadyAt = tick + SHOT_CD; p.a = Math.atan2(dy, dx); touch(p);
+        emit({ type: 'shot', seat: p.seat, x: r1(ball.x), y: r1(ball.y) });
+      }
+    }
+    if (p.wantTackle) {
+      p.wantTackle = false;
+      if (!stunned(p) && tick >= p.tackleReadyAt && ball.owner !== p.seat) {
+        let dx = p.mx, dy = p.my; if (!dx && !dy) { dx = Math.cos(p.a); dy = Math.sin(p.a); }
+        p.vx += dx * TACKLE_IMP; p.vy += dy * TACKLE_IMP; p.a = Math.atan2(dy, dx);
+        p.tackleUntil = tick + TACKLE_TICKS; p.tackleReadyAt = tick + TACKLE_CD; p.tackleDx = dx; p.tackleDy = dy; p.tkHit = {};
+        emit({ type: 'slide', seat: p.seat, x: r1(p.x), y: r1(p.y) });
+      }
+    }
+  }
+  function tackleHits(p) {                          // pendant la glissade : le premier contact avec chaque adversaire compte
+    for (const q of players) {
+      if (q === p || !q.alive || !foe(p, q) || p.tkHit[q.seat]) continue;
+      if (Math.hypot(q.x - p.x, q.y - p.y) > PR * 2 + 6) continue;
+      p.tkHit[q.seat] = 1;
+      const steal = ball.owner === q.seat;
+      q.vx += p.tackleDx * BUMP; q.vy += p.tackleDy * BUMP;
+      if (steal) {                                   // le ballon saute dans le sens du tacle ; le porteur est sonné
+        ball.owner = -1; ball.vx = p.tackleDx * STEAL_SPD + q.vx * 0.2; ball.vy = p.tackleDy * STEAL_SPD + q.vy * 0.2;
+        q.grabBlock = tick + STEAL_BLOCK; q.stunUntil = tick + STUN_TICKS; touch(p);
+      }
+      emit({ type: 'tackle', seat: q.seat, by: p.seat, steal, x: r1((p.x + q.x) / 2), y: r1((p.y + q.y) / 2) });
+    }
+  }
+
+  /* ---------- ballon ---------- */
+  // Murs, bouches de but et poteaux. Renvoie true si un but vient d'être marqué.
+  function ballEdges(bounce) {
+    for (const e of geo.edges) {
+      const dx = ball.x - e.ax, dy = ball.y - e.ay, d = dx * e.nx + dy * e.ny;
+      if (d >= BR) continue;
+      const s = dx * e.tx + dy * e.ty;
+      if (s < -BR || s > e.len + BR) continue;     // au-delà du segment : c'est le côté voisin qui répond
+      if (e.open && e.owner >= 0 && players[e.owner].alive && Math.abs(s - e.len / 2) < half(e)) {
+        if (d < 0) { goal(e); return true; }        // le CENTRE du ballon a franchi la ligne dans la bouche
+        continue;                                   // dans la bouche : pas de rebond
+      }
+      ball.x += e.nx * (BR - d); ball.y += e.ny * (BR - d);
+      const vn = ball.vx * e.nx + ball.vy * e.ny;
+      if (bounce && vn < 0) {
+        ball.vx -= (1 + WALL_REST) * vn * e.nx; ball.vy -= (1 + WALL_REST) * vn * e.ny;
+        if (vn < -3) emit({ type: 'wall', x: r1(ball.x), y: r1(ball.y), f: r2(Math.min(1, -vn / 16)) });
+      }
+    }
+    // poteaux (cages ouvertes seulement) : petits disques qui renvoient le ballon
+    for (const e of geo.edges) {
+      if (!e.open || e.owner < 0 || !players[e.owner].alive) continue;
+      const h = half(e);
+      for (const sg of [-1, 1]) {
+        const px = e.mx + e.tx * h * sg, py = e.my + e.ty * h * sg, dx = ball.x - px, dy = ball.y - py, d = Math.hypot(dx, dy), rr = BR + POST_R;
+        if (d >= rr || d < 1e-6) continue;
+        const nx = dx / d, ny = dy / d; ball.x = px + nx * rr; ball.y = py + ny * rr;
+        const vn = ball.vx * nx + ball.vy * ny;
+        if (bounce && vn < 0) { ball.vx -= (1 + POST_REST) * vn * nx; ball.vy -= (1 + POST_REST) * vn * ny; if (vn < -2) emit({ type: 'post', x: r1(px), y: r1(py), f: r2(Math.min(1, -vn / 14)) }); }
+      }
+    }
+    return false;
+  }
+  function ballPlayers(alive) {                     // ballon libre : collé au premier qui le touche, sauf un tir trop fort
+    const sp = Math.hypot(ball.vx, ball.vy);
+    let best = null, bd = Infinity;
+    for (const p of alive) {
+      const d = Math.hypot(ball.x - p.x, ball.y - p.y);
+      if (d >= PR + BR) continue;
+      if (sp > STICK_MAX) {                          // tir puissant : il rebondit sur le joueur (déviation), sans se coller
+        const nx = d > 1e-6 ? (ball.x - p.x) / d : 1, ny = d > 1e-6 ? (ball.y - p.y) / d : 0;
+        const vn = (ball.vx - p.vx) * nx + (ball.vy - p.vy) * ny;
+        ball.x = p.x + nx * (PR + BR); ball.y = p.y + ny * (PR + BR);
+        if (vn < 0) { ball.vx -= (1 + DEFLECT_REST) * vn * nx; ball.vy -= (1 + DEFLECT_REST) * vn * ny; }
+        if (ball.last !== p.seat) emit({ type: 'deflect', seat: p.seat, x: r1(ball.x), y: r1(ball.y) });
+        ball.last = p.seat; ball.lastTick = tick;     // simple déviation : le crédit du but reste au tireur (kick)
+        return;
+      }
+      if (stunned(p) || tick < p.grabBlock) continue;
+      if (d < bd) { bd = d; best = p; }
+    }
+    if (best) { ball.owner = best.seat; ball.vx = 0; ball.vy = 0; touch(best); emit({ type: 'grab', seat: best.seat }); }
+  }
+  function updateBall(alive) {
+    if (ball.owner >= 0) {                           // conduite : le ballon devant les pieds du porteur
+      const o = players[ball.owner];
+      if (!o.alive) { ball.owner = -1; }
+      else {
+        const k = PR + BR + 1;
+        ball.x = o.x + Math.cos(o.a) * k; ball.y = o.y + Math.sin(o.a) * k; ball.vx = o.vx; ball.vy = o.vy;
+        return ballEdges(false);                      // on peut rentrer le ballon dans une cage en le conduisant
+      }
+    }
+    let sp = Math.hypot(ball.vx, ball.vy);
+    if (sp > BALL_VMAX) { ball.vx *= BALL_VMAX / sp; ball.vy *= BALL_VMAX / sp; sp = BALL_VMAX; }
+    const n = Math.max(1, Math.ceil(sp / (BR * 0.8)));   // sous-pas : un tir ne traverse ni un mur ni un joueur
+    for (let i = 0; i < n; i++) {
+      ball.x += ball.vx / n; ball.y += ball.vy / n;
+      if (ballEdges(true)) return true;
+      if (ball.owner < 0) ballPlayers(alive);
+      if (ball.owner >= 0) break;
+    }
+    ball.vx *= BALL_FR; ball.vy *= BALL_FR;
+    if (Math.hypot(ball.vx, ball.vy) < 0.05) { ball.vx = 0; ball.vy = 0; }
+    return false;
+  }
+
+  /* ---------- IA ---------- */
+  function goalTarget(p) {                          // cage adverse ouverte la plus proche
+    let best = null, bd = Infinity;
+    for (const e of geo.edges) {
+      if (!e.open || e.owner < 0) continue;
+      const q = players[e.owner]; if (!q.alive || !foe(p, q)) continue;
+      const d = Math.hypot(e.mx - p.x, e.my - p.y); if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+  function botThink(p) {
+    const D = FTDIFF[botDiff] || FTDIFF[1];
+    if (tick < p.botNext) return;
+    p.botNext = tick + D.every;
+    const myE = geo.edges[p.edge];
+    let gx = 0, gy = 0;
+    if (ball.owner === p.seat) {
+      const e = goalTarget(p);
+      if (e) {
+        if (p.botTgt !== e.owner) { p.botTgt = e.owner; p.botAim = (Math.random() * 2 - 1) * D.noise; }
+        const ax = e.mx + e.tx * half(e) * 0.8 * p.botAim, ay = e.my + e.ty * half(e) * 0.8 * p.botAim;
+        gx = ax - p.x; gy = ay - p.y;
+        const d = Math.hypot(gx, gy) || 1, face = (Math.cos(p.a) * gx + Math.sin(p.a) * gy) / d;
+        const press = players.some(q => q.alive && foe(p, q) && Math.hypot(q.x - p.x, q.y - p.y) < 60);
+        const range = e.apo * 2 * D.shoot * 0.55;
+        if ((d < range || (press && d < range * 1.6)) && face > 0.9) p.wantShoot = true;
+      }
+    } else if (ball.owner >= 0) {
+      const o = players[ball.owner];
+      if (foe(p, o)) {
+        const d = Math.hypot(o.x - p.x, o.y - p.y);
+        const menace = myE.open && Math.hypot(o.x - myE.mx, o.y - myE.my) < myE.apo * 0.9;
+        if (d < 170 || !menace) {                    // on presse le porteur, tacle quand il est à portée
+          gx = o.x + o.vx * 4 - p.x; gy = o.y + o.vy * 4 - p.y;
+          if (d < PR * 2 + 16 && tick >= p.tackleReadyAt && Math.random() < D.tackleP) p.wantTackle = true;
+        } else {                                     // il fonce vers MA cage : je me place entre lui et elle
+          gx = myE.mx + (o.x - myE.mx) * 0.3 - p.x; gy = myE.my + (o.y - myE.my) * 0.3 - p.y;
+        }
+      } else {                                       // un coéquipier a le ballon : on monte en soutien
+        const e = goalTarget(o);
+        if (e) { gx = (o.x + e.mx) / 2 + e.tx * 60 * (p.seat % 2 ? 1 : -1) - p.x; gy = (o.y + e.my) / 2 + e.ty * 60 * (p.seat % 2 ? 1 : -1) - p.y; }
+      }
+    } else {
+      // ballon libre qui file vers MA cage : réflexe de gardien (point d'interception sur ma ligne de but)
+      let garde = false;
+      if (D.keeper && myE.open) {
+        const vn = ball.vx * myE.nx + ball.vy * myE.ny, d0 = (ball.x - myE.ax) * myE.nx + (ball.y - myE.ay) * myE.ny;
+        if (vn < -2 && d0 / -vn < 40) {
+          const t = d0 / -vn, hx = ball.x + ball.vx * t, hy = ball.y + ball.vy * t, s = (hx - myE.ax) * myE.tx + (hy - myE.ay) * myE.ty;
+          if (Math.abs(s - myE.len / 2) < half(myE) + BR * 2) {
+            const px = myE.ax + myE.tx * s + myE.nx * (PR + 6), py = myE.ay + myE.ty * s + myE.ny * (PR + 6);
+            gx = px - p.x; gy = py - p.y; garde = true;
+          }
+        }
+      }
+      if (!garde) {                                  // sinon, on court au ballon (là où il sera dans quelques ticks)
+        const d = Math.hypot(ball.x - p.x, ball.y - p.y), k = Math.min(12, d / 6);
+        gx = ball.x + ball.vx * k - p.x; gy = ball.y + ball.vy * k - p.y;
+      }
+    }
+    const gl = Math.hypot(gx, gy);
+    if (gl > 2) { p.mx = gx / gl; p.my = gy / gl; } else { p.mx = 0; p.my = 0; }
+  }
+
+  function update() { fx = pend; pend = []; dansTick = true; try { pas(); } finally { dansTick = false; } }
+  function pas() {
+    if (gameState === 'countdown') { tick++; if (tick >= countdownUntil) { gameState = 'play'; tick = 0; emit({ type: 'whistle', k: 'go' }); } return; }
+    if (gameState !== 'play') return;
+    tick++;
+    if (!sdOn && tick >= SD_START) { sdOn = true; emit({ type: 'sd' }); }
+    if (freezeUntil) {                               // célébration du but : tout est figé, puis engagement
+      if (tick < freezeUntil) return;
+      freezeUntil = 0;
+      if (aliveTeams().size <= 1) { endRound(); return; }
+      kickoff(); emit({ type: 'whistle', k: 'kick' });
+      return;
+    }
+    const alive = players.filter(p => p.alive);
+    for (const p of alive) { if (p.bot) botThink(p); else humanDir(p); if (stunned(p)) { p.mx = 0; p.my = 0; } }
+    for (const p of alive) actions(p);
+    for (const p of alive) move(p);
+    for (let i = 0; i < alive.length; i++) for (let j = i + 1; j < alive.length; j++) collide(alive[i], alive[j]);
+    for (const p of alive) if (tackling(p)) tackleHits(p);
+    updateBall(alive);
+    if (tick >= TIME_CAP && !freezeUntil) endRound();
+  }
+
+  function snapshot() {
+    return {
+      gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, lives,
+      ar, sd: sdOn && gameState === 'play', gw: r2(gwFrac()), frz: freezeUntil > tick ? 1 : 0,
+      // le terrain ne change qu'aux éliminations : le hub ne le renvoie pas tant qu'il est identique
+      geo: { G: geo.G, e: geo.edges.map(e => [r1(e.ax), r1(e.ay), r1(e.bx), r1(e.by), e.owner, e.open ? 1 : 0]) },
+      ball: { x: r1(ball.x), y: r1(ball.y), o: ball.owner, l: ball.last },
+      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts } : null,
+      players: players.map(p => ({
+        seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot, edge: p.edge,
+        x: r1(p.x), y: r1(p.y), a: r2(p.a), lives: p.lives, goals: p.goals, kills: p.kills,
+        tk: tackling(p), tcd: r2(1 - Math.max(0, p.tackleReadyAt - tick) / TACKLE_CD), st: stunned(p),
+        place: p.place, elimTick: p.elimTick, elimBy: p.elimBy,
+      })),
+    };
+  }
+
+  /* ---- contrat plateforme ---- */
+  // Siège d'un bot pris par un humain entre deux manches : on efface ce que le BOT y avait gagné (ligne de l'écran de
+  // fin, victoire, points de match), sinon l'arrivant apparaissait vainqueur d'une manche qu'il n'a pas jouée.
+  function repriseSiegeBot(p) {
+    p.playing = false; p.alive = false; p.place = 0; p.kills = 0;
+    if ('score' in p) p.score = 0; if ('matchKills' in p) p.matchKills = 0;
+  }
+  function onJoin(member) {
+    const cur = seatOf(member); if (cur >= 0) return { role: 'player', seat: cur, hello: { t: 'welcome', seat: cur } }; // déjà assis (reconnexion within grace)
+    let seat = -1;
+    const rid = seatByMid[member.id];
+    if (rid != null && players[rid] && !players[rid].member && !players[rid].bot) seat = rid;
+    if (seat < 0) { const free = players.find(p => !p.member && !p.bot) || (editable() ? players.find(p => !p.member) : null); if (free) seat = free.seat; }
+    if (seat < 0) return { role: 'spectator', hello: { t: 'welcome', seat: -1 } };
+    const p = players[seat];
+    if (p.bot) repriseSiegeBot(p);   /* hors partie, un siège de bot se libère (startGame redistribue les bots) : remis à neuf */
+    p.member = member; p.bot = false; p.mid = member.id; p.name = member.name || '';
+    seatByMid[member.id] = seat;
+    apercu();
+    return { role: 'player', seat, hello: { t: 'welcome', seat } };
+  }
+  function onLeave(member) {
+    const seat = seatOf(member); if (seat < 0) return;
+    const p = players[seat]; p.member = null; p.inp = { up: false, down: false, left: false, right: false }; p.mx = 0; p.my = 0;
+    if (gameState === 'play' || gameState === 'countdown' || gameState === 'paused') {
+      if (p.alive) { eliminate(p, -1); }
+      if (connectedCount() === 0) fullReset(); else if (gameState === 'play' && aliveTeams().size <= 1 && !freezeUntil) endRound();
+    } else if (connectedCount() === 0) fullReset();
+    else apercu();
+  }
+  function onRename(member) { const s = seatOf(member); if (s >= 0) players[s].name = member.name || ''; }
+  function onMessage(member, m) {
+    if (!m || typeof m !== 'object') return;
+    const seat = seatOf(member);
+    const p = seat >= 0 ? players[seat] : null;
+    if (m.t === 'input' && p) p.inp = { up: !!m.up, down: !!m.down, left: !!m.left, right: !!m.right };   // état TENU, envoyé à chaque changement
+    else if (m.t === 'shoot' && p && p.alive && gameState === 'play') p.wantShoot = true;   // traité au tick suivant (ordre déterministe)
+    else if (m.t === 'tackle' && p && p.alive && gameState === 'play') p.wantTackle = true;
+    else if (m.t === 'start') startGame();
+    else if (m.t === 'pause') { if (gameState === 'play') gameState = 'paused'; else if (gameState === 'paused') gameState = 'play'; }
+    else if (m.t === 'abort') backToLobby();
+    else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; } }
+    else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); apercu(); } }
+    else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
+    else if (m.t === 'lives') { if (editable()) lives = LIVES_CYCLE[(LIVES_CYCLE.indexOf(lives) + 1) % LIVES_CYCLE.length]; }
+    else if (m.t === 'lbreset') reset(GID);
+  }
+  function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }
+
+  fullReset();
+  return { onJoin, onLeave, onRename, onMessage, tick: tick_, isIdle: editable };
+}
+
+export default { meta: { id: GID, name: 'Foot', min: 2, max: 10, tickHz: TICK_HZ, desc: 'Une cage par joueur, un seul ballon : marque dans les cages adverses pour les éliminer' }, create: createFoot };
