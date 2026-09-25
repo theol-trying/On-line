@@ -247,6 +247,22 @@ Retour utilisateur : « on ne fait que se tacler pour dégager la balle et elle 
 - **IA** : frappe dosée selon la distance (0,4 à 0,9, rarement à fond), réflexe à chaque tick quand un ballon libre
   file (arrêts, interceptions). Manches mesurées : ~20 s à 2, ~30 s à 3, ~70 s à 5, ~3 min à 10.
 
+### Une cage par ÉQUIPE (25/09)
+Retour utilisateur : « en mode équipe il faut qu'il y ait autant de buts que d'équipes et que le terrain s'adapte ».
+- Tout le jeu raisonne par équipe ; en « chacun pour soi », chaque joueur est une équipe d'un (rien ne change).
+- Le polygone a **K = nombre d'équipes** côtés-cages (2 : carré, cages gauche/droite et murs haut/bas ; 3 : triangle ;
+  4 : carré ; 5 : pentagone). La **taille** de l'arène suit toujours le nombre de JOUEURS (`scaleFor(N)`).
+- Chaque côté-cage porte `team` (côté serveur) et `owner` = siège représentant (1er de l'équipe) pour le client
+  (couleur d'équipe, vies affichées, étiquette « Équipe X »). Cage active = `open && team >= 0`.
+- **Vies d'équipe** (`teamLives`, recopiées dans `p.lives` de chaque membre). À 0 : toute l'équipe sort au même tick
+  (même place), sa cage se ferme ; le buteur gagne une élimination par membre sorti.
+- **Départ** en pleine manche : l'équipe continue s'il reste un membre (nouveau représentant) ; sinon elle est éliminée.
+- Coéquipiers placés côte à côte devant leur cage (un sur deux avancé). Le lobby montre déjà le bon terrain pour le
+  mode choisi (`apercu()` rappelé au changement de mode).
+- Contre son camp : dernier « kick » de l'équipe qui encaisse (coéquipier compris). Crédit : dernier kick adverse.
+- Simulation de tous les modes (2 à 10 joueurs) : cages = équipes, terrain du lobby identique, sorties groupées par
+  équipe, manches finies (11 à 70 s entre bots).
+
 ## ZQSD / WASD dans tous les jeux (25/09)
 Les 7 jeux lisent le clavier par `e.code` (position PHYSIQUE) : `KeyW`/`KeyA` sont les touches Z/Q d'un clavier
 AZERTY, donc ZQSD marchait déjà en AZERTY. `KeyZ`/`KeyQ` ajoutés partout : Z Q S D marche aussi sur un clavier réglé

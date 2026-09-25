@@ -1,6 +1,8 @@
-// Jeu FOOT — terrain polygonal vu de dessus, UNE CAGE PAR JOUEUR (même principe que les raquettes de Pong),
-// un seul ballon au centre. Chaque but encaissé coûte une vie ; à zéro, le joueur est éliminé et sa cage se
-// ferme (son côté devient un mur). Le dernier joueur (ou la dernière équipe) en lice gagne la manche.
+// Jeu FOOT — terrain polygonal vu de dessus, UNE CAGE PAR ÉQUIPE (même principe que les raquettes de Pong ; en
+// « chacun pour soi », chaque joueur est une équipe d'un), un seul ballon au centre. Chaque but encaissé coûte une vie
+// à l'équipe ; à zéro, toute l'équipe est éliminée et sa cage se ferme (son côté devient un mur). La dernière équipe
+// en lice gagne. Le terrain a autant de côtés-cages que d'équipes (2 : carré, cages face à face ; 3 : triangle…) ;
+// sa TAILLE suit le nombre de joueurs.
 // Ballon collé au premier qui le touche ; Espace = tir, E = tacle (le tacle fait sauter le ballon du porteur).
 // Physique continue à 30 Hz, comme le Sumo dont ce fichier reprend la structure. Pas de bonus/malus (v1).
 import { AR0, PITCH, PR, BR, POST_R, GOAL0, GOAL_SD } from '../../public/games/foot/shared.js';
@@ -53,7 +55,7 @@ const r2 = v => Math.round(v * 100) / 100;
 
 export function createFoot(room) {
   let players, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick, botCount, botDiff, lives;
-  let ar, geo, ball, freezeUntil, sdOn;
+  let ar, geo, ball, freezeUntil, sdOn, teamLives = [];
   let seatByMid = {};
   // Effets : pendant un tick ils partent dans fx ; entre deux ticks (lancement, départ d'un joueur) ils attendent dans
   // pend, sinon update() les effacerait avant la diffusion.
@@ -118,9 +120,9 @@ export function createFoot(room) {
   const stunned = p => p.stunUntil > tick;
   const tackling = p => p.tackleUntil > tick;
 
-  /* ---------- terrain : polygone régulier, un côté par joueur (2 joueurs : carré, cages face à face) ---------- */
-  function buildGeo(N) {
-    const G = N <= 2 ? 4 : N, c = cxy(), R = ar * PITCH;
+  /* ---------- terrain : polygone régulier, un côté-cage par ÉQUIPE (2 équipes : carré, cages face à face) ---------- */
+  function buildGeo(K) {
+    const G = K <= 2 ? 4 : K, c = cxy(), R = ar * PITCH;
     const start = -Math.PI / 2 - Math.PI / G;      // un côté bien à plat en haut, quel que soit G
     const v = [];
     for (let k = 0; k < G; k++) { const a = start + k * 2 * Math.PI / G; v.push([c + R * Math.cos(a), c + R * Math.sin(a)]); }
@@ -130,29 +132,35 @@ export function createFoot(room) {
       const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy), tx = dx / len, ty = dy / len;
       const mx = (ax + bx) / 2, my = (ay + by) / 2;
       let nx = c - mx, ny = c - my; const nl = Math.hypot(nx, ny); nx /= nl; ny /= nl;   // normale vers l'intérieur
-      edges.push({ ax, ay, bx, by, tx, ty, nx, ny, len, mx, my, apo: nl, owner: -1, open: false });
+      edges.push({ ax, ay, bx, by, tx, ty, nx, ny, len, mx, my, apo: nl, owner: -1, team: -1, open: false });   // owner : siège représentant (couleur, vies, côté client)
     }
     return { G, edges };
   }
-  // côtés attribués : tous à partir de 3 joueurs ; à 2, les deux côtés opposés gauche / droite (comme Pong)
-  function ownerEdges(N) {
-    if (N >= 3) return Array.from({ length: N }, (_, i) => i);
-    return [0, 1, 2, 3].sort((a, b) => Math.abs(geo.edges[b].nx) - Math.abs(geo.edges[a].nx)).slice(0, N);
+  // côtés attribués : tous à partir de 3 équipes ; à 2, les deux côtés opposés gauche / droite (comme Pong)
+  function ownerEdges(K) {
+    if (K >= 3) return Array.from({ length: K }, (_, i) => i);
+    return [0, 1, 2, 3].sort((a, b) => Math.abs(geo.edges[b].nx) - Math.abs(geo.edges[a].nx)).slice(0, K);
   }
+  const cageActive = e => e.open && e.team >= 0;
+  const equipe = t => players.filter(q => q.playing && q.team === t);
+  function setTeamLives(t, v) { teamLives[t] = v; for (const q of equipe(t)) q.lives = v; }   // miroir par joueur : HUD, courbe de fin
   const gwFrac = () => GOAL0 + (GOAL_SD - GOAL0) * (sdOn ? Math.min(1, (tick - SD_START) / SD_GROW) : 0);
   const half = e => e.len * gwFrac() / 2;         // demi-largeur de la bouche de but
   // aperçu du lobby : le terrain et les cages au bon nombre (sièges humains d'abord, puis bots à venir)
   function apercu() {
     if (gameState !== 'lobby') return;
-    const n = Math.max(2, partCount());
-    setArena(n); geo = buildGeo(n); ball = newBall();
-    const own = ownerEdges(n), humains = players.filter(p => p.member);
-    own.forEach((ei, i) => { geo.edges[ei].owner = i < humains.length ? humains[i].seat : -2; geo.edges[ei].open = true; });   // -2 : un bot à venir
+    const n = Math.max(2, partCount()), m = validModes(n).includes(mode) ? mode : 'ffa', k = numTeamsFor(m, n);
+    setArena(n); geo = buildGeo(k); ball = newBall();
+    // équipe t = participants d'indice ≡ t (mod k), humains d'abord : son représentant est le t-ième humain, sinon un bot à venir (-2)
+    const own = ownerEdges(k), humains = players.filter(p => p.member);
+    humains.forEach((p, i) => { p.team = i % k; });
+    own.forEach((ei, t) => { const e = geo.edges[ei]; e.owner = t < humains.length ? humains[t].seat : -2; e.team = t; e.open = true; });
   }
 
-  function spawnPos(p) {
-    const e = geo.edges[p.edge], d = Math.min(e.apo * 0.34, 150);
-    p.sx = e.mx + e.nx * d; p.sy = e.my + e.ny * d;
+  function spawnPos(p, j, k) {                     // j-ième de son équipe (k joueurs) : en ligne devant la cage, un sur deux avancé
+    const e = geo.edges[p.edge], d = Math.min(e.apo * 0.34, 150) * (k > 1 && j % 2 ? 1.45 : 1);
+    const sp = Math.min(e.len * 0.8 / Math.max(1, k), 70), u = (j - (k - 1) / 2) * sp;
+    p.sx = e.mx + e.nx * d + e.tx * u; p.sy = e.my + e.ny * d + e.ty * u;
   }
   function kickoff() {                             // engagement : ballon au centre, chacun devant sa cage
     ball = newBall();
@@ -175,16 +183,17 @@ export function createFoot(room) {
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
-    setArena(N); geo = buildGeo(N);
-    const own = ownerEdges(N);
+    setArena(N); geo = buildGeo(nteams);           // la TAILLE suit les joueurs, la FORME suit les équipes
+    const own = ownerEdges(nteams); teamLives = [];
     parts.forEach((p, i) => {
-      p.playing = true; p.alive = true; p.team = i % nteams; p.edge = own[i];
-      geo.edges[own[i]].owner = p.seat; geo.edges[own[i]].open = true;
+      const t = i % nteams, e = geo.edges[own[t]];
+      p.playing = true; p.alive = true; p.team = t; p.edge = own[t];
+      if (i < nteams) { e.owner = p.seat; e.team = t; e.open = true; teamLives[t] = lives; }   // 1er de l'équipe = représentant
       p.lives = lives; p.goals = 0; p.kills = 0; p.place = 0; p.elimTick = -1; p.elimBy = -1;
       p.inp = { up: false, down: false, left: false, right: false }; p.mx = 0; p.my = 0; p.tackleReadyAt = 0; p.shotReadyAt = 0;
       p.botNext = 0; p.botTgt = -1;
-      spawnPos(p);
     });
+    for (let t = 0; t < nteams; t++) equipe(t).forEach((p, j, arr) => spawnPos(p, j, arr.length));
     nParts = N; deaths = 0; endTick = 0; winner = null; freezeUntil = 0; sdOn = false;
     round++; tick = 0; countdownUntil = COUNTDOWN_TICKS; gameState = 'countdown';
     kickoff();
@@ -200,34 +209,46 @@ export function createFoot(room) {
     gameState = 'over'; endTick = tick;
     let s = aliveTeams();
     if (s.size > 1) {                                // filet de 6 min : l'équipe qui a le plus de vies l'emporte (égalité sinon)
-      const tot = {}; for (const p of players) if (p.alive) tot[p.team] = (tot[p.team] || 0) + p.lives;
+      const tot = {}; for (const t of s) tot[t] = teamLives[t] || 0;
       let best = -1, bv = -1, tie = false;
       for (const t in tot) { if (tot[t] > bv) { bv = tot[t]; best = +t; tie = false; } else if (tot[t] === bv) tie = true; }
       s = tie ? new Set() : new Set([best]);
     }
     winner = s.size === 1 ? [...s][0] : -1;
     if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
-    players.forEach(p => { if (p.playing && p.alive) p.place = 1; });
+    const viv = [...aliveTeams()];                   // encore en lice : classées par vies restantes (1 = vainqueur)
+    players.forEach(p => { if (p.playing && p.alive) p.place = 1 + viv.filter(u => (teamLives[u] || 0) > (teamLives[p.team] || 0)).length; });
     emit({ type: 'whistle', k: 'end' });
     recordRound();
   }
 
-  function eliminate(p, by) {
-    p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++; p.elimBy = by;
-    if (by >= 0) players[by].kills++;
-    if (p.edge >= 0) geo.edges[p.edge].open = false;    // sa cage se ferme : le côté devient un mur
+  // Un joueur sort (équipe éliminée, ou départ) : place = nombre d'équipes encore en lice à cet instant (lui compris).
+  function sortir(p, by, place) {
+    p.alive = false; p.elimTick = tick; p.place = place; deaths++; p.elimBy = by;
     if (ball.owner === p.seat) ball.owner = -1;
     emit({ type: 'out', seat: p.seat, by, x: r1(p.x), y: r1(p.y) });
   }
+  function eliminerEquipe(t, by) {                  // plus de vies : TOUTE l'équipe sort, sa cage se ferme (le côté devient un mur)
+    const place = aliveTeams().size, membres = equipe(t).filter(q => q.alive);
+    for (const q of membres) sortir(q, by, place);
+    if (by >= 0) players[by].kills += membres.length;
+    for (const e of geo.edges) if (e.team === t) e.open = false;
+  }
+  function quitter(p) {                             // départ en pleine manche : l'équipe continue s'il lui reste quelqu'un
+    const reste = equipe(p.team).filter(q => q.alive && q !== p);
+    if (!reste.length) { eliminerEquipe(p.team, -1); return; }
+    sortir(p, -1, aliveTeams().size);
+    for (const e of geo.edges) if (e.team === p.team && e.owner === p.seat) e.owner = reste[0].seat;   // nouveau représentant
+  }
   function goal(e) {
-    const victim = players[e.owner];
-    const lp = ball.kick >= 0 ? players[ball.kick] : null;
-    const by = lp && lp !== victim && foe(lp, victim) && tick - ball.kickTick <= CREDIT_TICKS ? lp.seat : -1;
-    const own = ball.kick === victim.seat;             // contre son camp : c'est lui qui l'a joué en dernier
-    victim.lives = Math.max(0, victim.lives - 1);
+    const t = e.team, lp = ball.kick >= 0 ? players[ball.kick] : null;
+    const recent = lp && tick - ball.kickTick <= CREDIT_TICKS;
+    const by = recent && lp.team !== t ? lp.seat : -1;
+    const own = !!(recent && lp.team === t);         // contre son camp : le dernier à l'avoir joué est de l'équipe qui encaisse
+    setTeamLives(t, Math.max(0, (teamLives[t] || 0) - 1));
     if (by >= 0) players[by].goals++;
-    emit({ type: 'goal', seat: victim.seat, by, own, x: r1(ball.x), y: r1(ball.y), lives: victim.lives });
-    if (victim.lives <= 0) eliminate(victim, by);
+    emit({ type: 'goal', seat: e.owner, team: t, by, own, k: own ? lp.seat : -1, x: r1(ball.x), y: r1(ball.y), lives: teamLives[t] });
+    if (teamLives[t] <= 0) eliminerEquipe(t, by);
     ball.owner = -1; ball.vx *= 0.2; ball.vy *= 0.2;
     freezeUntil = tick + GOAL_FREEZE;
   }
@@ -317,7 +338,7 @@ export function createFoot(room) {
       if (d >= BR) continue;
       const s = dx * e.tx + dy * e.ty;
       if (s < -BR || s > e.len + BR) continue;     // au-delà du segment : c'est le côté voisin qui répond
-      if (e.open && e.owner >= 0 && players[e.owner].alive && Math.abs(s - e.len / 2) < half(e)) {
+      if (cageActive(e) && Math.abs(s - e.len / 2) < half(e)) {
         if (d < 0) { goal(e); return true; }        // le CENTRE du ballon a franchi la ligne dans la bouche
         continue;                                   // dans la bouche : pas de rebond
       }
@@ -330,7 +351,7 @@ export function createFoot(room) {
     }
     // poteaux (cages ouvertes seulement) : petits disques qui renvoient le ballon
     for (const e of geo.edges) {
-      if (!e.open || e.owner < 0 || !players[e.owner].alive) continue;
+      if (!cageActive(e)) continue;
       const h = half(e);
       for (const sg of [-1, 1]) {
         const px = e.mx + e.tx * h * sg, py = e.my + e.ty * h * sg, dx = ball.x - px, dy = ball.y - py, d = Math.hypot(dx, dy), rr = BR + POST_R;
@@ -369,6 +390,7 @@ export function createFoot(room) {
       else {
         const k = PR + BR + 1;
         ball.x = o.x + Math.cos(o.a) * k; ball.y = o.y + Math.sin(o.a) * k; ball.vx = o.vx; ball.vy = o.vy;
+        ball.kickTick = tick; ball.lastTick = tick;   // la conduite compte comme jouer le ballon (crédit d'un but « rentré » au pied)
         return ballEdges(false);                      // on peut rentrer le ballon dans une cage en le conduisant
       }
     }
@@ -390,8 +412,7 @@ export function createFoot(room) {
   function goalTarget(p) {                          // cage adverse ouverte la plus proche
     let best = null, bd = Infinity;
     for (const e of geo.edges) {
-      if (!e.open || e.owner < 0) continue;
-      const q = players[e.owner]; if (!q.alive || !foe(p, q)) continue;
+      if (!cageActive(e) || e.team === p.team) continue;
       const d = Math.hypot(e.mx - p.x, e.my - p.y); if (d < bd) { bd = d; best = e; }
     }
     return best;
@@ -406,7 +427,7 @@ export function createFoot(room) {
     if (ball.owner === p.seat) {
       const e = goalTarget(p);
       if (e) {
-        if (p.botTgt !== e.owner) { p.botTgt = e.owner; p.botAim = (Math.random() * 2 - 1) * D.noise; }
+        if (p.botTgt !== e.team) { p.botTgt = e.team; p.botAim = (Math.random() * 2 - 1) * D.noise; }
         const ax = e.mx + e.tx * half(e) * 0.8 * p.botAim, ay = e.my + e.ty * half(e) * 0.8 * p.botAim;
         gx = ax - p.x; gy = ay - p.y;
         const d = Math.hypot(gx, gy) || 1, face = (Math.cos(p.a) * gx + Math.sin(p.a) * gy) / d;
@@ -467,6 +488,7 @@ export function createFoot(room) {
       kickoff(); emit({ type: 'whistle', k: 'kick' });
       return;
     }
+    if (aliveTeams().size <= 1) { endRound(); return; }   // une équipe entière est partie (décompte, pause…) : fin
     const alive = players.filter(p => p.alive);
     for (const p of alive) {
       if (p.bot) { botThink(p); if (p.botShootAt && tick >= p.botShootAt) { p.botShootAt = 0; p.chargeHeld = false; p.chargeRelease = true; } }
@@ -485,7 +507,8 @@ export function createFoot(room) {
   function snapshot() {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, lives,
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, nteams, lives,
+      mode: gameState === 'lobby' && !validModes(Math.max(2, partCount())).includes(mode) ? 'ffa' : mode,
       ar, sd: sdOn && gameState === 'play', gw: r2(gwFrac()), frz: freezeUntil > tick ? 1 : 0,
       // le terrain ne change qu'aux éliminations : le hub ne le renvoie pas tant qu'il est identique
       geo: { G: geo.G, e: geo.edges.map(e => [r1(e.ax), r1(e.ay), r1(e.bx), r1(e.by), e.owner, e.open ? 1 : 0]) },
@@ -513,7 +536,7 @@ export function createFoot(room) {
     let seat = -1;
     const rid = seatByMid[member.id];
     if (rid != null && players[rid] && !players[rid].member && !players[rid].bot) seat = rid;
-    if (seat < 0) { const free = players.find(p => !p.member && !p.bot) || (editable() ? players.find(p => !p.member) : null); if (free) seat = free.seat; }
+    if (seat < 0) { const free = players.find(p => !p.member && !p.bot && (editable() || !p.playing)) || (editable() ? players.find(p => !p.member) : null); if (free) seat = free.seat; }
     if (seat < 0) return { role: 'spectator', hello: { t: 'welcome', seat: -1 } };
     const p = players[seat];
     if (p.bot) repriseSiegeBot(p);   /* hors partie, un siège de bot se libère (startGame redistribue les bots) : remis à neuf */
@@ -526,7 +549,7 @@ export function createFoot(room) {
     const seat = seatOf(member); if (seat < 0) return;
     const p = players[seat]; p.member = null; p.inp = { up: false, down: false, left: false, right: false }; p.mx = 0; p.my = 0;
     if (gameState === 'play' || gameState === 'countdown' || gameState === 'paused') {
-      if (p.alive) { eliminate(p, -1); }
+      if (p.alive) quitter(p);
       if (connectedCount() === 0) fullReset(); else if (gameState === 'play' && aliveTeams().size <= 1 && !freezeUntil) endRound();
     } else if (connectedCount() === 0) fullReset();
     else apercu();
@@ -546,7 +569,7 @@ export function createFoot(room) {
     else if (m.t === 'start') startGame();
     else if (m.t === 'pause') { if (gameState === 'play') gameState = 'paused'; else if (gameState === 'paused') gameState = 'play'; }
     else if (m.t === 'abort') backToLobby();
-    else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; } }
+    else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; apercu(); } }   // le terrain du lobby suit le mode
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); apercu(); } }
     else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
     else if (m.t === 'lives') { if (editable()) lives = LIVES_CYCLE[(LIVES_CYCLE.indexOf(lives) + 1) % LIVES_CYCLE.length]; }
