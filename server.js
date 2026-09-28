@@ -1,7 +1,7 @@
 // Point d'entrée : sert les fichiers statiques (public/) + branche le hub multijeux (WS + boucle).
 import http from 'http';
 import os from 'os';
-import { readFile } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import { initLeaderboard, board, history, flush } from './leaderboard.js';
@@ -11,6 +11,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+// ETag des statiques : taille+mtime, calculé une seule fois par fichier puis mis en cache (revalidé si mtime/taille changent).
+const etags = new Map();                          // chemin absolu -> { taille, mtimeMs, etag }
+function etagDe(chemin, st) {
+  const c = etags.get(chemin);
+  if (c && c.taille === st.size && c.mtimeMs === st.mtimeMs) return c.etag;
+  const etag = 'W/"' + st.size.toString(16) + '-' + Math.floor(st.mtimeMs).toString(16) + '"';
+  etags.set(chemin, { taille: st.size, mtimeMs: st.mtimeMs, etag });
+  return etag;
+}
 
 // LEADERBOARD_FILE : le test de fumée écrit dans un dossier temporaire, jamais dans le vrai fichier.
 initLeaderboard(process.env.LEADERBOARD_FILE || join(__dirname, 'leaderboard.json'));
@@ -67,6 +77,10 @@ const server = http.createServer((req, res) => {
   servir(req, res).catch(() => { try { if (!res.headersSent) res.writeHead(400); res.end(); } catch {} });
 });
 async function servir(req, res) {
+  // Seules GET/HEAD sont servies ici ; l'upgrade WebSocket passe par l'événement 'upgrade' (jamais 'request'), donc intact.
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { Allow: 'GET, HEAD', 'Content-Type': 'text/plain' }); res.end('Method Not Allowed'); return;
+  }
   const u = new URL(req.url, 'http://x');
   const path = u.pathname;
   const gid = u.searchParams.get('game') || 'pong';
@@ -79,9 +93,27 @@ async function servir(req, res) {
   }
   const url = path === '/' ? '/index.html' : path;
   if (url.includes('..')) { res.writeHead(403); res.end('Forbidden'); return; }
+  const full = join(__dirname, 'public', url);
   try {
-    const buf = await readFile(join(__dirname, 'public', url));
-    res.writeHead(200, { 'Content-Type': TYPES[extname(url)] || 'application/octet-stream' });
+    const st = await stat(full);
+    if (!st.isFile()) throw new Error('pas un fichier');   // un dossier (/games/) : 404, pas un 200 vide en HEAD
+    const etag = etagDe(full, st);
+    const entetes = {
+      'Content-Type': TYPES[extname(url)] || 'application/octet-stream',
+      'Content-Length': String(st.size),
+      ETag: etag,
+      'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'same-origin',
+    };
+    if (req.headers['if-none-match'] === etag) {   // revalidation : le fichier n'a pas changé, pas de corps à renvoyer
+      res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin' });
+      res.end();
+      return;
+    }
+    if (req.method === 'HEAD') { res.writeHead(200, entetes); res.end(); return; }
+    const buf = await readFile(full);
+    res.writeHead(200, entetes);
     res.end(buf);
   } catch {
     res.writeHead(404); res.end('Not found');

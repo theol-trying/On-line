@@ -73,11 +73,21 @@ export function createMusic(getCtx, getA11y, theme) {
     st.notes.forEach((n, i) => { (Array.isArray(n) ? n : [n]).forEach(s => osc(t0 + i * rate, base * Math.pow(2, s / 12), st.dur || 0.16, st.wave || 'triangle', st.gain || 0.05)); });
   }
   // écran verrouillé / onglet masqué : on suspend tout l'audio (musique + SFX) ; on relance au retour
-  document.addEventListener('visibilitychange', () => { const c = getCtx(); if (!c) return; try { if (document.hidden) c.suspend(); else c.resume(); } catch {} });
+  let disposed = false;
+  function onVis() { if (disposed) return; const c = getCtx(); if (!c) return; try { if (document.hidden) c.suspend(); else c.resume(); } catch {} }
+  document.addEventListener('visibilitychange', onVis);
   return {
     start() { if (!timer) timer = setInterval(sched, 90); },
     stop() { if (timer) { clearInterval(timer); timer = null; } if (master && ctx) master.gain.setTargetAtTime(0, ctx.currentTime, 0.06); nextT = 0; },
     setIntensity(v) { intensity = Math.max(0, Math.min(2, v | 0)); },
     sting,
+    // Teardown (changement de jeu) : arrête l'ordonnanceur et retire l'écouteur — sinon il relançait
+    // (c.resume()) l'AudioContext d'un jeu déjà quitté au retour sur l'onglet.
+    dispose() {
+      disposed = true;
+      if (timer) { clearInterval(timer); timer = null; }
+      if (master && ctx) { try { master.gain.setTargetAtTime(0, ctx.currentTime, 0.06); } catch {} }
+      document.removeEventListener('visibilitychange', onVis);
+    },
   };
 }

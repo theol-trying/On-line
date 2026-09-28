@@ -19,7 +19,7 @@ const SHELL_SPD = 6.5, SHELL_LIFE = 110, MAX_BOUNCE = 3, FIRE_COOL = 20, MAX_SHE
 const LIVES = 3, INVULN = 45;
 const PU_EVERY = 6 * TICK_HZ, MAX_PU = 3, PU_R = 11;
 const RAPID_T = 6 * TICK_HZ, TRIPLE_T = 8 * TICK_HZ, SPEED_T = 8 * TICK_HZ, PIERCE_T = 8 * TICK_HZ, SHIELD_CAP = 2;
-const MINE_ARM = 20, MINE_R = 30, MINE_CAP = 3;
+const MINE_ARM = 20, MINE_R = 30, MINE_CAP = 3, MINE_CD = 8;   // MINE_CD : délai mini (ticks) entre 2 mines d'un même joueur
 const EMP_T = 2 * TICK_HZ, EMP_R = BLK * 4;        // EMP : étourdit les ennemis proches
 const HOMING_T = 8 * TICK_HZ, CAMO_T = 6 * TICK_HZ, RADAR_T = 10 * TICK_HZ, HOMING_TURN = 0.13; // power-ups avancés : missile guidé / camouflage / radar
 const BARREL_COUNT = 4, BARREL_R = 11, BARREL_DMG_R = BLK * 1.25, BARREL_CHAIN = BLK * 1.6;      // barils explosifs : rayon collision / dégâts de zone / chaînage
@@ -105,7 +105,7 @@ export function createTank(room) {
       seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false, bot: false,
       x: ARENA / 2, y: ARENA / 2, angle: 0, lives: LIVES, cool: 0, invulnUntil: 0, empUntil: 0, spawn: { x: 0, y: 0, angle: 0 },
       inputs: { left: false, right: false, fwd: false, back: false, fire: false },
-      rapidUntil: 0, tripleUntil: 0, speedUntil: 0, pierceUntil: 0, shield: 0, mineN: 0,
+      rapidUntil: 0, tripleUntil: 0, speedUntil: 0, pierceUntil: 0, shield: 0, mineN: 0, mineCd: 0,
       homingUntil: 0, camoUntil: 0, radarUntil: 0,
       kills: 0, dmg: 0, place: 0, elimTick: -1, score: 0,
     }));
@@ -152,7 +152,7 @@ export function createTank(room) {
 
   function startGame() {
     if (!editable() || !canStart()) return;
-    for (const p of players) { p.playing = false; p.bot = false; }
+    for (const p of players) { p.playing = false; p.bot = false; p.alive = false; p.place = 0; p.kills = 0; }   // fantôme : siège hors nouvelle manche remis à zéro
     if (botCount > maxBots()) botCount = maxBots();
     const parts = players.filter(p => p.member);
     let bots = botCount;
@@ -168,7 +168,7 @@ export function createTank(room) {
     tick = 0;                       // remis à 0 AVANT placeAtSpawn : sinon l'invuln se calcule sur le tick (élevé) de la manche précédente -> joueurs invincibles au rematch
     parts.forEach((p, i) => {
       p.playing = true; p.alive = true; p.lives = LIVES; p.kills = 0; p.dmg = 0; p.place = 0; p.elimTick = -1; p.team = i % nteams; p.cool = 0;
-      p.rapidUntil = 0; p.tripleUntil = 0; p.speedUntil = 0; p.pierceUntil = 0; p.shield = 0; p.mineN = 0; p.empUntil = 0;
+      p.rapidUntil = 0; p.tripleUntil = 0; p.speedUntil = 0; p.pierceUntil = 0; p.shield = 0; p.mineN = 0; p.mineCd = 0; p.empUntil = 0;
       p.homingUntil = 0; p.camoUntil = 0; p.radarUntil = 0;
       p.botAvoidUntil = 0; p.botWanderUntil = 0; p.botWanderTurn = null;   // tick repart à 0 : purge l'état d'IA de la manche précédente
       if (p.bot) p.name = '🤖 Bot ' + (i + 1);
@@ -249,7 +249,7 @@ export function createTank(room) {
       if (diff > 0.07) inp.right = true; else if (diff < -0.07) inp.left = true;
       if (Math.abs(diff) < 1.1 && bd > (BLK * 1.3) ** 2) inp.fwd = true;                 // avance aussi pendant qu'il tourne, s'approche plus près
       if (Math.abs(diff) < D.fireA && tick >= p.cool && Math.random() < D.fireP) inp.fire = true;   // aligné : tire (fenêtre/probabilité selon difficulté)
-      if (p.mineN > 0 && bd < (BLK * 1.4) ** 2 && Math.random() < 0.03) { p.mineN--; mines.push({ x: p.x, y: p.y, owner: p.seat, arm: tick + MINE_ARM }); fx.push({ type: 'mineset', x: p.x, y: p.y, seat: p.seat }); }
+      if (p.mineN > 0 && tick >= p.mineCd && bd < (BLK * 1.4) ** 2 && Math.random() < 0.03) { p.mineN--; p.mineCd = tick + MINE_CD; mines.push({ x: p.x, y: p.y, owner: p.seat, arm: tick + MINE_ARM }); fx.push({ type: 'mineset', x: p.x, y: p.y, seat: p.seat }); }
     } else {                                          // pas de cible visible : errance (patrouille)
       if (!(p.botWanderUntil > tick)) { p.botWanderUntil = tick + 20 + Math.floor(Math.random() * 40); p.botWanderTurn = Math.random() < 0.35 ? (Math.random() < 0.5 ? 'left' : 'right') : null; }
       if (p.botWanderTurn) inp[p.botWanderTurn] = true;
@@ -422,7 +422,7 @@ export function createTank(room) {
     let seat = -1;
     const rid = seatByMid[member.id];
     if (rid != null && players[rid] && !players[rid].member && !players[rid].bot) seat = rid;
-    if (seat < 0) { const free = players.find(p => !p.member && !p.bot) || (editable() ? players.find(p => !p.member) : null); if (free) seat = free.seat; }
+    if (seat < 0) { const free = players.find(p => !p.member && !p.bot && (editable() || !p.playing)) || (editable() ? players.find(p => !p.member) : null); if (free) seat = free.seat; }   // siège « en jeu » (fantôme parti en pleine manche) protégé tant que la manche tourne : nParts/deaths restent cohérents
     if (seat < 0) return { role: 'spectator', hello: { t: 'welcome', seat: -1 } };
     const p = players[seat]; if (p.bot) repriseSiegeBot(p);   /* hors partie, un siège de bot se libère (startGame redistribue les bots) : remis à neuf */
     p.member = member; p.bot = false; p.mid = member.id; p.name = member.name || ''; seatByMid[member.id] = seat;
@@ -441,7 +441,7 @@ export function createTank(room) {
     if (!m || typeof m !== 'object') return;
     const seat = seatOf(member); const p = seat >= 0 ? players[seat] : null;
     if (m.t === 'input' && p) p.inputs = { left: !!m.left, right: !!m.right, fwd: !!m.fwd, back: !!m.back, fire: !!m.fire };
-    else if (m.t === 'mine' && p && active(p) && p.mineN > 0) { p.mineN--; mines.push({ x: p.x, y: p.y, owner: p.seat, arm: tick + MINE_ARM }); fx.push({ type: 'mineset', x: p.x, y: p.y, seat: p.seat }); }
+    else if (m.t === 'mine' && p && active(p) && p.mineN > 0 && tick >= p.mineCd) { p.mineN--; p.mineCd = tick + MINE_CD; mines.push({ x: p.x, y: p.y, owner: p.seat, arm: tick + MINE_ARM }); fx.push({ type: 'mineset', x: p.x, y: p.y, seat: p.seat }); }
     else if (m.t === 'start') startGame();
     else if (m.t === 'pause') { if (gameState === 'play') gameState = 'paused'; else if (gameState === 'paused') gameState = 'play'; }
     else if (m.t === 'abort') backToLobby();

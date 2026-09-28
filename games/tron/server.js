@@ -123,7 +123,10 @@ export function createTron(room) {
 
   function startGame() {
     if (!editable() || !canStart()) return;
-    for (const p of players) { p.playing = false; p.bot = false; }
+    // sièges ne participant pas à cette manche (ex. vainqueur parti sur l'écran de fin) : remis à zéro,
+    // sinon leur ancien alive=true/cells en fait des « motos fantômes » dans la manche suivante (update()
+    // ne filtre que sur alive, pas playing). spawnPlayers() réinitialise ensuite les VRAIS participants.
+    for (const p of players) { p.playing = false; p.bot = false; p.alive = false; p.cells = []; p.place = 0; p.kills = 0; p.boostHeld = false; p.pendingDir = null; p.nextDir = null; }
     if (botCount > maxBots()) botCount = maxBots();
     const parts = players.filter(p => p.member);
     let bots = botCount;
@@ -150,11 +153,19 @@ export function createTron(room) {
     winner = s.size === 1 ? [...s][0] : -1;
     if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
     players.forEach(p => { if (p.playing && p.alive) p.place = 1; });
+    // nul (aucun camp seul survivant) avec plusieurs morts au MÊME tick (causes distinctes : mur d'un côté,
+    // traînée de l'autre — pas seulement le choc mutuel déjà groupé plus haut) : ils partagent la meilleure
+    // place restante, sinon l'ordre de traitement (arbitraire) élit un faux gagnant à la place d'un nul.
+    if (winner < 0) {
+      const lastDead = players.filter(p => p.playing && !p.alive && p.elimTick === endTick);
+      if (lastDead.length > 1) { const best = Math.min(...lastDead.map(p => p.place)); for (const p of lastDead) p.place = best; }
+    }
     recordRound();
   }
 
-  function killCycle(p, killer, x, y) {
-    p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++;
+  function killCycle(p, killer, x, y, place) {
+    // `place` fourni => mort groupée (choc frontal/croisement) : même place pour tout le groupe, cf. appelant.
+    p.alive = false; p.elimTick = tick; p.place = place != null ? place : (nParts - deaths); if (place == null) deaths++;
     if (killer >= 0 && players[killer] && killer !== p.seat) players[killer].kills++;
     fx.push({ type: 'crash', seat: p.seat, x, y, by: killer });
   }
@@ -263,7 +274,7 @@ export function createTron(room) {
     for (const p of alive) { const n = fn.get(p), k = key(n.x, n.y); (tgt.get(k) || tgt.set(k, []).get(k)).push(p); }
     for (const [, list] of tgt) if (list.length > 1) for (const p of list) doomed.add(p);
     for (const p of alive) { if (doomed.has(p)) continue; const np = fn.get(p); for (const q of alive) { if (q === p || doomed.has(q)) continue; const nq = fn.get(q); if (np.x === head(q).x && np.y === head(q).y && nq.x === head(p).x && nq.y === head(p).y) { doomed.add(p); doomed.add(q); break; } } }
-    for (const p of doomed) { const n = fn.get(p); killCycle(p, -1, n.x, n.y); }
+    if (doomed.size) { const place = nParts - deaths; for (const p of doomed) { const n = fn.get(p); killCycle(p, -1, n.x, n.y, place); } deaths += doomed.size; }   // même place pour un choc mutuel simultané (sinon un « nul » élit un faux gagnant)
     for (const p of alive) {
       if (!p.alive) continue;
       const boosting = p.boostHeld && p.boost > 0;
@@ -275,7 +286,7 @@ export function createTron(room) {
       while (p.cells.length > TRAIL_LIFE) { const c = p.cells.shift(); const k = key(c.x, c.y); if (occupied.get(k) === p.seat) occupied.delete(k); }
     }
     if (tick % PU_EVERY === 0) spawnPickup();
-    if (aliveCount() <= 1) endRound();
+    if (aliveTeams().size <= 1) endRound();   // équipes : fin dès qu'un seul camp reste (pas seulement un seul joueur)
   }
 
   function snapshot() {
@@ -319,8 +330,8 @@ export function createTron(room) {
     const p = players[seat]; p.member = null; p.boostHeld = false;
     if (gameState === 'play' || gameState === 'countdown' || gameState === 'paused') {
       if (p.alive) { p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++; }
-      if (connectedCount() === 0) fullReset(); else if (gameState === 'play' && aliveCount() <= 1) endRound();
-    } else if (connectedCount() === 0) fullReset();
+      if (connectedCount() === 0) fullReset(); else if (gameState === 'play' && aliveTeams().size <= 1) endRound();
+    } else if (connectedCount() === 0) fullReset();   // départ sur l'écran de fin : il reste affiché au podium ; startGame nettoie son siège
   }
   // File de 2 virages (24/09). Un virage n'occupait qu'une case, écrasée à chaque réception : « haut puis gauche »
   // dans le même tick (demi-tour serré, balayage du joystick) → « gauche » écrasait « haut » puis était refusé comme

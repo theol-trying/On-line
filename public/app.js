@@ -9,8 +9,13 @@ let ws = null;
 // Un onglet DUPLIQUÉ recopie le jeton : le hub fait alors reprendre le joueur par le nouvel onglet (message « remplace »).
 const lireJeton = () => { try { return sessionStorage.getItem('pong-lan-token') || ''; } catch (e) { return ''; } };
 const garderJeton = t => { try { sessionStorage.setItem('pong-lan-token', t); } catch (e) {} };
+// Aides sûres pour TOUT accès à localStorage : un stockage bloqué (navigation privée, quota, politique
+// d'entreprise) ne doit plus jamais faire planter le chargement de la page (page blanche).
+const lireLS = (k, def) => { try { return localStorage.getItem(k); } catch (e) { return def === undefined ? null : def; } };
+const ecrireLS = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+const lireJSON = (s, def) => { try { const v = JSON.parse(s); return (v && typeof v === 'object') ? v : def; } catch (e) { return def; } };
 let you = { id: null, name: '', token: lireJeton() };
-let myName = (localStorage.getItem('pong-lan-name') || '').slice(0, 12);
+let myName = (lireLS('pong-lan-name', '') || '').slice(0, 12);
 let gamesMeta = [], activeId = null;
 let mod = null, modId = null, modReady = false, loadingId = null;
 const pend = {};                 // g -> { msgs:[], lb, state } : messages tamponnés tant que le module n'est pas prêt
@@ -31,7 +36,7 @@ const setPad = document.getElementById('setPad');
 
 /* ---------- accessibilité (partagée, persistée) ---------- */
 const a11y = Object.assign({ palette: 'normal', contrast: false, reduceFx: false, theme: 'neon', music: false, sfx: 1, mvol: 0.7, pad: 'joy' },
-  JSON.parse(localStorage.getItem('pong-lan-a11y') || localStorage.getItem('pong-a11y') || '{}'));
+  lireJSON(lireLS('pong-lan-a11y') || lireLS('pong-a11y') || '{}', {}));
 function applyA11y() {
   document.body.classList.toggle('flat', a11y.reduceFx);
   document.body.classList.remove('theme-neon', 'theme-crt', 'theme-light');
@@ -42,16 +47,22 @@ function applyA11y() {
   if (setMvol) setMvol.value = Math.round((a11y.mvol == null ? 0.7 : a11y.mvol) * 100);
   document.body.classList.toggle('pad-croix', a11y.pad === 'croix');   // téléphone : joystick (défaut) ou croix d'origine
   if (setPad) setPad.value = a11y.pad === 'croix' ? 'croix' : 'joy';
-  localStorage.setItem('pong-lan-a11y', JSON.stringify(a11y));
+  ecrireLS('pong-lan-a11y', JSON.stringify(a11y));
   if (mod && mod.onA11y) mod.onA11y();
 }
+// Sauvegarde différée (~300 ms) pour les curseurs de volume : ils déclenchent oninput à haute fréquence
+// pendant le glisser, et appeler applyA11y() à chaque fois videait les caches graphiques du jeu actif
+// (mod.onA11y) en boucle. a11y est lu en direct par music.js et les jeux (le volume change donc déjà
+// sans repasser par applyA11y) ; on se contente ici de persister le réglage une fois le geste terminé.
+let volSaveT = 0;
+function saveA11yDiffere() { clearTimeout(volSaveT); volSaveT = setTimeout(() => ecrireLS('pong-lan-a11y', JSON.stringify(a11y)), 300); }
 setPalette.onchange = () => { a11y.palette = setPalette.value; applyA11y(); };
 setContrast.onchange = () => { a11y.contrast = setContrast.checked; applyA11y(); };
 setFx.onchange = () => { a11y.reduceFx = setFx.checked; applyA11y(); };
 setTheme.onchange = () => { a11y.theme = setTheme.value; applyA11y(); };
 setMusic.onchange = () => { a11y.music = setMusic.checked; applyA11y(); };
-if (setSfx) setSfx.oninput = () => { a11y.sfx = (parseInt(setSfx.value, 10) || 0) / 100; applyA11y(); };
-if (setMvol) setMvol.oninput = () => { a11y.mvol = (parseInt(setMvol.value, 10) || 0) / 100; applyA11y(); };
+if (setSfx) setSfx.oninput = () => { a11y.sfx = (parseInt(setSfx.value, 10) || 0) / 100; saveA11yDiffere(); };
+if (setMvol) setMvol.oninput = () => { a11y.mvol = (parseInt(setMvol.value, 10) || 0) / 100; saveA11yDiffere(); };
 if (setPad) setPad.onchange = () => { a11y.pad = setPad.value; applyA11y(); };
 initJoystick();
 if (setFull) setFull.onclick = () => { if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen(); else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); };
@@ -141,6 +152,13 @@ const emoteToasts = document.getElementById('emoteToasts');
 if (emoteBar) emoteBar.innerHTML = EMOTES.map(e => `<button class="emo" data-e="${e}">${e}</button>`).join('');
 if (emoteFloat) emoteFloat.onclick = () => { if (emoteBar) emoteBar.classList.toggle('hidden'); };
 if (emoteBar) emoteBar.querySelectorAll('.emo').forEach(b => b.onclick = () => { send({ t: 'emote', e: b.dataset.e }); emoteBar.classList.add('hidden'); });
+// Barre d'émotes : se referme au tap/clic à côté et sur Échap (elle n'a pas de voile modal, contrairement aux panneaux .settings).
+if (emoteBar) document.addEventListener('pointerdown', e => {
+  if (emoteBar.classList.contains('hidden')) return;
+  if (e.target && e.target.closest && (e.target.closest('#emoteBar') || e.target.closest('#emoteFloat'))) return;
+  emoteBar.classList.add('hidden');
+});
+if (emoteBar) document.addEventListener('keydown', e => { if (e.key === 'Escape' && !emoteBar.classList.contains('hidden')) emoteBar.classList.add('hidden'); });
 function showEmote(name, e) {
   if (!emoteToasts) return;
   const el = document.createElement('div'); el.className = 'etoast';
@@ -175,8 +193,8 @@ const esc = s => ('' + s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '
 let adminKey = '';                       // clé admin = marqueur « game master » (présentée au hub à la connexion)
 (function initAdmin() {
   const urlKey = new URLSearchParams(location.search).get('admin');
-  if (urlKey) { localStorage.setItem('pong-lan-admin', urlKey); try { history.replaceState(null, '', location.pathname); } catch {} } // mémorise la clé puis nettoie l'URL
-  adminKey = localStorage.getItem('pong-lan-admin') || '';
+  if (urlKey) { ecrireLS('pong-lan-admin', urlKey); try { history.replaceState(null, '', location.pathname); } catch {} } // mémorise la clé puis nettoie l'URL
+  adminKey = lireLS('pong-lan-admin', '') || '';
   const adminBox = document.getElementById('adminBox'), adminResetBtn = document.getElementById('adminResetBtn');
   if (adminKey && adminBox) adminBox.style.display = '';
   if (adminResetBtn) adminResetBtn.onclick = () => {
@@ -304,11 +322,11 @@ const chatOuvert = () => chatDocke()
   : !!(chatPanel && !chatPanel.classList.contains('hidden'));
 function replierChat(off) {
   document.body.classList.toggle('nochat', off);
-  try { localStorage.setItem('pong-lan-nochat', off ? '1' : ''); } catch (e) {}
+  ecrireLS('pong-lan-nochat', off ? '1' : '');
   if (!off && chatDot) chatDot.classList.add('hidden');
   majTaille();                                    // le plateau récupère (ou rend) la colonne
 }
-try { if (localStorage.getItem('pong-lan-nochat')) document.body.classList.add('nochat'); } catch (e) {}
+if (lireLS('pong-lan-nochat')) document.body.classList.add('nochat');
 
 /* Téléphone en partie : tant qu'on joue, ni chat ni liste des joueurs (style.css). Une fois
    ÉLIMINÉ — ou spectateur — les deux redeviennent accessibles à la demande. L'élimination est lue
@@ -384,7 +402,7 @@ if (dailyToggle) dailyToggle.onclick = () => send({ t: 'daytoggle' });
 const AV_EMOJIS = ['🦊', '🐸', '🤖', '🐙', '🦄', '🐼', '🐝', '🦁', '🐧', '🐢', '🦖', '👻', '🐳', '🦉', '🐯', '🍄', '⚡', '🌟', '💀', '🎃'];
 const AV_IMG_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/;
 const avatars = {};                       // pseudo -> emoji | data URL
-let myAvatar = localStorage.getItem('pong-lan-avatar') || '';
+let myAvatar = lireLS('pong-lan-avatar', '') || '';
 const avBtn = document.getElementById('avBtn'), avPanel = document.getElementById('avPanel');
 const avPrev = document.getElementById('avPrev'), avGrid = document.getElementById('avGrid');
 const avFile = document.getElementById('avFile'), avClear = document.getElementById('avClear');
@@ -403,7 +421,7 @@ function renderAvatarUI() {
 }
 function setMyAvatar(a) {
   myAvatar = a || '';
-  try { localStorage.setItem('pong-lan-avatar', myAvatar); } catch {}
+  ecrireLS('pong-lan-avatar', myAvatar);
   if (myName) { if (myAvatar) avatars[myName] = myAvatar; else delete avatars[myName]; }
   send({ t: 'avatar', a: myAvatar });
   renderAvatarUI(); renderReady();
@@ -437,7 +455,7 @@ if (avClear) avClear.onclick = () => setMyAvatar('');
 
 /* ---------- pseudo ---------- */
 nameInput.value = myName;
-nameInput.onchange = () => { myName = nameInput.value.trim().slice(0, 12); localStorage.setItem('pong-lan-name', myName); send({ t: 'name', name: myName }); };
+nameInput.onchange = () => { myName = nameInput.value.trim().slice(0, 12); ecrireLS('pong-lan-name', myName); send({ t: 'name', name: myName }); };
 nameInput.onkeydown = e => e.stopPropagation();   // saisie du pseudo : Espace/flèches ne doivent pas déclencher les raccourcis du jeu
 
 /* ---------- menu de jeux ---------- */

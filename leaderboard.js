@@ -65,14 +65,30 @@ async function lire(cle, chemin) {
     return null;
   }
 }
-function charger(nom, cle, chemin, ok, essai) {
-  lire(cle, chemin).then(d => {
+// Met de côté la donnée qui n'a pas pu être fusionnée (fichier -> renommé ; Upstash -> clé ':corrompu') pour
+// inspection manuelle, SANS bloquer les écritures futures (A3, 28/09 : avant, une fusion ratée coupait les
+// sauvegardes pour le reste de la vie du processus).
+async function quarantaine(nom, cle, chemin, d) {
+  try {
+    if (useRedis) { await redisCmd(['SET', cle + ':corrompu', JSON.stringify(d)]); console.error('[' + nom + '] Sauvegarde mise de côté sous la clé ' + cle + ':corrompu'); }
+    else if (chemin) { const dest = chemin + '.corrompu-' + Date.now(); await rename(chemin, dest); console.error('[' + nom + '] Sauvegarde mise de côté : ' + dest); }
+  } catch (e) { console.error('[' + nom + '] Impossible de mettre la sauvegarde de côté (' + (e && e.message) + ')'); }
+}
+// `fusion(d)` peut jeter (données incohérentes) : la donnée brute est alors mise en quarantaine et journalisée,
+// mais `marquerPret()` s'exécute quand même pour que les nouveaux résultats soient de nouveau sauvegardés.
+function charger(nom, cle, chemin, fusion, marquerPret, essai) {
+  lire(cle, chemin).then(async d => {
     // Une erreur APRÈS la lecture (fusion) n'est pas un échec de lecture : pas de relance (elle refusionnerait).
-    try { ok(d); } catch (e) { console.error('[' + nom + '] Fusion impossible (' + (e && e.message) + ') : sauvegarde laissée intacte, aucune écriture'); }
+    try { fusion(d); }
+    catch (e) {
+      console.error('[' + nom + '] Fusion impossible (' + (e && e.message) + ') : sauvegarde mise de côté, écritures reprises');
+      await quarantaine(nom, cle, chemin, d);
+    }
+    marquerPret();
   }, e => {
     const d = RELANCES[Math.min(essai, RELANCES.length - 1)];
     console.error('[' + nom + '] Chargement échoué (' + (e && e.message) + ') : aucune écriture, nouvel essai dans ' + d / 1000 + ' s');
-    setTimeout(() => charger(nom, cle, chemin, ok, essai + 1), d).unref();
+    setTimeout(() => charger(nom, cle, chemin, fusion, marquerPret, essai + 1), d).unref();
   });
 }
 // Écrivain regroupé : planifier() programme UNE écriture après `delai` ; une seule en vol à la fois, la dernière
@@ -81,6 +97,7 @@ function charger(nom, cle, chemin, ok, essai) {
 // vider() : écriture immédiate, attendue (arrêt du processus).
 function ecrivain(nom, cle, chemin, delai, pret, donnees) {
   let t = null, enVol = null, encore = false, retenu = false;
+  let enPanne = false, dernierLog = 0;    // A4 : journal borné — 1re erreur tout de suite, puis au plus 1 ligne/minute, + « rétabli »
   const planifier = (ms) => { if (!t) t = setTimeout(ecrire, ms == null ? delai : ms); };
   async function ecrire() {
     t = null;
@@ -92,11 +109,22 @@ function ecrivain(nom, cle, chemin, delai, pret, donnees) {
         const d = donnees();
         if (useRedis) await redisCmd(['SET', cle, d]);
         else if (chemin) { await writeFile(chemin + '.tmp', d); await rename(chemin + '.tmp', chemin); }
-      } catch (e) { rate = true; console.error('[' + nom + '] Sauvegarde échouée (nouvel essai dans 5 s) :', e && e.message); }
+      } catch (e) {
+        rate = true;
+        const maintenant = Date.now();
+        if (!enPanne || maintenant - dernierLog >= 60000) {
+          console.error('[' + nom + '] Sauvegarde échouée (nouvel essai dans 5 s) :', e && e.message);
+          dernierLog = maintenant;
+        }
+        enPanne = true;
+      }
     })();
     await enVol; enVol = null;
     if (rate) planifier(5000);
-    else if (encore) { encore = false; planifier(); }
+    else {
+      if (enPanne) { enPanne = false; console.error('[' + nom + '] Sauvegarde rétablie.'); }
+      if (encore) { encore = false; planifier(); }
+    }
   }
   return {
     planifier,
@@ -185,10 +213,8 @@ function loadAvatars() {
     for (const k of retires) delete avatars[k];                                          // retirés avant la lecture
     retires.clear();
     for (const k in memo) if (own(memo, k)) { avatars[k] = memo[k]; change = true; }   // changés avant la lecture : ils gagnent
-    avCharge = true;
     if (change) planifierAv();
-    if (ecrAv) ecrAv.reprendre();
-  }, 0);
+  }, () => { avCharge = true; if (ecrAv) ecrAv.reprendre(); }, 0);
 }
 export function getAvatar(name) { return (name && own(avatars, name) && avatars[name]) || null; }
 export function setAvatar(name, data) {          // data falsy => retrait de l'avatar
@@ -208,7 +234,7 @@ export function initLeaderboard(path) {
   ecrAv = ecrivain('avatars', AV_KEY, AV_PATH, 10000, () => avCharge, () => JSON.stringify(avatars));
   console.log('[leaderboard] Stockage : ' + (useRedis ? 'Upstash Redis (en ligne).' : 'fichier local (' + path + ').'));
   loadAvatars();
-  charger('leaderboard', REDIS_KEY, PATH, d => { if (d) hydrate(d); charge = true; ecrLb.reprendre(); }, 0);
+  charger('leaderboard', REDIS_KEY, PATH, d => { if (d) hydrate(d); }, () => { charge = true; ecrLb.reprendre(); }, 0);
 }
 
 function node(gameId) {
