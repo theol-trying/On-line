@@ -166,7 +166,10 @@ export function createSnake(room) {
 
   function startGame() {
     if (!editable() || !canStart()) return;
-    for (const p of players) { p.playing = false; p.bot = false; }
+    // sièges ne participant pas à cette manche (ex. joueur parti sur l'écran de fin) : remis à zéro,
+    // sinon leur ancien alive=true en fait un serpent fantôme dans la manche suivante (update() ne
+    // filtre que sur alive, pas playing) et fausse aussi le compteur `deaths` du classement (B3).
+    for (const p of players) { p.playing = false; p.bot = false; p.alive = false; p.cells = []; p.place = 0; p.kills = 0; p.pendingDir = null; p.nextDir = null; }
     if (botCount > maxBots()) botCount = maxBots();
     const parts = players.filter(p => p.member);
     let bots = botCount;
@@ -185,10 +188,25 @@ export function createSnake(room) {
   const bestScoreTeam = () => { let champ = null; for (const p of players) if (p.playing) { if (!champ || p.score > champ.score) champ = p; } return champ ? champ.team : -1; };
   function endRound(forced) {
     gameState = 'over'; endTick = tick;
-    if (forced != null) winner = forced;
-    else { const s = aliveTeams(); winner = s.size === 1 ? [...s][0] : -1; }
-    if (rush) { const order = players.filter(p => p.playing).sort((a, b) => ((b.alive ? 1 : 0) - (a.alive ? 1 : 0)) || (b.score - a.score)); order.forEach((p, i) => p.place = i + 1); } // food-rush : classement au score
-    else players.forEach(p => { if (p.playing && p.alive) p.place = 1; });
+    if (rush) {
+      // même vérité pour le classement ET le vainqueur : le tri (score décroissant, égalité => survie) fait
+      // foi ; `forced` (bestScoreTeam, appelé par les sites d'appel) ne sert plus qu'à sortir tôt, cf. update().
+      // Avant, `forced`/aliveTeams départageaient les égalités par ORDRE DE SIÈGE alors que le tri les
+      // départageait par survie : à score nul partout, le « vainqueur » et la place 1 pouvaient diverger.
+      const order = players.filter(p => p.playing).sort((a, b) => (b.score - a.score) || ((b.alive ? 1 : 0) - (a.alive ? 1 : 0)) || (b.elimTick - a.elimTick));
+      order.forEach((p, i) => p.place = i + 1);
+      winner = order.length ? order[0].team : -1;
+    } else {
+      if (forced != null) winner = forced;
+      else { const s = aliveTeams(); winner = s.size === 1 ? [...s][0] : -1; }
+      players.forEach(p => { if (p.playing && p.alive) p.place = 1; });
+      // nul (aucune équipe seule en tête) avec plusieurs morts au MÊME tick (causes distinctes, ex. deux
+      // têtes qui entrent chacune dans un obstacle le même tick) : ils partagent la meilleure place restante.
+      if (winner < 0) {
+        const lastDead = players.filter(p => p.playing && !p.alive && p.elimTick === endTick);
+        if (lastDead.length > 1) { const best = Math.min(...lastDead.map(p => p.place)); for (const p of lastDead) p.place = best; }
+      }
+    }
     recordRound();
   }
   function backToLobby() {            // abandon : retour au lobby en pleine partie
@@ -224,8 +242,10 @@ export function createSnake(room) {
     if (best && best !== d) p.pendingDir = best;
   }
 
-  function killSnake(p, killer, x, y) {
-    p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++;
+  function killSnake(p, killer, x, y, place) {
+    // `place` fourni => mort groupée (tick avec plusieurs collisions simultanées) : même place pour tout le
+    // groupe (sinon un choc mutuel final élit un faux gagnant à la place d'un nul, cf. checkOver DRAW_SINGLE_PLACE1).
+    p.alive = false; p.elimTick = tick; p.place = place != null ? place : (nParts - deaths); if (place == null) deaths++;
     if (killer >= 0 && players[killer] && killer !== p.seat) players[killer].kills++;
     fx.push({ type: 'crash', seat: p.seat, x, y, by: killer });
     let dropped = 0;                                  // le corps devient de la nourriture (slither-like), 1 cellule sur 2, plafonné
@@ -260,7 +280,7 @@ export function createSnake(room) {
       const o = solid.get(key(n.x, n.y));
       if (o !== undefined && !(p.ghostUntil > tick)) { doomed.add(p); killerOf.set(p, o !== p.seat ? o : -1); } // serpent (sauf fantôme)
     }
-    for (const p of doomed) { const n = nh.get(p); killSnake(p, killerOf.has(p) ? killerOf.get(p) : -1, n.x, n.y); }
+    if (doomed.size) { const place = nParts - deaths; for (const p of doomed) { const n = nh.get(p); killSnake(p, killerOf.has(p) ? killerOf.get(p) : -1, n.x, n.y, place); } deaths += doomed.size; }
     // déplacement des survivants
     for (const p of alive) {
       if (doomed.has(p)) continue;
@@ -325,7 +345,7 @@ export function createSnake(room) {
       if (p.alive) { p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++; }
       if (connectedCount() === 0) fullReset();
       else if (gameState === 'play') { if (nParts >= 2 ? aliveTeams().size <= 1 : aliveCount() === 0) endRound(rush ? bestScoreTeam() : undefined); }   // même règle de gagnant qu'en update (food-rush = meilleur score)
-    } else if (connectedCount() === 0) fullReset();
+    } else if (connectedCount() === 0) fullReset();   // départ sur l'écran de fin : il reste affiché au podium ; startGame nettoie son siège
   }
   // File de 2 virages (24/09). Un virage n'occupait qu'une case, écrasée à chaque réception : « haut puis gauche »
   // dans le même tick (demi-tour serré, balayage du joystick) → « gauche » écrasait « haut » puis était refusé comme

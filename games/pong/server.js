@@ -25,6 +25,7 @@ let PAD_LEN = PAD_LEN0, PAD_SPD = PAD_SPD0;
 const MAX_SEATS = 10;
 const MIN_SPD = 2.6, TICK_HZ = 60;
 const LEAD_TICKS = 2;          // ≈ 33 ms : latence aller (~25 ms à Francfort) + un demi-tick — cf. ballPaddles
+const MAX_ROUND_TICKS = 10 * 60 * TICK_HZ;   // durée max d'une manche : 10 min de JEU (paused ne compte pas, cf. update)
 function setArena(n) {
   const k = 1 + 0.13 * (Math.max(2, Math.min(MAX_SEATS, n)) - 2);   // 2 j : ×1.00 · 6 j : ×1.52 · 10 j : ×2.04
   // À 10 joueurs le polygone a des arêtes plus COURTES (2·R·sin(π/N)) alors que la raquette suit k :
@@ -380,6 +381,25 @@ export function createPong(room) {
     recordRound();
     return true;
   }
+  // Mort subite par le temps : au-delà de MAX_ROUND_TICKS, fin de manche même si plusieurs équipes sont
+  // encore en vie. Classement par vies restantes (égalité de vies => places partagées) ; vainqueur = seule
+  // équipe en tête (nulle s'il y en a plusieurs). Le solo (entraînement) ne compte pas de vainqueur.
+  function endByTimeup() {
+    gameState = 'over'; endTick = tick;
+    if (nParts < 2) winner = -1;
+    else {
+      const alive = players.filter(inPlay);
+      const maxLives = alive.length ? Math.max(...alive.map(p => p.lives)) : -1;
+      const leadTeams = new Set(alive.filter(p => p.lives === maxLives).map(p => p.team));
+      winner = leadTeams.size === 1 ? [...leadTeams][0] : -1;
+      if (winner >= 0) players.forEach(p => { if (p.edge >= 0 && p.team === winner) p.score++; });
+    }
+    const order = players.filter(p => p.edge >= 0).sort((a, b) => b.lives - a.lives);
+    let place = 1;
+    order.forEach((p, i) => { if (i > 0 && p.lives !== order[i - 1].lives) place = i + 1; p.place = place; });
+    fx.push({ type: 'timeup' });
+    recordRound();
+  }
   function ballPaddles(b, max) {
     for (let ei = 0; ei < geo.edges.length; ei++) {
       if (ei === b.last) continue;
@@ -523,6 +543,7 @@ export function createPong(room) {
     }
     if (gameState !== 'play') return;
     tick++;
+    if (tick >= MAX_ROUND_TICKS) { endByTimeup(); return; }
     computeLeader();
     if (rules.sudden !== 'off' && !sdActive && aliveTeams().size === 2) sdActive = true;
     if (sdActive && rules.sudden === 'shrink') {
@@ -578,6 +599,8 @@ export function createPong(room) {
       wallBoost: wallBoostOn(),                        // le client dessine les bords éliminés en bumpers
       pspd: Math.round(PAD_SPD * 100) / 100,           // vitesse raquette par tick : le client PRÉDIT la sienne avec
       count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / 60)) : 0,
+      // compte à rebours de la dernière minute avant la limite de durée (vague 2 : affichage client) ; null tant qu'il reste > 60 s
+      tl: (gameState === 'play' && MAX_ROUND_TICKS - tick <= 60 * TICK_HZ) ? Math.max(0, Math.ceil((MAX_ROUND_TICKS - tick) / TICK_HZ)) : null,
       sd: sdActive, slow: slowUntil > tick,
       opts: {
         lives: cfg.lives, pu: cfg.pu, accel: cfg.accelEvery > 0, speed: cfg.speedLevel,

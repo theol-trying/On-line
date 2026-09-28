@@ -158,7 +158,7 @@ export function createBomb(room) {
   }
   function startGame() {
     if (!editable() || !canStart()) return;
-    for (const p of players) { p.playing = false; p.bot = false; }
+    for (const p of players) { p.playing = false; p.bot = false; p.alive = false; p.revenant = false; p.place = 0; p.kills = 0; }   // fantôme : siège hors nouvelle manche remis à zéro
     if (botCount > maxBots()) botCount = maxBots();
     const parts = players.filter(p => p.member);
     let bots = botCount;
@@ -194,8 +194,11 @@ export function createBomb(room) {
       if (present.length === 1) winner = present[0];
       else { const byTeam = {}; for (const p of players) if (p.playing) byTeam[p.team] = (byTeam[p.team] || 0) + p.kills; let bt = -1, bv = -1, tie = false; for (const k in byTeam) { const v = byTeam[k]; if (v > bv) { bv = v; bt = +k; tie = false; } else if (v === bv) tie = true; } winner = tie ? -1 : bt; }
       if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
-      const order = players.filter(p => p.playing).sort((a, b) => ((b.alive ? 1 : 0) - (a.alive ? 1 : 0)) || ((b.elimTick || 0) - (a.elimTick || 0)));
-      order.forEach((p, i) => p.place = i + 1);
+      // équipe gagnante = place 1 (même si encore « revenant », pas alive, à l'instant du décompte) ; le reste garde le classement par survie/ordre d'élimination, à la suite
+      const champs = winner >= 0 ? players.filter(p => p.playing && p.team === winner) : [];
+      const order = players.filter(p => p.playing && !champs.includes(p)).sort((a, b) => ((b.alive ? 1 : 0) - (a.alive ? 1 : 0)) || ((b.elimTick || 0) - (a.elimTick || 0)));
+      champs.forEach(p => p.place = 1);
+      order.forEach((p, i) => p.place = i + 1 + champs.length);
       recordRound(); return;
     }
     const s = aliveTeams();
@@ -557,7 +560,7 @@ export function createBomb(room) {
     let seat = -1;
     const rid = seatByMid[member.id];
     if (rid != null && players[rid] && !players[rid].member && !players[rid].bot) seat = rid;
-    if (seat < 0) { const free = players.find(p => !p.member && !p.bot) || (editable() ? players.find(p => !p.member) : null); if (free) seat = free.seat; }   // siège de bot protégé
+    if (seat < 0) { const free = players.find(p => !p.member && !p.bot && (editable() || !p.playing)) || (editable() ? players.find(p => !p.member) : null); if (free) seat = free.seat; }   // siège de bot protégé ; siège « en jeu » (parti en pleine manche) protégé tant que la manche tourne
     if (seat < 0) return { role: 'spectator', hello: { t: 'welcome', seat: -1 } };
     const p = players[seat]; if (p.bot) repriseSiegeBot(p);   /* hors partie, un siège de bot se libère (startGame redistribue les bots) : remis à neuf */
     p.member = member; p.bot = false; p.mid = member.id; p.name = member.name || ''; seatByMid[member.id] = seat;

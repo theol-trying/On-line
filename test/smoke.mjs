@@ -17,6 +17,7 @@ import { dirname, join } from 'path';
 import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import net from 'net';
+import http from 'http';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.SMOKE_PORT || 3999);
@@ -309,6 +310,29 @@ async function robustesse() {
   b2.ws.close(); await wait(300);
 }
 
+/* ---------- HTTP statique (28/09) : ETag/304, en-têtes de sécurité, méthodes refusées ---------- */
+function requeteHttp(methode, chemin, entetes) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port: PORT, method: methode, path: chemin, headers: entetes || {} }, res => {
+      const morceaux = [];
+      res.on('data', d => morceaux.push(d));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, corps: Buffer.concat(morceaux) }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+async function httpStatique() {
+  console.log('\n▶ HTTP statique : ETag/304, en-têtes de sécurité, méthodes refusées');
+  const r1 = await requeteHttp('GET', '/index.html');
+  ok('index.html sert un ETag', typeof r1.headers.etag === 'string' && r1.headers.etag.length > 0, JSON.stringify(r1.headers.etag));
+  ok('en-tête X-Content-Type-Options: nosniff sur les statiques', r1.headers['x-content-type-options'] === 'nosniff', String(r1.headers['x-content-type-options']));
+  const r2 = await requeteHttp('GET', '/index.html', { 'If-None-Match': r1.headers.etag });
+  ok('If-None-Match rejoué renvoie 304 sans corps', r2.status === 304 && r2.corps.length === 0, 'statut ' + r2.status + ', ' + r2.corps.length + ' octet(s)');
+  const r3 = await requeteHttp('POST', '/');
+  ok('POST / est refusé (405)', r3.status === 405, 'statut ' + r3.status);
+}
+
 /* ---------- compléments du 25/09 : rafale de pings, sièges de bots, sauvegarde à l'arrêt ---------- */
 // Socket WebSocket écrite à la main : l'API WebSocket ne sait pas envoyer de trames ping.
 function socketBrute() {
@@ -415,6 +439,7 @@ cadences.sumo = await jouer('sumo', 10, { arene: { lire: s => 'arène ' + s.ar, 
 await arriveeEnCours();
 await protections();
 await robustesse();
+await httpStatique();
 await complements();
 await terrainsFoot();
 

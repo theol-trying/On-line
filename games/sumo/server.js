@@ -428,7 +428,7 @@ export function createSumo(room) {
     let seat = -1;
     const rid = seatByMid[member.id];
     if (rid != null && players[rid] && !players[rid].member && !players[rid].bot) seat = rid;
-    if (seat < 0) { const free = players.find(p => !p.member && !p.bot) || (editable() ? players.find(p => !p.member) : null); if (free) seat = free.seat; }   // siège de bot protégé
+    if (seat < 0) { const free = players.find(p => !p.member && !p.bot && (editable() || !p.playing)) || (editable() ? players.find(p => !p.member) : null); if (free) seat = free.seat; }   // siège de bot protégé ; siège « en jeu » (parti en pleine manche) protégé tant que la manche tourne
     if (seat < 0) return { role: 'spectator', hello: { t: 'welcome', seat: -1 } };
     const p = players[seat];
     if (p.bot) repriseSiegeBot(p);   /* hors partie, un siège de bot se libère (startGame redistribue les bots) : remis à neuf */
@@ -441,7 +441,7 @@ export function createSumo(room) {
     const seat = seatOf(member); if (seat < 0) return;
     const p = players[seat]; p.member = null; p.inp = { up: false, down: false, left: false, right: false }; p.mx = 0; p.my = 0;
     if (gameState === 'play' || gameState === 'countdown' || gameState === 'paused') {
-      if (p.alive) { p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++; }
+      if (p.alive) eliminate(p);   // même chemin (place/fx 'out') qu'une sortie en jeu, comme le Foot
       if (connectedCount() === 0) fullReset(); else if (gameState === 'play' && aliveTeams().size <= 1) endRound();
     } else if (connectedCount() === 0) fullReset();
     else if (gameState === 'lobby') setArena(partCount());

@@ -27,9 +27,12 @@ let ctxSeq = 0;   // un CanvasPattern est théoriquement réutilisable d'un cont
  * Motif répétable du siège `seat`.
  * @param {CanvasRenderingContext2D} ctx  contexte servant à fabriquer le CanvasPattern
  * @param {number} seat                   index de siège (0..5, modulo au-delà)
- * @param {{size?:number, ink?:string}} [opts]
+ * @param {{size?:number, ink?:string, res?:number}} [opts]
  *        size = côté de la tuile dans l'espace de coordonnées courant (≈ taille d'une case/pièce)
  *        ink  = couleur du motif (par défaut un blanc translucide qui marche sur toutes les teintes)
+ *        res  = résolution optionnelle (px appareil par unité monde) : la tuile est construite à cette
+ *               résolution puis ramenée à `size` via pattern.setTransform (Retina net ; sans `res`,
+ *               comportement inchangé — les 7 clients existants qui n'en passent pas ne voient rien changer)
  * @returns {CanvasPattern|null} null pour le siège 0 (uni)
  */
 export function seatPattern(ctx, seat, opts) {
@@ -38,15 +41,21 @@ export function seatPattern(ctx, seat, opts) {
   const o = opts || {};
   const size = Math.max(4, Math.round(o.size || 10));
   const ink = o.ink || 'rgba(255,255,255,0.32)';
+  const res = o.res && o.res > 1 ? o.res : 0;
   if (!ctx.__patId) ctx.__patId = 'c' + (++ctxSeq);
-  const key = ctx.__patId + '|' + i + '|' + size + '|' + ink;
+  const key = ctx.__patId + '|' + i + '|' + size + '|' + ink + '|' + res;
   if (cache.has(key)) return cache.get(key);
+  // Cache borné : un nouveau <canvas> (donc un nouveau contexte, donc une nouvelle clé) à chaque sprite
+  // — comme le fait Tron — grossissait ce Map sans fin. Au-delà de ~200 tuiles on repart de zéro (elles
+  // se reconstruisent à la demande, coût négligeable).
+  if (cache.size > 200) cache.clear();
 
+  const px = res ? Math.max(4, Math.round(size * res)) : size;
   const cv = document.createElement('canvas');
-  cv.width = cv.height = size;
+  cv.width = cv.height = px;
   const c = cv.getContext('2d');
   if (!c) return null;
-  const s = size, lw = Math.max(1, s * 0.16);
+  const s = px, lw = Math.max(1, s * 0.16);
   c.strokeStyle = ink; c.fillStyle = ink; c.lineWidth = lw; c.lineCap = 'round';
 
   if (i === 1) {                                  // rayures diagonales (la diagonale coin-à-coin se raccorde d'une tuile à l'autre)
@@ -78,6 +87,11 @@ export function seatPattern(ctx, seat, opts) {
 
   let pat = null;
   try { pat = ctx.createPattern(cv, 'repeat'); } catch { pat = null; }
+  // Tuile construite à `px` (> size sur Retina) : on la ramène à `size` unités monde. `setTransform`
+  // n'existe que sur les moteurs récents — sans lui (garde), le motif reste juste un peu plus dense.
+  if (pat && res && typeof DOMMatrix !== 'undefined' && pat.setTransform) {
+    try { pat.setTransform(new DOMMatrix().scale(1 / res)); } catch {}
+  }
   cache.set(key, pat);
   return pat;
 }
