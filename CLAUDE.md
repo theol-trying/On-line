@@ -42,7 +42,8 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
 - **Briques graphiques partagées** (à réutiliser, pas à réinventer dans un jeu) : `lumiere.js` (lueurs additives sur le sol), `crepuscule.js`
   (étalonnage jour → crépuscule en mort subite), `finpartie.js` (journal de manche → courbe + meilleure
   action, textes échappés), `vitrine.js` (accueil en cartes animées), `echo-virage.js` (chevron immédiat du
-  virage enregistré, jeux à pas discret). Un nouveau jeu doit aussi avoir sa mini-scène dans `vitrine.js`.
+  virage enregistré, jeux à pas discret), `exploits.js` (« DOUBLÉ ! », arrêt sur image, éclat, vignette de danger,
+  pastille numérotée, `readable`/`hudK` pour des textes lisibles sur téléphone). Un nouveau jeu doit aussi avoir sa mini-scène dans `vitrine.js`.
 - **Clés venant du réseau** (pseudo, id de jeu, direction…) : jamais `obj[cle]` nu sur un objet ordinaire —
   `Object.hasOwn` côté serveur (`Object.prototype.hasOwnProperty.call` côté client) ou `Object.create(null)`.
   Un simple `{t:'pick', id:'constructor'}` tuait le serveur (corrigé le 24/09). Tout appel au code d'un jeu hors

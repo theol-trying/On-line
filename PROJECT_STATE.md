@@ -1014,7 +1014,7 @@ Lot issu de la revue « propositions » (8 agents), validé par l'utilisateur : 
   reprendre » sans se reconnecter. Une grâce existante sur un jeton est soldée (`onLeave`) au lieu d'être écrasée.
   Hôte de repli = **plus ancien rang d'arrivée** (`ident.rang`), plus la position dans `members` : un F5 ne coûte plus
   le rôle. Jeton client en **sessionStorage** (propre à l'onglet, survit au F5) : deux onglets = deux joueurs.
-  Salle plafonnée à 24 membres (`{t:'plein'}`, le client réessaie au bout de 30 s).
+  Salle plafonnée à 60 membres (`MEMBRES_MAX`, relevé depuis 24 ; `{t:'plein'}`, le client réessaie au bout de 30 s).
 - **Amplificateurs de quota** (le seau borne le nombre de messages, pas ce qu'ils déclenchent — un avatar renvoyé en
   boucle coûtait 1,1 Mo/s par témoin) : `differer()` applique avatar (5 s), pseudo (1 s) et « Prêt » (250 ms) tout de
   suite si le précédent est ancien, sinon une fois à l'échéance avec la dernière valeur ; valeur identique = rien.
@@ -1060,6 +1060,39 @@ Lot issu de la revue « propositions » (8 agents), validé par l'utilisateur : 
   réservés au proxy (en LAN, on pouvait bloquer l'adresse d'un autre) → crus seulement si `RENDER` ; `flush()` ne
   retentait pas une écriture ratée au SIGTERM → 3 tentatives espacées d'1 s.
 
+## Audit complet et corrections (28-29/09/2026)
+Audit en 3 temps : relecture des 7 clients (contre-vérifiée), fuzz headless des 7 serveurs (~400 manches, 0 panne,
+< 0,07 ms/tick à 10 joueurs, snapshots 150-700 o), attaque WebSocket en direct, relecture du cœur et de la coquille.
+Corrigé ensuite en 2 vagues (commits « Audit 28/09, vague 1 / vague 2 ») :
+- **Tron/Snake — sièges fantômes** : `startGame` remet à zéro TOUS les sièges (alive, cells, place, kills) avant de
+  placer les participants : un vainqueur parti sur l'écran de fin laissait une moto vivante qui roulait et tuait à la
+  manche suivante. Un départ en 'over' ne vide plus le siège tout de suite (le podium reste intact).
+- **Tron en équipes** : fin sur `aliveTeams().size <= 1` (avant : un seul JOUEUR restant). Morts au même tick =
+  même place (Tron, Snake) : un nul n'élit plus de faux vainqueur.
+- **Classement « place 1 = vainqueur »** : Snake course (tri score puis survie, vainqueur = même tri), Bomberman
+  revanche, arrivée en cours de manche (`onJoin` ne redonne plus un siège déjà joué : tank, bomb, sumo).
+- **Pong** : manche plafonnée à **10 min de jeu** (`MAX_ROUND_TICKS`, pauses exclues) → places aux vies
+  restantes (égalité en tête = nul), fx `timeup`, champ `tl` (secondes restantes, seulement ≤ 60) → compte à
+  rebours dans le HUD. **Tanks** : `MINE_CD` 8 ticks entre deux mines. **Sumo** : départ en manche = `eliminate()`.
+- **HTTP** : ETag (taille+mtime) + 304, `Cache-Control: no-cache`, `nosniff`, `Referrer-Policy`, 405 hors
+  GET/HEAD, 404 sur un dossier. **Classement** : une fusion ratée au chargement met la donnée brute de côté
+  (`<fichier>.corrompu-<ms>` ou clé `<clé>:corrompu`) puis les écritures reprennent ; journal d'échec borné
+  (1 ligne/min + « rétablie »).
+- **Coquille** : tout accès au stockage local protégé (plus de page blanche si bloqué) ; curseurs de volume sans
+  `onA11y` (plus de caches vidés) ; `music.dispose()` ; cache de `patterns.js` borné + option `res` (motifs nets
+  sur Retina) ; chat `aria-live`, barre d'emotes qui se ferme à côté / Échap, focus visible.
+- **Nouveau `public/exploits.js`** (aides visuelles partagées) : `createStreaks`/`createCallouts`/`streakText`
+  (« DOUBLÉ ! TRIPLÉ ! CARNAGE ! »), `createHitStop` (60 ms), `drawFlash`, `drawDanger` (vignette), `drawSeatChip`
+  (pastille numérotée), `readable`/`hudK` (texte ≥ ~9 px CSS sur téléphone).
+- **7 clients** : garde `e.repeat` partout, teardown complet (touches relâchées, AudioContext fermé), cartes HUD
+  réécrites seulement si changées, marge peinte pendant les secousses, pas de halo sur un nul, indications clavier
+  masquées au tactile, killcam Tron sans traînée, interpolation Snake/Tron 1,5×, barre HUD Tanks qui s'efface,
+  décor Foot mis en cache par contenu ; ambiance : pétales + bord rougeoyant + paliers d'onigiri (Sumo), brume de
+  chaleur (Tanks), pluie en mort subite (Bomberman), flashs en tribune + signal des cages qui s'agrandissent +
+  doublé/triplé de buteur (Foot). Jauges du Foot de part et d'autre d'une cage du bas décollée du bord (10 côtés).
+- Vérifié : `npm test` 101/101 (+ ETag/304/405), navigateur : les 7 jeux dessinent sans erreur (bureau, téléphone à
+  10 joueurs, « Réduire les effets »). **Pas encore testé à plusieurs humains ni sur un vrai iPhone.**
+
 ## Limites connues (assumées)
 - ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».
 - Hébergement Render en **Europe (Frankfurt)** — confirmé par l'utilisateur, donc ~15-25 ms de ping : le ping
@@ -1086,6 +1119,7 @@ Lot issu de la revue « propositions » (8 agents), validé par l'utilisateur : 
   Ces choses-là n'ont jamais été trouvées par l'automatisation — toujours par les testeurs.
 
 ## Pistes non faites (idées futures)
-Mobs IA solo Bomberman ; salles multiples (codes de room) ; replay de fin de manche ; avatars dessinés sur les pièces en jeu ;
-arène évolutive (jour → crépuscule) ; éclairage dynamique ; envoi incrémental de la géométrie (optim réseau) ;
-purge de `identities` dans le hub ; nouveaux jeux via le contrat (le plus simple à brancher).
+Mobs IA solo Bomberman ; salles multiples (codes de room) ; ralenti du moment décisif ; caméra de duel ; podium dessiné ;
+envoi incrémental de la géométrie / compression WebSocket (optim réseau) ; une fonction de fin de manche commune aux
+jeux + tests de fin de manche ; rotation des sauvegardes du classement ; nouveaux jeux via le contrat (idées : Territoire,
+Patate chaude). (Faits depuis : crépuscule, lueurs `lumiere.js`, purge d'`identities`. Refusé : avatars sur les pièces.)
