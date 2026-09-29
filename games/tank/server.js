@@ -8,6 +8,7 @@ function setGridT(n) {
   ARENA = G * BLK;
 }
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
+import { classerManche } from '../fin-manche.js';
 import { dailyRng } from '../../dayseed.js';
 
 const GID = 'tank';
@@ -86,8 +87,8 @@ export function createTank(room) {
       if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
       const e = lbEntry(p.name);
       e.games++;
-      if (winner >= 0 && p.team === winner) e.wins++;
-      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });   // classement du jour (tous jeux)
+      if (winner >= 0 && p.place === 1) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.place === 1, kills: p.kills, game: GID });   // classement du jour (tous jeux)
       e.kills += p.kills; e.dmg += p.dmg;
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / TICK_HZ;
       e.survSum += surv; if (surv > e.bestSurvivalSec) e.bestSurvivalSec = surv;
@@ -186,7 +187,7 @@ export function createTank(room) {
     gameState = 'over'; endTick = tick;
     const s = aliveTeams();
     winner = s.size === 1 ? [...s][0] : -1;
-    players.forEach(p => { if (p.playing && p.alive) p.place = 1; });
+    classerManche(players, winner);                    // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
     if (winner >= 0) {
       players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
       const champ = players.find(p => p.playing && p.team === winner);

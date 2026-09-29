@@ -2,6 +2,7 @@
 // charge, ancrage, bonus au sol, cercle qui rétrécit (mort subite). Physique continue à 30 Hz (comme Tanks).
 import { AR0, RING0, PR } from '../../public/games/sumo/shared.js';
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
+import { classerManche } from '../fin-manche.js';
 
 const GID = 'sumo';
 const MAX_SEATS = 10;
@@ -77,8 +78,8 @@ export function createSumo(room) {
       if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
       const e = lbEntry(p.name);
       e.games++;
-      if (winner >= 0 && p.team === winner) e.wins++;
-      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });   // classement du jour (tous jeux)
+      if (winner >= 0 && p.place === 1) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.place === 1, kills: p.kills, game: GID });   // classement du jour (tous jeux)
       e.kills += p.kills; e.dmg += p.dmg;            // dmg = chocs francs portés à un adversaire (l'équivalent sumo des dégâts)
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / TICK_HZ;
       e.survSum += surv;
@@ -178,7 +179,7 @@ export function createSumo(room) {
     const s = aliveTeams();
     winner = s.size === 1 ? [...s][0] : -1;
     if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
-    players.forEach(p => { if (p.playing && p.alive) p.place = 1; });
+    classerManche(players, winner);                    // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
     recordRound();
   }
 

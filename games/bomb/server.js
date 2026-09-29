@@ -12,6 +12,7 @@ function setGridB(n) {
   RING = buildRing(); RING_LEN = RING.length;     // sont dérivés de la grille : à refaire à chaque changement
 }
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
+import { classerManche } from '../fin-manche.js';
 import { dailyRng } from '../../dayseed.js';
 
 const GID = 'bomb';
@@ -25,6 +26,7 @@ const SOFT_PROB = 0.72, PICK_PROB = 0.42, MALUS_RATIO = 0.22;
 const DUR = 8 * TICK_HZ, AUTO_EVERY = 18, THROW_DIST = 4, SHIELD_CAP = 1;
 const GHOST_DUR = 10 * TICK_HZ;                    // 👻 traverse-murs : temporaire (sinon trop fort)
 const SD_START = 65 * TICK_HZ, SD_EVERY = 10;
+const SD_GRACE = 20 * TICK_HZ;                     // filet : arène comblée depuis 20 s => la manche s'arrête (cf. update)
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const GOOD = ['bomb', 'flame', 'speed', 'kick', 'remote', 'shield', 'ghost', 'throw', 'line'];
 const BMDIFF = [{ skip: 0.5, cd: 44 }, { skip: 0.18, cd: 24 }, { skip: 0, cd: 12 }];   // IA : Facile / Normale / Difficile (hésitation, cadence de pose)
@@ -94,8 +96,8 @@ export function createBomb(room) {
     for (const p of players) {
       if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
       const e = lbEntry(p.name); e.games++;
-      if (winner >= 0 && p.team === winner) e.wins++;
-      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });   // classement du jour (tous jeux)
+      if (winner >= 0 && p.place === 1) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.place === 1, kills: p.kills, game: GID });   // classement du jour (tous jeux)
       e.kills += p.kills; e.dmg += p.kills;
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / TICK_HZ; e.survSum += surv;
       if (surv > e.bestSurvivalSec) e.bestSurvivalSec = surv;
@@ -191,20 +193,18 @@ export function createBomb(room) {
     gameState = 'over'; endTick = tick;
     if (revenge && nParts >= 2) {
       const present = [...new Set(players.filter(p => p.playing && (p.alive || p.revenant)).map(p => p.team))];
+      const byTeam = {};                               // kills par équipe : départage la manche quand plusieurs camps restent (revenants compris)
       if (present.length === 1) winner = present[0];
-      else { const byTeam = {}; for (const p of players) if (p.playing) byTeam[p.team] = (byTeam[p.team] || 0) + p.kills; let bt = -1, bv = -1, tie = false; for (const k in byTeam) { const v = byTeam[k]; if (v > bv) { bv = v; bt = +k; tie = false; } else if (v === bv) tie = true; } winner = tie ? -1 : bt; }
+      else { for (const p of players) if (p.playing) byTeam[p.team] = (byTeam[p.team] || 0) + p.kills; let bt = -1, bv = -1, tie = false; for (const k in byTeam) { const v = byTeam[k]; if (v > bv) { bv = v; bt = +k; tie = false; } else if (v === bv) tie = true; } winner = tie ? -1 : bt; }
       if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
-      // équipe gagnante = place 1 (même si encore « revenant », pas alive, à l'instant du décompte) ; le reste garde le classement par survie/ordre d'élimination, à la suite
-      const champs = winner >= 0 ? players.filter(p => p.playing && p.team === winner) : [];
-      const order = players.filter(p => p.playing && !champs.includes(p)).sort((a, b) => ((b.alive ? 1 : 0) - (a.alive ? 1 : 0)) || ((b.elimTick || 0) - (a.elimTick || 0)));
-      champs.forEach(p => p.place = 1);
-      order.forEach((p, i) => p.place = i + 1 + champs.length);
+      // équipe gagnante = place 1 (même si encore « revenant », pas alive, à l'instant du décompte) ; un seul camp restant : le reste par survie/ordre d'élimination, à la suite
+      classerManche(players, winner, present.length === 1 ? undefined : { score: p => byTeam[p.team] || 0 });   // kills d'équipe : les ex æquo en tête partagent la place 1
       recordRound(); return;
     }
     const s = aliveTeams();
     winner = s.size === 1 ? [...s][0] : -1;
     if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
-    players.filter(active).forEach(p => p.place = 1);
+    classerManche(players, winner);                    // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
     recordRound();
   }
 
@@ -481,6 +481,11 @@ export function createBomb(room) {
     // mort subite
     if (!sd && tick >= SD_START) sd = true;
     if (sd && tick % SD_EVERY === 0 && sdIndex < SD_SPIRAL.length) { const [gx, gy] = SD_SPIRAL[sdIndex++]; dropBlock(gx, gy); }
+    // Filet anti-manche-infinie : la spirale a comblé TOUTE l'arène depuis SD_GRACE. Plus aucune bombe ne peut être posée, donc
+    // plus aucun kill : les derniers en vie sont des joueurs protégés (🛡 / invulnérables) restés DANS un bloc, et en revanche un
+    // revenant n'a plus de case pour bombarder ni pour ressusciter — la manche restait ouverte indéfiniment. Les revenants comptent
+    // comme éliminés (leur elimTick date de leur mort) et la manche se règle normalement (survivants ; nul ou départage aux kills en revanche).
+    if (tick >= SD_START + SD_EVERY * SD_SPIRAL.length + SD_GRACE) { for (const p of players) p.revenant = false; endRound(); return; }
     // mèches + chaînage
     const q = [];
     for (const b of bombs) if (!b.dead) { if (!b.remote) { b.fuse--; if (b.fuse <= 0) q.push(b); } else if (b.fuse > 1) b.fuse--; }

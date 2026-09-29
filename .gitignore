@@ -5,6 +5,11 @@ avatars.json
 *.json.tmp
 *.corrompu
 *.corrompu-*
+# sauvegardes tournantes du classement (les 3 dernières versions, 1 h d'écart) et leur temporaire — cf. leaderboard.js
+*.sauv1
+*.sauv2
+*.sauv3
+*.sauv.tmp
 # dépendances (le projet est zéro-dépendance, mais au cas où)
 node_modules/
 # note de travail personnelle (prompt de transfert vers un autre projet) — hors dépôt

@@ -8,6 +8,7 @@ function setGrid(n) {
   GW = side; GH = side;
 }
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
+import { classerManche } from '../fin-manche.js';
 
 const GID = 'snake';
 const MAX_SEATS = 10;
@@ -76,8 +77,8 @@ export function createSnake(room) {
     for (const p of players) {
       if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
       const e = lbEntry(p.name); e.games++;
-      if (winner >= 0 && p.team === winner) e.wins++;
-      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });   // classement du jour (tous jeux)
+      if (winner >= 0 && p.place === 1) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.place === 1, kills: p.kills, game: GID });   // classement du jour (tous jeux)
       e.kills += p.kills;
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / TICK_HZ;
       e.survSum += surv; if (surv > e.bestSurvivalSec) e.bestSurvivalSec = surv;
@@ -188,25 +189,20 @@ export function createSnake(room) {
   const bestScoreTeam = () => { let champ = null; for (const p of players) if (p.playing) { if (!champ || p.score > champ.score) champ = p; } return champ ? champ.team : -1; };
   function endRound(forced) {
     gameState = 'over'; endTick = tick;
+    let opts;
     if (rush) {
       // même vérité pour le classement ET le vainqueur : le tri (score décroissant, égalité => survie) fait
       // foi ; `forced` (bestScoreTeam, appelé par les sites d'appel) ne sert plus qu'à sortir tôt, cf. update().
       // Avant, `forced`/aliveTeams départageaient les égalités par ORDRE DE SIÈGE alors que le tri les
       // départageait par survie : à score nul partout, le « vainqueur » et la place 1 pouvaient diverger.
       const order = players.filter(p => p.playing).sort((a, b) => (b.score - a.score) || ((b.alive ? 1 : 0) - (a.alive ? 1 : 0)) || (b.elimTick - a.elimTick));
-      order.forEach((p, i) => p.place = i + 1);
       winner = order.length ? order[0].team : -1;
+      opts = { score: p => p.score };                  // mêmes clés de tri que ci-dessus : place 1 = équipe du vainqueur
     } else {
       if (forced != null) winner = forced;
       else { const s = aliveTeams(); winner = s.size === 1 ? [...s][0] : -1; }
-      players.forEach(p => { if (p.playing && p.alive) p.place = 1; });
-      // nul (aucune équipe seule en tête) avec plusieurs morts au MÊME tick (causes distinctes, ex. deux
-      // têtes qui entrent chacune dans un obstacle le même tick) : ils partagent la meilleure place restante.
-      if (winner < 0) {
-        const lastDead = players.filter(p => p.playing && !p.alive && p.elimTick === endTick);
-        if (lastDead.length > 1) { const best = Math.min(...lastDead.map(p => p.place)); for (const p of lastDead) p.place = best; }
-      }
     }
+    classerManche(players, winner, opts);              // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
     recordRound();
   }
   function backToLobby() {            // abandon : retour au lobby en pleine partie
