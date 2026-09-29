@@ -1092,6 +1092,9 @@ Corrigé ensuite en 2 vagues (commits « Audit 28/09, vague 1 / vague 2 ») :
   doublé/triplé de buteur (Foot). Jauges du Foot de part et d'autre d'une cage du bas décollée du bord (10 côtés).
 - Vérifié : `npm test` 101/101 (+ ETag/304/405), navigateur : les 7 jeux dessinent sans erreur (bureau, téléphone à
   10 joueurs, « Réduire les effets »). **Pas encore testé à plusieurs humains ni sur un vrai iPhone.**
+- **Restes connus, trouvés par le fuzz et NON corrigés** (antérieurs au lot) : Bomberman en mode revanche peut ne
+  jamais finir (un revenant qui ne trouve jamais de case libre garde la manche ouverte) ; Snake n'a pas de durée max
+  (deux serpents peuvent s'éviter indéfiniment) ; sur un nul total en Sumo/Bomberman, un seul joueur peut garder la place 1.
 
 ## Limites connues (assumées)
 - ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».
