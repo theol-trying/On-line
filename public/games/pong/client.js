@@ -25,6 +25,8 @@ import { lumiere, creerLumieres } from '../../lumiere.js';       // balles qui �
 import { crepuscule, creerDuel } from '../../crepuscule.js';               // mort subite : l'arène glisse du jour au crépuscule
 import { creerJournal, blocFin } from '../../finpartie.js';      // écran de fin : courbe des vies + meilleure action
 import { createStreaks, createCallouts, streakText, createHitStop, drawFlash, drawDanger, drawSeatChip, readable } from '../../exploits.js';   // aides partagées : « DOUBLÉ ! », arrêt sur image, éclat, danger, pastilles, lisibilité
+import { createRalenti } from '../../ralenti.js';                   // ralenti du point décisif (rejeu des derniers snapshots)
+import { drawPodium, podiumEntries } from '../../podium.js';        // podium de fin de manche dessiné au canvas
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -219,6 +221,11 @@ export default (function () {
   let shakeMag = 0, ballPopUntil = 0, bannerTimer = null, curWinMode = 'survivor';
   let rafId = 0, destroyed = false, resizeH = null, lastFrame = 0, curInten = 0, countT = 0, lastFw = 0;
   let geo0 = null;                                         // sommets du terrain en début de manche : fantôme du rétrécissement
+  // Ralenti : tampon des derniers snapshots ; à la fin de manche on rejoue le point décisif (rendu depuis les snapshots rejoués,
+  // sans sons ni fx) et la carte DOM de fin / le jingle attendent sa fin. Ensuite le podium canvas prend le haut du plateau.
+  const RL = createRalenti({ keepMs: 3000, windowMs: 1400, slow: 0.4 });
+  let endPend = null, rpl = false, swallow = 0, duelLast = 0;   // fin en attente du ralenti · rejeu en cours (dessin) · prochain clic à avaler · dernier fondu de duel réel
+  let podT0 = 0, podEntries = null, podPx = -1;            // début de la montée du podium · entrées (calculées une fois par fin de manche) · hauteur (px CSS) réservée en haut de la carte DOM
   const flashes = creerLumieres(16);                       // éclairs éphémères sur le sol (plafonnés)
   let sdAcc = 0;                                           // ms de mort subite JOUÉES (la pause fige le crépuscule)
   // Journal de la manche (côté client) : vies de chaque joueur + faits marquants pour l'écran de fin
@@ -256,6 +263,7 @@ export default (function () {
     const size = arenaSize({ max: 1100, side: 200, hLobby: 0.66, hPlay: 0.86 });   // side : les flèches ▲▼ encadrent le plateau sur desktop
     cv.style.width = size + 'px'; cv.style.height = size + 'px';
     cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr);
+    if (endShown && snap) podLayout(snap);         // la carte de fin garde sa place sous le podium quand la taille change
   }
 
   function refreshHUD() {
@@ -364,6 +372,65 @@ export default (function () {
       <div class="etitle" style="color:${champ ? colOf(champ) : '#fff'}">${title}</div>
       <div class="emeta">⏱ ${m.stats.durationSec}s · 🏓 ${m.stats.bounces} rebonds · ${m.stats.nParts} joueurs</div>
       ${mvpLine}<div class="elist">${rows}</div>${finHtml}${podHtml}<div class="ehint"><b style="font-family:Orbitron,'Segoe UI',sans-serif;letter-spacing:.12em;color:#6ff0ff">CONTINUE ?</b> ${touch ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
+    podLayout(m);
+  }
+
+  /* ---- podium canvas : bande du haut du plateau ------------------------------------------------
+     La carte DOM (#endscreen) couvre tout le plateau, fond sombre à 84 %. Pour ne pas masquer le podium : sa fraction du haut
+     (PODF de la hauteur, plus petite sur grand écran) reste transparente et la carte commence en dessous (padding haut) ; le
+     canvas peint lui-même un fond sombre de même teinte derrière le podium. Défilement de la carte : le fond suit (« local »). */
+  const podFrac = () => (cv && cv.clientHeight >= 600) ? 0.34 : 0.42;
+  const podList = m => (m.stats && m.stats.nParts === 1) ? [] : podiumEntries(m.players, colSeat);   // entraînement solo : pas de podium
+  function podLayout(m) {
+    if (!m && podPx < 0) return;                       // appelé à chaque snapshot hors fin : rien à défaire
+    const es = $('endscreen'); if (!es) return;
+    const on = !!(m && m.gs === 'over' && cv && cv.clientHeight > 0 && podList(m).length);
+    if (!on) { if (podPx >= 0) { podPx = -1; es.style.paddingTop = ''; es.style.justifyContent = ''; es.style.background = ''; es.style.backgroundAttachment = ''; } return; }
+    const P = Math.round(cv.clientHeight * podFrac());
+    podPx = P;
+    es.style.justifyContent = 'flex-start'; es.style.paddingTop = (P + 8) + 'px';
+    es.style.background = 'linear-gradient(180deg,rgba(5,6,14,0) 0,rgba(5,6,14,0) ' + P + 'px,rgba(5,6,14,.84) ' + P + 'px)'; es.style.backgroundAttachment = 'local';
+  }
+  // Pièce du podium : la raquette du siège, debout sur sa marche (tube néon vertical : gaine, tube, motif du siège, cœur, électrodes).
+  function podPiece(g, e, x, y, size) {
+    const hl = size * 0.35, r = size * 0.11, col = e.color, ga = g.globalAlpha;
+    const vl = () => { g.beginPath(); g.moveTo(0, -hl); g.lineTo(0, hl); g.stroke(); };
+    g.translate(x, y); g.lineCap = 'round';
+    if (!A.reduceFx) { g.globalCompositeOperation = 'lighter'; g.strokeStyle = col; g.globalAlpha = ga * 0.22; g.lineWidth = r * 2 + size * 0.14; vl(); g.globalCompositeOperation = 'source-over'; g.globalAlpha = ga; }
+    if (A.contrast) { g.strokeStyle = '#ffffff'; g.lineWidth = r * 2 + 3; vl(); }
+    g.strokeStyle = shade(col, -0.45); g.lineWidth = r * 2; vl();                                     // gaine
+    g.strokeStyle = col; g.lineWidth = r * 1.7; vl();                                                 // tube
+    const pat = seatPattern(g, e.seat, { size: Math.max(6, Math.round(size * 0.3)), res: Math.max(1, Math.min(4, Math.round(cv.width / W))) });
+    if (pat) { g.strokeStyle = pat; vl(); }
+    g.strokeStyle = shade(col, 0.72); g.globalAlpha = ga * 0.85; g.lineWidth = Math.max(1.3, r * 0.36); vl();   // cœur lumineux
+    g.globalAlpha = ga; g.fillStyle = '#ffffff';
+    g.beginPath(); g.arc(0, -hl, r * 0.36, 0, Math.PI * 2); g.arc(0, hl, r * 0.36, 0, Math.PI * 2); g.fill();   // électrodes
+  }
+  function drawEndPodium(now) {                          // repère du canvas (W × H)
+    if (!podEntries) podEntries = podList(snap);
+    if (!podEntries.length) return;
+    const f = podFrac(), ph = H * f;
+    if (Math.round(cv.clientHeight * f) !== podPx && endShown) podLayout(snap);
+    ctx.globalAlpha = 1; ctx.fillStyle = A.contrast ? '#05060e' : 'rgba(5,6,14,.84)'; ctx.fillRect(0, 0, W, ph);
+    ctx.fillStyle = rgba(TH.A, A.contrast ? 1 : 0.7); ctx.fillRect(0, ph - 1.5, W, 1.5);
+    const match = !!(snap.stats && snap.stats.match), nul = snap.winner < 0;
+    drawPodium(ctx, { x: W * 0.03, y: H * 0.012, w: W * 0.94, h: ph - H * 0.03 }, now, {
+      entries: podEntries, A, W, t0: podT0, nul, title: (match && !nul) ? 'VICTOIRE DU MATCH' : '',
+      theme: { step: TH.add ? TH.field2 : '#3a3470', edge: TH.A, text: TH.add ? TH.txt : '#ffffff', glow: TH.B },
+      drawPiece: podPiece,
+    });
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  }
+  // Ralenti : le PREMIER appui (Espace / clic / tap) ne fait que le passer. `swallow` avale le clic qui suit un appui déjà pris.
+  function rlBlock() {
+    const t = performance.now();
+    if (RL.active(t)) { RL.skip(); swallow = 0; return true; }
+    if (swallow > t) { swallow = 0; return true; }
+    return false;
+  }
+  function finRalenti(now) {                              // le ralenti est fini (ou passé) : jingle, carte de fin, montée du podium
+    endPend = null; podT0 = now;
+    if (snap && snap.gs === 'over') { sound('win'); music.sting('win'); if (!endShown) { showEndscreen(snap); endShown = true; } }
   }
 
   /* ---- entrées réseau (appelées par le shell) ---- */
@@ -382,7 +449,9 @@ export default (function () {
     if (m.aw && m.aw !== W) { W = m.aw; H = m.ah || m.aw; }  // arène redimensionnée (nb de joueurs)
     if (m.geo === undefined && snap) m.geo = snap.geo;      // delta réseau : géométrie absente = inchangée (null = vraiment vide)
     const prev = snap; snap = m;
-    if (m.pspd) padSpd = m.pspd;                       // vitesse par tick (dépend du nombre de joueurs)
+    if (prevGs === 'over' && m.gs !== 'over') { RL.clear(); endPend = null; podEntries = null; }   // on quitte l'écran de fin : plus rien à rejouer
+    if (m.gs === 'play' || m.gs === 'over') RL.push(m, performance.now());   // tampon du ralenti (après la reprise de `geo`, sans les `fx`)
+    if (m.pspd) padSpd = m.pspd;                    // vitesse par tick (dépend du nombre de joueurs)
     teamMode = m.mode && m.mode !== 'ffa';
     if (typeof m.maxLives === 'number') maxLives = m.maxLives;
     const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
@@ -396,7 +465,7 @@ export default (function () {
     if (ge && ge.length && ((m.gs !== 'play' && m.gs !== 'paused' && m.gs !== 'over') || !geo0 || geo0.length !== ge.length * 2)) {
       geo0 = []; for (const e of ge) geo0.push(e.ax, e.ay);
     }
-    if (m.gs === 'countdown' && prevGs !== 'countdown') { breaks.length = 0; shards.length = 0; elimFl.length = 0; flashes.vider(); sdAcc = 0; streaks.reset(); dangerK = 0; }   // nouvelle manche : bords réparés, retour au jour
+    if (m.gs === 'countdown' && prevGs !== 'countdown') { RL.clear(); endPend = null; podEntries = null; breaks.length = 0; shards.length = 0; elimFl.length = 0; flashes.vider(); sdAcc = 0; streaks.reset(); dangerK = 0; }   // nouvelle manche : bords réparés, retour au jour
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     (m.fx || []).forEach(f => {
@@ -406,7 +475,10 @@ export default (function () {
     });
     journal(prev, m, performance.now());               // AVANT l'écran de fin (plus bas) : il lit ce journal
     detectBanners(prev, m);
-    if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
+    if (prevGs !== 'over' && m.gs === 'over') {
+      if (!A.reduceFx && RL.start(performance.now())) endPend = m;         // ralenti du point décisif : jingle et carte de fin attendent sa fin
+      else { podT0 = performance.now(); sound('win'); music.sting('win'); }
+    }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== _lastCount) { music.sting('count'); sound('count'); countT = performance.now(); }   // décompte 3·2·1 : bip de borne
     if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); countT = performance.now(); }
     _lastCount = m.count;
@@ -416,8 +488,8 @@ export default (function () {
       if (m.gs === 'play' || m.gs === 'countdown') inten = (m.gs === 'play' && musicIntensity() > 0.55) ? 2 : 1;
       curInten = inten; music.setIntensity(inten); }
     refreshHUD(); refreshTimer(m);
-    if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } }
-    else { endShown = false; $('endscreen').classList.add('hidden'); }
+    if (m.gs === 'over') { if (!endShown && !endPend) { showEndscreen(m); endShown = true; } }   // pendant le ralenti : carte différée (finRalenti)
+    else { endShown = false; $('endscreen').classList.add('hidden'); podLayout(null); }
     const n = m.connected + m.botCount;
     const idle = m.gs === 'lobby' || m.gs === 'over';
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1 && n >= 1);   // n=1 : entraînement solo (mur)
@@ -705,8 +777,12 @@ export default (function () {
     let a = buf[0], b = buf[buf.length - 1];
     for (let i = 0; i < buf.length; i++) if (buf[i].t <= target) a = buf[i];
     for (let i = buf.length - 1; i >= 0; i--) if (buf[i].t >= target) b = buf[i];
-    const sa = a.s, sb = b.s, span = b.t - a.t;
+    const span = b.t - a.t;
     let al = span > 0 ? (target - a.t) / span : 0; al = al < 0 ? 0 : al > 1 ? 1 : al;
+    return viewOf(a.s, b.s, al);
+  }
+  // Interpolation entre deux snapshots (jeu en direct : tampon `buf` ; rejeu : snapshots du ralenti, jamais modifiés).
+  function viewOf(sa, sb, al) {
     let balls;
     const spd = bb => Math.hypot(bb.vx || 0, bb.vy || 0);   // vitesse (unités/tick) : longueur et chaleur de la comète
     if (sa.balls.length === sb.balls.length)
@@ -1047,7 +1123,7 @@ export default (function () {
       }
     }
     // bords qui se fissurent (vie perdue) ou volent en éclats (élimination) : le néon grésille puis se tait
-    if (!A.reduceFx) for (let i = breaks.length - 1; i >= 0; i--) {
+    if (!A.reduceFx && !rpl) for (let i = breaks.length - 1; i >= 0; i--) {   // (rejeu : pas de fissures rejouées)
       const br = breaks[i], life = br.elim ? 1100 : 650, t = (now - br.born) / life, e = E[br.ei];
       if (t >= 1 || !e) { breaks.splice(i, 1); continue; }
       if (t < (br.elim ? 0.7 : 0.45) && Math.random() < 0.6) tube(e.ax, e.ay, e.bx, e.by, br.col, 3, 1.2 * (1 - t), 0.6 * (1 - t));
@@ -1188,7 +1264,7 @@ export default (function () {
         for (let j = s0 + 1; j < tr.n; j++) { const f = (j - s0) / k; ctx.globalAlpha = 0.5 * f; ctx.lineWidth = BALL_R * 1.8 * f; seg(tr.x[j - 1], tr.y[j - 1], tr.x[j], tr.y[j]); }
         if (hot > 0.4) { ctx.strokeStyle = '#ffffff'; for (let j = Math.max(s0 + 1, tr.n - 5); j < tr.n; j++) { const f = (j - tr.n + 6) / 6; ctx.globalAlpha = 0.5 * f * hot; ctx.lineWidth = BALL_R * 0.7 * f; seg(tr.x[j - 1], tr.y[j - 1], tr.x[j], tr.y[j]); } }   // cœur chauffé à blanc
         ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
-        if (hot > 0.55 && Math.random() < 0.3 * kdt) { const a = Math.random() * Math.PI * 2; push(sparks, CAP.sparks, { x: b.x, y: b.y, vx: Math.cos(a) * 1.2, vy: Math.sin(a) * 1.2, born: now, life: 220, col: tcol, w: 1.2 }); }   // étincelles perdues à haute vitesse
+        if (hot > 0.55 && !rpl && Math.random() < 0.3 * kdt) { const a = Math.random() * Math.PI * 2; push(sparks, CAP.sparks, { x: b.x, y: b.y, vx: Math.cos(a) * 1.2, vy: Math.sin(a) * 1.2, born: now, life: 220, col: tcol, w: 1.2 }); }   // étincelles perdues à haute vitesse
       }
       const rr = BALL_R * (1 + pop);
       if (!A.reduceFx) { ctx.globalCompositeOperation = ADD(); glow(tcol, b.x, b.y, rr * 3.4, TH.add ? 0.6 : 0.35); ctx.globalCompositeOperation = 'source-over'; }
@@ -1402,14 +1478,14 @@ export default (function () {
       lumiere(ctx, b.x, b.y, 62 + 34 * hot, col, (b.gh ? 0.12 : 0.2 + 0.12 * hot) * k);
     }
     for (const pu of (snap.powerups || [])) lumiere(ctx, pu.x, pu.y, 36, pu.bad ? '#ff5a5a' : (PU_COL[pu.type] || '#ffffff'), 0.1 * k);   // les jetons rayonnent un peu
-    flashes.dessiner(ctx, now);
+    if (!rpl) flashes.dessiner(ctx, now);            // rejeu : pas d'éclairs d'événements
     ctx.restore(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   }
   // Mort subite : l'arène passe du jour au crépuscule, au fil du temps JOUÉ depuis son déclenchement.
   // Pris dans le terrain d'origine (geo0) : la zone déjà mangée par le rétrécissement s'assombrit avec le reste.
   const SD_RAMP = 26000;                                                 // ms pour atteindre le crépuscule complet (plafonné par la brique)
   function drawDusk(E) {
-    const t = Math.max(sdAcc > 0 ? Math.min(1, sdAcc / SD_RAMP) : 0, DUEL.t(snap, performance.now(), duelAnnonce));   // mort subite (option) OU duel final
+    const t = Math.max(sdAcc > 0 ? Math.min(1, sdAcc / SD_RAMP) : 0, rpl ? duelLast : (duelLast = DUEL.t(snap, performance.now(), duelAnnonce)));   // mort subite (option) OU duel final (rejeu : dernier fondu réel, sans ré-annonce)
     if (!(t > 0.005) || !fbox) return;
     const force = (TH.add ? 0.85 : 0.55) * (A.contrast ? 0.7 : 1) * (A.reduceFx ? 0.5 : 1);   // les raquettes vivent sur les BORDS, là où la vignette mord : on reste en deçà
     ctx.save(); ctx.beginPath();
@@ -1449,10 +1525,19 @@ export default (function () {
       if (snap.sd && g0 === 'play') sdAcc += kdt * 16.7;
       else if (g0 === 'lobby' || g0 === 'countdown' || (g0 === 'play' && !snap.sd)) sdAcc = 0;
     }
-    if (!A.reduceFx && hitStop.frozen(now)) return;    // arrêt sur image (60 ms) à l'élimination : on garde la dernière image affichée
+    if (endPend && !RL.active(now)) finRalenti(now);   // ralenti terminé ou passé : jingle, carte de fin, montée du podium
+    const rf = RL.frame(now);                          // rejeu du point décisif (a, b, u) ou null
+    if (!rf && !A.reduceFx && hitStop.frozen(now)) return;    // arrêt sur image (60 ms) à l'élimination : on garde la dernière image affichée
+    if (rf && !rpl) trails = [];                       // entrée en rejeu : les comètes repartent de zéro
+    rpl = !!rf;
+    if (!rf) { drawScene(now, kdt, null); return; }
+    const real = snap; snap = rf.b;                    // le rendu lit `snap` partout : on lui prête le snapshot rejoué (jamais modifié), restitué ensuite
+    try { drawScene(now, kdt, rf); } finally { snap = real; }
+  }
+  function drawScene(now, kdt, rf) {
     const sc = cv.width / W;
     let ox = 0, oy = 0;
-    if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.86; }
+    if (shakeMag > 0.3 && !A.reduceFx && !rf) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.86; }
     else shakeMag = 0;
     const fit = geoFit(snap && snap.geo, snap && snap.gs);
     FS = fit.s || 1; patRes = Math.max(1, Math.min(4, Math.round(sc * FS)));   // zoom du terrain (textes lisibles) · résolution des motifs de raquette (stable → cache)
@@ -1467,9 +1552,9 @@ export default (function () {
     if (ambiant) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); }
     else if (ox || oy) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, cv.width, cv.height); }   // secousse : la marge découverte par le décalage est repeinte (sinon une bande de l'image précédente reste visible)
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-    const view = computeView(now);
+    const view = rf ? viewOf(rf.a, rf.b, rf.u) : computeView(now);
     const vballs = view ? view.balls : (snap ? snap.balls : []);
-    const moiPred = predireMoi(now);                   // sa propre raquette : prédite, pas interpolée
+    const moiPred = rf ? null : predireMoi(now);       // sa propre raquette : prédite, pas interpolée (rejeu : positions rejouées)
     const vpos = s => (s === mySeat && moiPred != null) ? moiPred : (view && view.pos[s] != null) ? view.pos[s] : (snap ? snap.players[s].pos : 0);
     if (!snap || snap.gs === 'lobby') { vbase(); drawLobby(now); return; }   // écran titre : la scène couvre tout le canvas
     base();
@@ -1492,20 +1577,22 @@ export default (function () {
         drawPaddle(p, e, vpos(p.seat), now, over && snap.winner >= 0 && p.playing && p.alive && p.team === snap.winner);   // halo d'or : seulement l'équipe gagnante, jamais sur une égalité (winner = -1)
       });
       drawBumpers(now);
-      if (gs === 'play' || gs === 'paused' || gs === 'countdown') drawBalls(vballs, now, gs === 'play', kdt);
+      if (gs === 'play' || gs === 'paused' || gs === 'countdown' || rf) drawBalls(vballs, now, gs === 'play' || !!rf, kdt);   // rejeu : la balle reste dessinée jusqu'au bout
       else trails = [];
-      if (over && snap.winner >= 0 && !A.reduceFx && now - lastFw > 650 && dots.length < 160) {   // fin : feux d'artifice aux couleurs des vainqueurs
+      if (over && !rf && snap.winner >= 0 && !A.reduceFx && now - lastFw > 650 && dots.length < 160) {   // fin : feux d'artifice aux couleurs des vainqueurs
         lastFw = now; const win = snap.players.filter(p => snap.winner >= 0 && p.playing && p.alive && p.team === snap.winner), bw = fit.bw || W, bh = fit.bh || H;
         const c = win.length ? colOf(win[Math.floor(Math.random() * win.length)]) : TH.A;
         motes(W / 2 + (Math.random() - 0.5) * bw * 0.6, H / 2 + (Math.random() - 0.5) * bh * 0.5, 22, 1.2, 3.2, c, 1100, 2.2, now, 0.03);
       }
-      drawFx(now, kdt);
+      if (!rf) drawFx(now, kdt);                 // rejeu : ni particules ni textes d'événements
       drawDusk(E);                               // étalonnage PAR-DESSUS sol + pièces, sous les écrans / voiles
-      base(); updDanger(E, vballs, kdt); drawDanger(ctx, W, H, dangerK, A.reduceFx ? 0 : now);   // vignette rouge : balle rapide qui fonce sur MON bord (fixe, sans pulsation, en « Réduire les effets »)
+      base(); if (rf) dangerK = 0; else { updDanger(E, vballs, kdt); drawDanger(ctx, W, H, dangerK, A.reduceFx ? 0 : now); }   // vignette rouge : balle rapide qui fonce sur MON bord (fixe, sans pulsation, en « Réduire les effets »)
       callouts.draw(ctx, W, H, now, A);          // « DOUBLÉ ! » « TRIPLÉ ! » « CARNAGE ! »
     } else trails = [];
+    if (snap.gs === 'over' && !rf) { base(); drawEndPodium(now); }   // podium canvas : en haut du plateau, sous la carte de fin (après le ralenti éventuel)
     vbase();                                     // les voiles et écrans qui suivent couvrent tout le CANVAS
-    if (snap.gs === 'countdown') { drawCountdown(now); drawServeArrow(now, world); }
+    if (rf) { base(); RL.drawOverlay(ctx, W, H, now, A); }   // bandes cinéma, « ⟲ RALENTI », progression (en dernier)
+    else if (snap.gs === 'countdown') { drawCountdown(now); drawServeArrow(now, world); }
     else if (snap.gs === 'paused') drawPause(now);
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   }
@@ -1549,7 +1636,7 @@ export default (function () {
   const onKeyDown = e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
-    if (e.key === ' ' && !e.repeat && snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' });
+    if (e.key === ' ' && !e.repeat && snap && snap.gs !== 'play' && snap.gs !== 'paused' && !rlBlock()) send({ t: 'start' });   // pendant le ralenti, Espace ne fait que le passer
     if (!e.repeat && (e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) send({ t: 'pause' });   // touche tenue : jamais de re-envoi (sinon pause/reprise en boucle)
     if (!e.repeat) setKey(e.code, true);
   };
@@ -1591,6 +1678,7 @@ export default (function () {
     tlTxt = tlEl.querySelector('span'); tlTxt.style.cssText = 'font-size:17px;font-weight:800;font-variant-numeric:tabular-nums';
     hud.appendChild(tlEl); tlShown = -1; tlPrev = null; tlVal = null;
     touch = isTouch(); dangerK = 0; elimFl.length = 0; streaks.reset();
+    RL.clear(); endPend = null; rpl = false; swallow = 0; podEntries = null; duelLast = 0;   // singleton réutilisé : pas de rejeu ni de podium hérités
     startBtn = $('startBtn'); pauseBtn = $('pauseBtn'); botsBtn = $('botsBtn'); modeBtn = $('modeBtn'); presetBtn = $('presetBtn'); pauseFloat = $('pauseFloat');
     optBtn = $('optBtn'); optionsPanel = $('options');
     optLives = $('optLives'); optSpeed = $('optSpeed'); optPu = $('optPu'); optAccel = $('optAccel');
@@ -1598,13 +1686,15 @@ export default (function () {
     optTarRow = $('optTarRow'); optTar = $('optTar'); optTarLbl = $('optTarLbl'); optNeg = $('optNeg'); optBot = $('optBot'); optStyle = $('optStyle'); optBump = $('optBump');
     lbBtn = $('lbBtn'); lbPanel = $('lbpanel'); voteBtn = $('voteBtn'); histPreset = $('histPreset'); histMode = $('histMode');
 
-    startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
+    startBtn.onclick = () => { unlockAudio(); if (rlBlock()) return; send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' });
     pauseFloat.onclick = () => send({ t: 'pause' });
     botsBtn.onclick = () => send({ t: 'bots' });
     modeBtn.onclick = () => send({ t: 'mode' });
     presetBtn.onclick = () => send({ t: 'preset' });
-    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
+    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused' && !rlBlock()) send({ t: 'start' }); });
+    // ralenti : le PREMIER appui (souris / doigt, n'importe où dans le jeu) le passe seulement ; le clic qui suit est avalé (rlBlock)
+    if (premiere) root.addEventListener('pointerdown', () => { const t = performance.now(); if (RL.active(t)) { RL.skip(); swallow = t + 1500; } }, true);
     optBtn.onclick = () => togglePanel(optionsPanel);
     { const puBtn = $('puBtn'), puPanel = $('puhelp'); if (puBtn && puPanel) puBtn.onclick = () => togglePanel(puPanel); }
     $('optLivesMinus').onclick = () => send({ t: 'opt', op: 'lives', d: -1 });
@@ -1626,7 +1716,7 @@ export default (function () {
     $('lbReset').onclick = () => { if (confirm('Réinitialiser le classement ?')) send({ t: 'lbreset' }); };
     voteBtn.onclick = () => send({ t: 'vote' });
     histPreset.onchange = renderHist; histMode.onchange = renderHist;
-    if (premiere) $('endscreen').addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
+    if (premiere) $('endscreen').addEventListener('click', () => { unlockAudio(); if (rlBlock()) return; send({ t: 'start' }); });
     if (premiere) { hold($('touchUp'), 'up'); hold($('touchDn'), 'dn'); }
 
     applyColors();                  // purge aussi les décors / sprites : ils appartiennent au contexte précédent
@@ -1644,6 +1734,7 @@ export default (function () {
     if (input.up || input.dn) { input.up = input.dn = false; try { send({ t: 'input', up: false, dn: false }); } catch (e) {} }   // touches tenues : relâchées côté serveur (sinon la raquette file seule)
     if (actx) { const c0 = actx; actx = null; noiseBuf = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {} }   // ferme l'AudioContext (nouveau au prochain geste)
     elimFl.length = 0; dangerK = 0; streaks.reset();
+    RL.clear(); endPend = null; rpl = false; swallow = 0; podEntries = null; podLayout(null);   // ralenti et podium remis à zéro (carte de fin rendue à son style)
     J.fin(); flashes.vider(); sdAcc = 0;   // singleton : un retour en cours de manche ne doit pas prolonger l'ancien journal
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
   }

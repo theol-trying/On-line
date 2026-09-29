@@ -14,6 +14,8 @@ import { lumiere, creerLumieres } from '../../lumiere.js';        // lueurs sur 
 import { crepuscule, creerDuel } from '../../crepuscule.js';                 // le jardin passe du jour au crépuscule quand la manche s'achève
 import { creerJournal, blocFin } from '../../finpartie.js';
 import { createStreaks, createCallouts, streakText, createHitStop, drawFlash, drawDanger, drawSeatChip, readable, hudK } from '../../exploits.js';   // aides visuelles partagées (séries, arrêt sur image, vignette, pastilles, lisibilité)
+import { createRalenti } from '../../ralenti.js';                    // ralenti du moment décisif : derniers instantanés rejoués au ralenti à la fin de manche
+import { drawPodium, podiumEntries } from '../../podium.js';       // podium de fin dessiné au canvas (têtes de serpent)
 import { creerEcho } from '../../echo-virage.js';                   // chevron immédiat du virage enregistré (file de 2 virages côté serveur)       // écran de fin : longueur au fil de la manche + meilleure action
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
@@ -191,6 +193,13 @@ export default (function () {
   const cvBox = { clientWidth: 510 };               // largeur CSS du canvas (mise à jour au redimensionnement) : évite de relire clientWidth à chaque image
   let PRES = 1;                                     // px appareil par unité d'arène, arrondi au quart (motifs nets sur Retina, cache stable)
   let cardSig = [], cardLvSig = [], cardPn = [], cardLv = [];   // HUD : dernière chaîne écrite par carte (innerHTML seulement si elle change)
+  // ralenti de fin de manche + podium canvas : le tampon reçoit chaque instantané ; la carte DOM de fin attend la fin du rejeu
+  const RL = createRalenti({ keepMs: 3000, windowMs: 1400, slow: 0.4 });
+  let pendingEnd = null;                            // instantané 'over' dont la carte de fin est différée (rejeu en cours)
+  let RPLY = false;                                 // vrai pendant une image dessinée depuis le rejeu
+  let endGrace = -1e9;                              // instant où le rejeu s'est terminé : l'appui qui le passe ne doit pas lancer « Rejouer »
+  let podT0 = 0, podSnap = null, podEnt = [], podTop = '';   // podium : début de la montée, entrées en cache (par instantané), position de la carte DOM
+  const rOn = () => RL.active(performance.now());
   let hud, cards, startBtn, pauseBtn, modeBtn, variantBtn, rushBtn, botsBtn, diffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
@@ -204,7 +213,7 @@ export default (function () {
     t = { dk: rgbStr(mix(c, [8, 20, 6], 0.55)), lt: rgbStr(mix(c, [255, 255, 240], 0.55)) };
     return (tints[col] = t);
   }
-  function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; tints = {}; terrainKey = ''; foodSpr = {}; }
+  function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; tints = {}; terrainKey = ''; foodSpr = {}; podSnap = null; }
 
   function resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
@@ -250,9 +259,10 @@ export default (function () {
       `<div class="lbrow"><span class="lbn">${esc(e.name)}</span><span>🎮${e.games | 0}</span><span>🏆${e.wins | 0}</span><span title="kills">⚡${e.kills | 0}</span><span title="meilleur score">🍎${e.bestScore || 0}</span><span title="meilleure survie">⏱${Math.round(e.bestSurvivalSec || 0)}s</span></div>`).join('');
   }
   function showEndscreen(m) {
-    if (m.gs !== 'over' || !m.stats) { endEl.classList.add('hidden'); return; }
+    if (m.gs !== 'over' || !m.stats) { endEl.classList.add('hidden'); endBox(false); return; }
     endEl.classList.remove('hidden');
     const solo = m.stats.solo;
+    endBox(!solo && podList(m).length > 0);         // podium canvas en haut : la carte se range dessous
     const parts_ = m.players.filter(p => p.playing && p.place > 0).slice().sort((a, b) => a.place - b.place);
     const champ = m.winner >= 0 ? parts_.find(p => p.team === m.winner) : null;
     const who = champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[m.winner] : esc(champ.name || ('P' + (champ.seat + 1)))) : null;
@@ -279,6 +289,7 @@ export default (function () {
   function resetRound() {
     buf = []; parts.length = 0; waves.length = 0; floats.length = 0; flashes.length = 0; rushAlerted = duelAlerted = false;
     STK.reset(); hsAt = 0; dangerT = dangerK = 0;
+    pendingEnd = null; RL.skip();                   // nouvelle manche : plus de rejeu ni de carte de fin en attente (le tampon se vide seul au changement de `round`)
     for (const k in bulges) delete bulges[k];
     deathCause = {}; foodBorn.clear(); angSet.fill(0);
     LUM.vider(); lumPend.length = 0; playMs = 0; corpse.clear();
@@ -314,6 +325,7 @@ export default (function () {
   }
   function onState(m) {
     if (m.gw && m.gw !== GW) { GW = m.gw; GH = m.gh || m.gw; CELL = ARENA / GW; }   // grille redimensionnée
+    RL.push(m, performance.now());                   // tampon du ralenti : chaque instantané, avant toute autre chose
     snap = m; teamMode = !!(m.mode && m.mode !== 'ffa');
     if (m.rocks !== rocksRef) { rocksRef = m.rocks; rocksKey = (m.rocks && m.rocks.length) ? m.rocks.join(',') : ''; }   // rochers : figés pendant une manche → cuits dans le décor
     const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
@@ -322,6 +334,8 @@ export default (function () {
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
     if (m.round !== prevRound) { prevRound = m.round; resetRound(); }
     if ((m.gs === 'play' || m.gs === 'paused') && jRound !== m.round) { jRound = m.round; J.debut(performance.now()); jLast = -1e12; }   // aussi pour qui arrive en cours de manche
+    const overNow = prevGs !== 'over' && m.gs === 'over';
+    if (overNow && !A.reduceFx && RL.start(performance.now())) pendingEnd = m;   // dernier serpent tombé / cible atteinte : rejeu au ralenti, carte de fin et fanfare différées
     const prevS = buf.length ? buf[buf.length - 1].s : null;   // instantané précédent : le corps d'un serpent qui vient de mourir
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     const fxs = m.fx || []; let crashed = false;
@@ -329,7 +343,7 @@ export default (function () {
     trackFood(m, crashed);
     dangerT = dangerAhead(m);                        // vignette : recalculée à chaque instantané (12 Hz), lissée à l'affichage
     if (m.gs === 'play') jSample(m, performance.now(), crashed);     // une mort : point forcé, la chute tombe au bon instant
-    if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); jRoundEnd(m, performance.now()); }
+    if (overNow) { jRoundEnd(m, performance.now()); if (!pendingEnd) { sound('win'); music.sting('win'); podT0 = performance.now(); } }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte 3·2·1
     if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); playSince = performance.now(); }
     lastCount = m.count;
@@ -344,8 +358,8 @@ export default (function () {
       }
       music.setIntensity(inten); }
     refreshHUD();
-    if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } }
-    else { endShown = false; endEl.classList.add('hidden'); }
+    if (m.gs === 'over') { if (!endShown && !pendingEnd) { showEndscreen(m); endShown = true; } }   // rejeu en cours : la carte attend (cf. endReplay)
+    else { endShown = false; pendingEnd = null; RL.skip(); endEl.classList.add('hidden'); endBox(false); }
     const idle = m.gs === 'lobby' || m.gs === 'over';
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1);
     startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
@@ -396,7 +410,7 @@ export default (function () {
   }
   function psound(k, gx) { sndPan = Math.max(-1, Math.min(1, (px(gx) / ARENA - 0.5) * 1.7)); sound(k); sndPan = 0; }   // son positionné gauche/droite
   function sound(k) {
-    if (!actx) return;
+    if (!actx || rOn()) return;                     // silence pendant le ralenti : les sons ne se rejouent pas
     if (k === 'eat') { noise(0.05, 'bandpass', 2300, 0.1, 0, 1.4); noise(0.035, 'highpass', 3800, 0.06, 0.028); tone(540, 0.06, 'triangle', 0.04, 0.01); tone(810, 0.09, 'triangle', 0.035, 0.05); }   // croc + pincement
     else if (k === 'gold') { tone(1046.5, 0.16, 'triangle', 0.04); tone(1318.5, 0.19, 'triangle', 0.04, 0.055); tone(1568, 0.22, 'triangle', 0.04, 0.11); tone(2093, 0.3, 'sine', 0.03, 0.165); noise(0.25, 'highpass', 7000, 0.03, 0.04); }   // carillon
     else if (k === 'shrink') { glide(640, 170, 0.24, 'sine', 0.09); noise(0.2, 'lowpass', 650, 0.07, 0.03); }   // bloup + pouf de spores
@@ -492,7 +506,7 @@ export default (function () {
     if (f.type === 'crash') {
       const seat = f.seat, mine = seat === mySeat, cause = crashCause(f, m);
       deathCause[seat] = { k: cause, by: f.by };
-      psound(mine ? 'crashMe' : 'crash', f.x); music.sting('kill');
+      psound(mine ? 'crashMe' : 'crash', f.x); if (!rOn()) music.sting('kill');
       if (mine) msgPerso('✖', CAUSE_MSG[cause], { bad: true });
       jCrash(f, m, cause, now);
       if (cause === 'snake' && f.by >= 0 && f.by < MAX_SEATS && f.by !== seat) {   // seul cas où le tueur est connu (choc frontal / mur / rocher / morsure : pas d'auteur)
@@ -683,7 +697,7 @@ export default (function () {
     if (!angSet[seat] || !soft) { headAng[seat] = tgt; angSet[seat] = 1; }
     else { let d = tgt - headAng[seat]; d = Math.atan2(Math.sin(d), Math.cos(d)); headAng[seat] += d * Math.min(1, dtm / 55); }
     const ghost = !!pb.ghost, ga = ghost ? (soft ? 0.5 + 0.2 * Math.sin(now / 110) : 0.55) : 1;
-    if (ghost && soft && Math.random() < 0.12 * dtm / 16.7) burst(PX[0], PX[1], 1, { k: K_SPORE, col: '#dcebff', sp: C * 0.02, up: C * 0.02, g: -0.002, dr: 0.97, r: C * 0.14, life: 700 });   // volutes de fantôme
+    if (ghost && soft && !RPLY && Math.random() < 0.12 * dtm / 16.7) burst(PX[0], PX[1], 1, { k: K_SPORE, col: '#dcebff', sp: C * 0.02, up: C * 0.02, g: -0.002, dr: 0.97, r: C * 0.14, life: 700 });   // volutes de fantôme
     drawBody(C, col, seat, hD, ga, ghost, bulges[seat]);
     let lx = Math.cos(tgt), ly = Math.sin(tgt), best = 81 * C * C;                    // regard : la nourriture la plus proche (≤ 9 cases)
     for (let i = 0; i < foods.length; i++) { const fd = foods[i], fx = px(fd.x) - hx, fy = px(fd.y) - hy, d2 = fx * fx + fy * fy; if (d2 < best && d2 > 1) { best = d2; lx = fx; ly = fy; } }
@@ -695,7 +709,7 @@ export default (function () {
   }
   // repères : « c'est moi » (anneau pulsé + flèche au départ), couronne des vainqueurs en fin de manche
   function drawMarkers(now) {
-    const C = CELL, soft = !A.reduceFx, over = snap.gs === 'over', pl = snap.players || [];
+    const C = CELL, soft = !A.reduceFx, over = snap.gs === 'over' && !RPLY, pl = snap.players || [];   // rejeu : pas de couronnes, le jeu « se joue » encore
     if (over && snap.winner >= 0) {
       for (let s = 0; s < MAX_SEATS; s++) {
         const p = pl[s]; if (!HON[s] || !p || !p.alive || p.team !== snap.winner) continue;
@@ -727,7 +741,7 @@ export default (function () {
   // pastilles numérotées (n° de siège + glyphe du motif) au-dessus de chaque tête : toujours à partir de 7 joueurs (les teintes
   // ne suffisent plus), sinon pendant le décompte et 2 s après le départ. Le mien la pose du côté opposé à la flèche « c'est moi ».
   function drawChips(now) {
-    const gs = snap.gs, pl = snap.players || [];
+    const gs = RPLY ? 'play' : snap.gs, pl = snap.players || [];
     if (gs !== 'play' && gs !== 'countdown' && gs !== 'paused') return;
     let n = 0; for (let i = 0; i < pl.length; i++) if (pl[i] && pl[i].playing) n++;
     if (!(n >= 7 || gs === 'countdown' || (gs === 'play' && now - playSince < 2000))) return;
@@ -962,7 +976,7 @@ export default (function () {
   function drawLights(now, S) {
     if (A.reduceFx) { lumPend.length = 0; LUM.vider(); return; }
     const C = CELL, boost = 1 + 0.6 * dusk;         // à la tombée du jour, les lueurs portent davantage
-    for (let i = 0; i < lumPend.length; i++) { const q = lumPend[i]; if (now >= q.at) { LUM.ajouter(q.x, q.y, q.r, q.col, q.ms, q.a * boost); lumPend.splice(i, 1); i--; } }
+    for (let i = 0; !RPLY && i < lumPend.length; i++) { const q = lumPend[i]; if (now >= q.at) { LUM.ajouter(q.x, q.y, q.r, q.col, q.ms, q.a * boost); lumPend.splice(i, 1); i--; } }   // rejeu : les éclairs de la vraie fin ne sont pas rejoués (purgés à la fin du rejeu)
     if (S) {
       const foods = S.food || [];
       for (let i = 0; i < foods.length; i++) {
@@ -979,7 +993,7 @@ export default (function () {
       const t = now / 1000;
       for (let i = 0; i < AMB_FLY.length; i++) { const f = AMB_FLY[i], gl = 0.5 + 0.5 * Math.sin(t / 0.65 + f.ph); lumiere(ctx, f.x * ARENA + Math.sin(t / 2.2 + f.ph) * 26, f.y * ARENA + Math.cos(t / 1.9 + f.ph * 1.7) * 20, 18, '#d8ff9a', 0.2 * dusk * gl); }
     }
-    LUM.dessiner(ctx, now);
+    if (!RPLY) LUM.dessiner(ctx, now);
   }
   // crépuscule : survie → part des serpents tombés (duel final = soir), food-rush → approche de la cible,
   // et une manche qui s'éternise voit le soleil baisser. Plafonné à 0.85 : serpents et nourriture restent nets.
@@ -1070,10 +1084,10 @@ export default (function () {
     ctx.restore();
   }
   function label(txt, x, y, font, col) { ctx.font = font; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(30,16,6,0.75)'; ctx.strokeText(txt, x, y); ctx.fillStyle = col; ctx.fillText(txt, x, y); }
-  function drawRush() {                             // food-rush : progression du meneur sur une planchette (s'efface si une tête passe dessous)
-    const pl = snap.players || []; let lead = 0;
+  function drawRush(m) {                            // food-rush : progression du meneur sur une planchette (s'efface si une tête passe dessous) ; m = instantané affiché (courant ou rejeu)
+    const pl = m.players || []; let lead = 0;
     for (let i = 0; i < pl.length; i++) { const p = pl[i]; if (p && p.playing && p.score > lead) lead = p.score; }
-    const tgt = snap.rushTarget || 20, w = 176, h = 20, k = hudK(cvBox, ARENA), x = 0, y = 0;   // bloc agrandi autour de son point d'ancrage (haut, centré) pour rester lisible sur téléphone
+    const tgt = m.rushTarget || 20, w = 176, h = 20, k = hudK(cvBox, ARENA), x = 0, y = 0;   // bloc agrandi autour de son point d'ancrage (haut, centré) pour rester lisible sur téléphone
     let a = 0.94; for (let s = 0; s < MAX_SEATS; s++) if (HON[s] && HY[s] < 5 + (y + h) * k + CELL * 1.5 && HX[s] > ARENA / 2 - w * k / 2 - CELL && HX[s] < ARENA / 2 + w * k / 2 + CELL) { a = 0.32; break; }
     ctx.save(); ctx.translate(ARENA / 2 - w * k / 2, 5); ctx.scale(k, k);
     plank(x, y, w, h, a);
@@ -1214,9 +1228,13 @@ export default (function () {
   function draw() {
     if (destroyed) return;
     const now = performance.now(), dtm = lastFrame ? Math.min(100, Math.max(1, now - lastFrame)) : 16.7; lastFrame = now; NOW = now;
+    if (pendingEnd && !RL.active(now)) endReplay(now);   // rejeu fini (ou passé) : carte de fin, fanfare et podium
+    const rf = RL.frame(now);                       // instantanés rejoués (a, b, u) ; null hors rejeu
+    RPLY = !!rf;
     const kdt = Math.min(3, Math.max(0.25, dtm / 16.7)), sc = cv.width / ARENA, soft = !A.reduceFx;
-    // arrêt sur image de 60 ms à chaque élimination (l'image précédente reste à l'écran) ; jamais en « réduire les effets »
-    if (soft) { if (hsAt && now >= hsAt) { HS.trigger(now); hsAt = 0; } if (HS.frozen(now)) return; } else hsAt = 0;
+    // arrêt sur image de 60 ms à chaque élimination (l'image précédente reste à l'écran) ; jamais en « réduire les effets » ni pendant le rejeu
+    if (rf) { hsAt = 0; shakeMag = 0; }
+    else if (soft) { if (hsAt && now >= hsAt) { HS.trigger(now); hsAt = 0; } if (HS.frozen(now)) return; } else hsAt = 0;
     let ox = 0, oy = 0;
     if (shakeMag > 0.3 && soft) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= Math.pow(0.85, kdt); } else shakeMag = 0;
     if (ox || oy) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0d2c0f'; ctx.fillRect(0, 0, cv.width, cv.height); }   // secousse : le décor est décalé, on peint d'abord la marge (sinon une bande de l'image précédente reste visible)
@@ -1225,8 +1243,9 @@ export default (function () {
     ensureTerrain(); ctx.drawImage(terrainCv, 0, 0, ARENA, ARENA);   // décor statique pré-rendu (1 drawImage au lieu de ~6000 tracés)
     if (snap && snap.variant === 1) drawPortal(now);
     updateDusk(dtm);
-    if (snap) viewPair(now);
-    const S = snap ? (VA || snap) : null;
+    if (rf) { VA = rf.a; VB = rf.b; VAL = rf.u; }    // rejeu : mêmes interpolations que d'habitude, sur les instantanés rejoués (jamais modifiés)
+    else if (snap) viewPair(now);
+    const S = rf ? rf.a : snap ? (VA || snap) : null;
     drawLights(now, S);                             // lumière sur le sol, avant toute pièce
     if (soft) drawAmbient(now);
     HON.fill(0);
@@ -1236,7 +1255,7 @@ export default (function () {
       for (let i = 0; i < pl.length; i++) if (i !== mySeat) drawSnake(pl[i], now, dtm, foods);   // un serpent mort disparaît du plateau (il n'est plus un obstacle)
       if (mySeat >= 0 && pl[mySeat]) drawSnake(pl[mySeat], now, dtm, foods);                   // le mien par-dessus
     }
-    drawFx(now, kdt);
+    if (!rf) drawFx(now, kdt);                      // rejeu : ni particules ni éclats (ceux de la vraie fin sont purgés à la sortie)
     if (dusk > 0.01) crepuscule(ctx, 0, 0, ARENA, ARENA, dusk, { soleil: 'gauche', force: A.contrast || A.reduceFx ? 0.6 : 1 });   // étalonnage sur sol + pièces
     if (snap && snap.gs === 'play') {               // vignette de danger : ma tête va toucher quelque chose au prochain pas (figée, sans pulsation, en « réduire les effets »)
       dangerK = soft ? dangerK + (dangerT - dangerK) * Math.min(1, dtm / 90) : dangerT * 0.6;
@@ -1244,17 +1263,68 @@ export default (function () {
     } else dangerK = 0;
     if (snap) { drawMarkers(now); drawChips(now); }         // repères au-dessus du crépuscule : toujours nets
     CALL.draw(ctx, ARENA, ARENA, now, A);                   // « DOUBLÉ ! » / « TRIPLÉ ! » / « CARNAGE ! »
-    if (snap && snap.rush && (snap.gs === 'play' || snap.gs === 'countdown')) drawRush();
+    if (rf) { if (rf.b.rush) drawRush(rf.b); }
+    else if (snap && snap.rush && (snap.gs === 'play' || snap.gs === 'countdown')) drawRush(snap);
     if (snap && snap.gs === 'countdown') drawCountdown(now);
     if (snap && snap.gs === 'lobby') drawLobby(now);
     if (snap && snap.gs === 'paused') drawPause(now);
+    if (rf) RL.drawOverlay(ctx, ARENA, ARENA, now, A);   // bandes cinéma « ⟲ RALENTI » : en dernier
+    else if (snap && snap.gs === 'over' && !pendingEnd) drawEndPodium(now);
+  }
+  // fin du rejeu (durée écoulée ou passé par un appui) : sons, carte DOM de fin et podium, comme s'il n'y avait pas eu de ralenti
+  function endReplay(now) {
+    const m = pendingEnd; pendingEnd = null; endGrace = now;
+    parts.length = 0; waves.length = 0; floats.length = 0; flashes.length = 0; lumPend.length = 0; LUM.vider(); hsAt = 0; shakeMag = 0;   // effets de la vraie fin : périmés
+    if (!m || !snap || snap.gs !== 'over') return;
+    sound('win'); music.sting('win'); podT0 = now;
+    if (!endShown) { showEndscreen(snap); endShown = true; }
+  }
+  // ───────────────────────── podium de fin (canvas, style « Jardin ») ─────────────────────────
+  // Le podium occupe une bande en haut du canvas ; la carte DOM de fin (qui couvre tout le canvas par défaut) est rabaissée
+  // dessous par endBox() : bande plus haute sur téléphone (le podium y reste lisible), plus basse sur grand écran.
+  const podBand = () => cvBox.clientWidth < 460 ? 0.44 : 0.36;
+  function endBox(on) {
+    const t = on ? (podBand() * 100) + '%' : '';
+    if (t === podTop) return;
+    podTop = t; endEl.style.top = t; endEl.style.justifyContent = on ? 'flex-start' : '';   // carte plus basse : on la lit depuis le haut, elle défile si besoin
+  }
+  function podList(m) { if (podSnap !== m) { podSnap = m; podEnt = podiumEntries(m.players, colSeat); } return podEnt; }   // participants classés, recalculés par instantané
+  // pièce du podium : un serpent dressé (queue en S, tête au-dessus, langue qui frétille chez le vainqueur), inscrit dans size × size
+  function podPiece(g, e, x, y, size, rank) {
+    const a = ctx.globalAlpha, C = size / 5.4, seat = e.seat | 0, col = e.color || '#888', soft = !A.reduceFx, sg = (seat & 1) ? -1 : 1;
+    const hy = y - size * 0.2, by = y + size * 0.4;
+    pN = 0;
+    for (let k = 0; k <= 14; k++) { const u = k / 14; addPt(x + sg * Math.sin(2.2 * Math.PI * (u - 1)) * size * 0.12 * (1 - 0.35 * u), by + (hy - by) * u, k === 0); }
+    const L = CUM[pN - 1], hx = PX[2 * pN - 2], hpy = PX[2 * pN - 1], ang = Math.atan2(hpy - PX[2 * pN - 3], hx - PX[2 * pN - 4]);
+    drawBody(C, col, seat, L, a, false, null);
+    const tp = (NOW + seat * 1531) % 2200, tongue = soft && rank === 1 && tp < 300 ? Math.sin(tp / 300 * Math.PI) : 0;
+    drawHead(C, hx, hpy, ang, col, seat, a, soft && ((NOW + seat * 977) % 4300) < 130, tongue, Math.cos(ang), Math.sin(ang));
+  }
+  function drawEndPodium(now) {
+    const m = snap;
+    if (!m || !m.players || (m.stats && m.stats.solo)) return;   // balade en solo : pas de podium
+    const ent = podList(m); if (!ent.length) return;
+    endBox(true);
+    const H = ARENA * podBand();
+    ctx.save(); ctx.fillStyle = 'rgba(5,6,14,.86)'; ctx.fillRect(0, 0, ARENA, H + 14); ctx.restore();   // même voile sombre que la carte DOM, qui commence juste dessous
+    drawPodium(ctx, { x: ARENA * 0.03, y: ARENA * 0.012, w: ARENA * 0.94, h: H - ARENA * 0.024 }, now, {
+      entries: ent, A: A, W: ARENA, nul: m.winner < 0, t0: A.reduceFx ? null : podT0,
+      title: teamMode && m.winner >= 0 ? 'Équipe ' + (TEAM_LETTER[m.winner] || '?') : '',
+      theme: { step: '#7b5431', edge: '#d8cfb6', text: '#fff4cf', glow: '#ffd24a' },   // planches de bois du jardin, clous clairs
+      drawPiece: podPiece });
+  }
+  // appui (Espace, clic, toucher, bouton) pendant le rejeu : il le passe et RIEN d'autre ; un appui qui suit de trop près sa fin est ignoré aussi
+  function replayGuard() {
+    const now = performance.now();
+    if (RL.active(now)) { RL.skip(); endGrace = now; return true; }
+    return now - endGrace < 350;
   }
   function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }   // filet : une erreur de rendu ne fige plus le jeu
 
   const onKeyDown = e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
-    if (e.key === ' ' && snap && snap.gs !== 'play' && snap.gs !== 'paused') return e.repeat ? undefined : send({ t: 'start' });
+    if (e.key === ' ' && snap && snap.gs !== 'play' && snap.gs !== 'paused') return e.repeat || replayGuard() ? undefined : send({ t: 'start' });   // le premier Espace du rejeu ne fait que le passer
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) return e.repeat ? undefined : send({ t: 'pause' });   // touche tenue : jamais de re-envoi (la pause basculait en boucle)
     const d = DIR_KEYS[e.code]; if (d && !e.repeat) { send({ t: 'dir', d }); echoVirage(d); }   // la répétition auto renvoyait la même direction ~30×/s pour rien
   };
@@ -1281,7 +1351,7 @@ export default (function () {
     cardSig = new Array(MAX_SEATS).fill(''); cardLvSig = new Array(MAX_SEATS).fill(null);
     startBtn = $('snStart'); pauseBtn = $('snPause'); modeBtn = $('snMode'); variantBtn = $('snVariant'); rushBtn = $('snRush'); botsBtn = $('snBots'); pauseFloat = $('snPauseFloat');
     lbBtn = $('snLbBtn'); lbPanel = $('snLbPanel'); lbBody = $('snLbBody');
-    startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
+    startBtn.onclick = () => { unlockAudio(); if (replayGuard()) return; send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' });
     pauseFloat.onclick = () => send({ t: 'pause' });
     modeBtn.onclick = () => send({ t: 'mode' });
@@ -1291,8 +1361,8 @@ export default (function () {
     diffBtn = $('snDiff'); if (diffBtn) diffBtn.onclick = () => send({ t: 'botdiff' });
     { const helpBtn = $('snHelp'), helpPanel = $('snHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel); }
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
-    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
-    if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
+    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') { if (replayGuard()) return; send({ t: 'start' }); } });
+    if (premiere) endEl.addEventListener('click', () => { unlockAudio(); if (replayGuard()) return; send({ t: 'start' }); });
     if (premiere) { dpad('snUp', 'up'); dpad('snDown', 'down'); dpad('snLeft', 'left'); dpad('snRight', 'right'); }
     applyColors();
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
@@ -1308,6 +1378,7 @@ export default (function () {
     // s'accumulait, et le navigateur en plafonne le nombre. Il est recréé au prochain geste (unlockAudio).
     if (actx) { const c = actx; actx = null; noiseBuf = null; try { const pr = c.close(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }
     STK.reset(); hsAt = 0; dangerT = dangerK = 0; shakeMag = 0;
+    pendingEnd = null; RL.clear(); RPLY = false; endGrace = -1e9; podSnap = null; podEnt = []; endShown = false; if (endEl) { endEl.classList.add('hidden'); endBox(false); }   // ralenti et podium repartent propres
     J.fin(); jRound = -1; prevRound = -1; dusk = 0; }   // retour au jeu (autre salle, manche renumérotée) : journal et lumière repartent propres
 
   return { init, onState, onMessage, onLb, onA11y, teardown };
