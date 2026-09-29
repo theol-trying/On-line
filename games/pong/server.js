@@ -2,6 +2,7 @@
 // Le hub gère : connexion, identité/pseudo, token de reprise, spectateurs. Ici : uniquement le jeu.
 import { W as W0, H as H0, BALL_R, PAD_W, PAD_OFF, PU_R } from '../../public/games/pong/shared.js';
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
+import { classerManche } from '../fin-manche.js';
 
 const GID = 'pong';
 const r1 = x => Math.round(x * 10) / 10;
@@ -115,8 +116,8 @@ export function createPong(room) {
       if (p.edge < 0 || p.bot || !p.name) continue;
       const e = lbEntry(p.name);
       e.games++;
-      if (winner >= 0 && p.team === winner) e.wins++;
-      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });   // classement du jour (tous jeux)
+      if (winner >= 0 && p.place === 1) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.place === 1, kills: p.kills, game: GID });   // classement du jour (tous jeux)
       e.kills += p.kills; e.dmg += p.dmg; e.bounces += p.hits; e.pu += p.pu;
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / 60;
       e.survSum += surv;
@@ -356,7 +357,7 @@ export function createPong(room) {
     gameState = 'over'; endTick = tick;
     winner = players[killerSeat].team;
     players.forEach(p => { if (p.edge >= 0 && p.team === winner) p.score++; });
-    players.forEach(p => { if (p.edge >= 0 && p.alive) p.place = 1; });
+    classerManche(players, winner);
     matchWonPending = true; matchWinner = winner;
     recordRound();
   }
@@ -365,6 +366,7 @@ export function createPong(room) {
     if (nParts === 1) {                                // entraînement solo : la manche ne s'arrête que quand le joueur n'a plus de vies
       if (players.some(inPlay)) return false;
       gameState = 'over'; endTick = tick; winner = -1;
+      classerManche(players, winner);
       recordRound();                                   // no-op en solo (guard nParts<2) : hors classement
       return true;
     }
@@ -373,7 +375,7 @@ export function createPong(room) {
     gameState = 'over'; endTick = tick;
     winner = s.size === 1 ? [...s][0] : -1;
     if (winner >= 0) players.forEach(p => { if (p.edge >= 0 && p.team === winner) p.score++; });
-    players.forEach(p => { if (p.edge >= 0 && p.alive) p.place = 1; });
+    classerManche(players, winner);                    // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
     if (winner >= 0 && rules.winMode === 'rounds') {
       const champ = players.find(p => p.edge >= 0 && p.team === winner);
       if (champ && champ.score >= rules.roundsTarget) { matchWonPending = true; matchWinner = winner; }
@@ -394,9 +396,7 @@ export function createPong(room) {
       winner = leadTeams.size === 1 ? [...leadTeams][0] : -1;
       if (winner >= 0) players.forEach(p => { if (p.edge >= 0 && p.team === winner) p.score++; });
     }
-    const order = players.filter(p => p.edge >= 0).sort((a, b) => b.lives - a.lives);
-    let place = 1;
-    order.forEach((p, i) => { if (i > 0 && p.lives !== order[i - 1].lives) place = i + 1; p.place = place; });
+    classerManche(players, winner, { score: p => Math.max(0, p.lives) });   // vies restantes, puis ordre d'élimination
     fx.push({ type: 'timeup' });
     recordRound();
   }

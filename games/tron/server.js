@@ -8,6 +8,7 @@ function setGrid(n) {
   GW = side; GH = side;
 }
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
+import { classerManche } from '../fin-manche.js';
 
 const GID = 'tron';
 const MAX_SEATS = 10;
@@ -66,8 +67,8 @@ export function createTron(room) {
       if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
       const e = lbEntry(p.name);
       e.games++;
-      if (winner >= 0 && p.team === winner) e.wins++;
-      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });   // classement du jour (tous jeux)
+      if (winner >= 0 && p.place === 1) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.place === 1, kills: p.kills, game: GID });   // classement du jour (tous jeux)
       e.kills += p.kills; e.dmg += p.kills;
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / TICK_HZ;
       e.survSum += surv;
@@ -152,14 +153,7 @@ export function createTron(room) {
     const s = aliveTeams();
     winner = s.size === 1 ? [...s][0] : -1;
     if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
-    players.forEach(p => { if (p.playing && p.alive) p.place = 1; });
-    // nul (aucun camp seul survivant) avec plusieurs morts au MÊME tick (causes distinctes : mur d'un côté,
-    // traînée de l'autre — pas seulement le choc mutuel déjà groupé plus haut) : ils partagent la meilleure
-    // place restante, sinon l'ordre de traitement (arbitraire) élit un faux gagnant à la place d'un nul.
-    if (winner < 0) {
-      const lastDead = players.filter(p => p.playing && !p.alive && p.elimTick === endTick);
-      if (lastDead.length > 1) { const best = Math.min(...lastDead.map(p => p.place)); for (const p of lastDead) p.place = best; }
-    }
+    classerManche(players, winner);                    // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
     recordRound();
   }
 

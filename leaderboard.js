@@ -12,7 +12,19 @@
 // (idem pour les avatars). Les manches jouées en attendant restent en mémoire, affichées, et sont
 // FUSIONNÉES à la lecture réussie. Les écritures sont regroupées (une seule en vol, la dernière gagne) ;
 // en local elles passent par un fichier temporaire + rename, et un fichier illisible est mis de côté.
-import { readFile, writeFile, rename } from 'fs/promises';
+//
+// SAUVEGARDES TOURNANTES (29/09). Le classement garde ses 3 dernières versions, espacées d'au moins 1 h
+// (une copie à chaque écriture ne couvrirait que quelques secondes) : .sauv1 = la plus récente … .sauv3 = la
+// plus ancienne. Fichier : <fichier>.sauv1..3 (rotation par renommage, date = celle de la copie). Upstash : clés
+// <clé>:sauv1..3 (+ <clé>:sauv-t = date de la dernière rotation), une rotation = 1 requête groupée par heure au
+// plus. Une copie part aussi au démarrage si la dernière a plus d'1 h. Un classement VIDE n'est jamais copié :
+// il ne peut pas chasser une copie pleine.
+// RESTAURER À LA MAIN (serveur ARRÊTÉ pour le fichier, sinon l'écriture suivante repasse dessus) :
+//   • fichier  : copier leaderboard.json.sauv1 (ou 2, 3) par-dessus leaderboard.json, puis relancer ;
+//   • Upstash  : console Upstash > Data Browser, ouvrir la clé pong-line:store:sauv1 (ou 2, 3), copier sa valeur
+//                dans la clé pong-line:store (ou l'équivalent REST : ["SET","pong-line:store","<valeur>"]), puis
+//                redémarrer le service (il relit la clé au démarrage). LEADERBOARD_KEY change le préfixe.
+import { readFile, writeFile, rename, stat, utimes } from 'fs/promises';
 import { dirname, join } from 'path';
 
 let store = {};                 // gameId -> { board:{}, history:[] }
@@ -49,6 +61,20 @@ async function redisCmd(cmd) {
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();   // { result: ... }
+}
+
+// Requêtes groupées (endpoint /pipeline) : exécutées dans l'ordre, une réponse { result } ou { error } PAR commande
+// (un RENAME sur une clé absente répond en erreur sans faire échouer la requête).
+async function redisPipe(cmds) {
+  const res = await fetch(REST_URL.replace(/\/+$/, '') + '/pipeline', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${REST_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(cmds),
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const r = await res.json();
+  if (!Array.isArray(r)) throw new Error('réponse /pipeline inattendue');
+  return r;
 }
 
 // Lecture d'une sauvegarde. Résout avec l'objet lu, ou null s'il n'existe pas encore (clé ou fichier absent :
@@ -91,11 +117,90 @@ function charger(nom, cle, chemin, fusion, marquerPret, essai) {
     setTimeout(() => charger(nom, cle, chemin, fusion, marquerPret, essai + 1), d).unref();
   });
 }
+// --- Sauvegardes tournantes du classement (voir l'en-tête) ---
+const SAUV_MS = 3600000, SAUV_N = 3, SAUV_RETRY = 600000;    // espacement, nombre de copies, pause après un échec
+// Vrai si le classement sérialisé ne contient rien (ni score ni historique, hors « classement du jour »)
+// ou n'est pas lisible : dans les deux cas il ne vaut pas une copie.
+function classementVide(txt) {
+  let d; try { d = JSON.parse(txt); } catch (e) { return true; }
+  if (!d || typeof d !== 'object') return true;
+  const plein = g => !!g && typeof g === 'object' && ((g.board && Object.keys(g.board).length > 0) || (g.history && g.history.length > 0));
+  if (d.board || d.history) return !plein(d);                // ancien format mono-jeu
+  for (const gid in d) if (own(d, gid) && gid !== DAY_SLOT && plein(d[gid])) return false;
+  return true;
+}
+// Ne bloque JAMAIS l'écriture du classement : tout est sérialisé sur une chaîne, chaque étape attrape ses erreurs.
+// `precedent` = dernier contenu du classement connu comme écrit (ou lu au démarrage) : c'est lui qu'on copie,
+// donc aucune relecture du stockage (pas de GET Upstash) ; `copie` = dernier contenu déjà copié (pas de doublon).
+function sauvegardes(nom, cle, chemin) {
+  const fich = i => chemin + '.sauv' + i, clef = i => cle + ':sauv' + i, TKEY = cle + ':sauv-t';
+  let derniere = 0, precedent = null, copie = null, essaiApres = 0, chaine = Promise.resolve();
+  const serie = f => (chaine = chaine.then(f).catch(() => {}));
+  const absent = e => { if (!(e && e.code === 'ENOENT')) throw e; };
+  const journal = (m, e) => console.error('[' + nom + '] ' + m + (e ? ' (' + (e && e.message) + ')' : ''));
+
+  async function lireAge(m) {                     // date de la dernière rotation ; 0 = jamais ; m = « ne rien faire avant 1 h »
+    try {
+      if (useRedis) { const r = await redisCmd(['GET', TKEY]); const n = r && typeof r.result === 'string' ? Number(r.result) : 0; return Number.isFinite(n) ? n : 0; }
+      if (!chemin) return m;
+      try { return (await stat(fich(1))).mtimeMs; } catch (e) { absent(e); return 0; }
+    } catch (e) { journal('Date des sauvegardes illisible : pas de copie avant 1 h', e); return m; }
+  }
+  async function lireSauv1() {                    // contenu de la copie la plus récente (null si absente ou illisible)
+    try {
+      if (useRedis) { const r = await redisCmd(['GET', clef(1)]); return r && typeof r.result === 'string' ? r.result : null; }
+      return chemin ? await readFile(fich(1), 'utf8') : null;
+    } catch (e) { return null; }
+  }
+  async function tourner(src, m) {                // décale .sauv2 -> .sauv3, .sauv1 -> .sauv2, puis écrit la nouvelle .sauv1
+    if (useRedis) {
+      const cmds = [];
+      for (let i = SAUV_N - 1; i >= 1; i--) cmds.push(['RENAME', clef(i), clef(i + 1)]);
+      cmds.push(['SET', clef(1), src], ['SET', TKEY, String(m)]);
+      const r = await redisPipe(cmds);
+      for (const x of r.slice(SAUV_N - 1)) if (x && x.error) throw new Error(x.error);   // RENAME d'une clé absente : sans importance
+    } else if (chemin) {
+      for (let i = SAUV_N - 1; i >= 1; i--) await rename(fich(i), fich(i + 1)).catch(absent);
+      await writeFile(chemin + '.sauv.tmp', src);
+      await rename(chemin + '.sauv.tmp', fich(1));
+      await utimes(fich(1), new Date(m), new Date(m));                                     // la date du fichier = celle de la copie
+    }
+  }
+  async function copier(src, m) {
+    if (!src || src === copie || classementVide(src)) return;
+    try {
+      await tourner(src, m);
+      derniere = m; copie = src; essaiApres = 0;
+      console.log('[' + nom + '] Sauvegarde tournante : nouvelle copie .sauv1 (' + SAUV_N + ' gardées, 1 h d\'écart)');
+    } catch (e) { essaiApres = m + SAUV_RETRY; journal('Sauvegarde tournante échouée (nouvel essai dans 10 min)', e); }
+  }
+  return {
+    // À l'issue de la lecture réussie : txt = classement lu (JSON) ou null (premier démarrage).
+    demarrage(txt) {
+      precedent = txt;
+      return serie(async () => {
+        const m = Date.now();
+        derniere = await lireAge(m);
+        if (m - derniere < SAUV_MS || !txt || classementVide(txt)) return;
+        if (await lireSauv1() === txt) { derniere = m; copie = txt; return; }   // redémarrage sans rien de nouveau : pas de doublon
+        await copier(txt, m);
+      });
+    },
+    // Après une écriture réussie de `d` : l'ancien contenu (celui qui vient d'être remplacé) est copié si la
+    // dernière copie a plus d'1 h. Ne retarde pas l'écriture principale (déjà faite, chaîne à part).
+    apres(d) {
+      const prec = precedent; precedent = d;
+      serie(async () => { const m = Date.now(); if (m - derniere >= SAUV_MS && m >= essaiApres) await copier(prec, m); });
+    },
+    attendre() { return chaine; },
+  };
+}
 // Écrivain regroupé : planifier() programme UNE écriture après `delai` ; une seule en vol à la fois, la dernière
 // version gagne. Tant que pret() est faux, rien ne part : reprendre() relance ce qui a été retenu. Une écriture
 // ratée est retentée 5 s plus tard (la dernière manche de la soirée ne doit pas se perdre sur un 5xx).
 // vider() : écriture immédiate, attendue (arrêt du processus).
-function ecrivain(nom, cle, chemin, delai, pret, donnees) {
+// sv (facultatif) : sauvegardes tournantes, réservées au classement.
+function ecrivain(nom, cle, chemin, delai, pret, donnees, sv) {
   let t = null, enVol = null, encore = false, retenu = false;
   let enPanne = false, dernierLog = 0;    // A4 : journal borné — 1re erreur tout de suite, puis au plus 1 ligne/minute, + « rétabli »
   const planifier = (ms) => { if (!t) t = setTimeout(ecrire, ms == null ? delai : ms); };
@@ -109,6 +214,7 @@ function ecrivain(nom, cle, chemin, delai, pret, donnees) {
         const d = donnees();
         if (useRedis) await redisCmd(['SET', cle, d]);
         else if (chemin) { await writeFile(chemin + '.tmp', d); await rename(chemin + '.tmp', chemin); }
+        if (sv) sv.apres(d);                              // écriture réussie seulement ; la rotation ne bloque jamais la suivante
       } catch (e) {
         rate = true;
         const maintenant = Date.now();
@@ -126,19 +232,23 @@ function ecrivain(nom, cle, chemin, delai, pret, donnees) {
       if (encore) { encore = false; planifier(); }
     }
   }
+  async function viderEcritures() {
+    for (let essai = 0; essai < 3; essai++) {
+      if (enVol) await enVol;                            // l'écriture en cours d'abord (elle peut échouer : on le voit ensuite)
+      if (!(t || encore || retenu) || !pret()) return;
+      if (t) { clearTimeout(t); t = null; }
+      encore = false; retenu = false;
+      await ecrire();
+      if (!t) return;                                    // réussie (un échec reprogramme t)
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
   return {
     planifier,
     reprendre() { if (retenu) { retenu = false; planifier(); } },
     async vider() {
-      for (let essai = 0; essai < 3; essai++) {
-        if (enVol) await enVol;                          // l'écriture en cours d'abord (elle peut échouer : on le voit ensuite)
-        if (!(t || encore || retenu) || !pret()) return;
-        if (t) { clearTimeout(t); t = null; }
-        encore = false; retenu = false;
-        await ecrire();
-        if (!t) return;                                  // réussie (un échec reprogramme t)
-        await new Promise(r => setTimeout(r, 1000));
-      }
+      await viderEcritures();
+      if (sv) { let h; await Promise.race([sv.attendre(), new Promise(r => { h = setTimeout(r, 3000); })]); clearTimeout(h); }   // rotation en cours : 3 s au plus
     },
   };
 }
@@ -230,11 +340,15 @@ export function initLeaderboard(path) {
   // avatars.json À CÔTÉ du classement, quel que soit son nom (LEADERBOARD_FILE) : jamais le même fichier
   AV_PATH = join(dirname(path), 'avatars.json');
   if (AV_PATH === PATH) AV_PATH = path + '.avatars.json';
-  ecrLb = ecrivain('leaderboard', REDIS_KEY, PATH, 1000, () => charge, () => JSON.stringify(store));
+  const sv = sauvegardes('leaderboard', REDIS_KEY, PATH);
+  ecrLb = ecrivain('leaderboard', REDIS_KEY, PATH, 1000, () => charge, () => JSON.stringify(store), sv);
   ecrAv = ecrivain('avatars', AV_KEY, AV_PATH, 10000, () => avCharge, () => JSON.stringify(avatars));
   console.log('[leaderboard] Stockage : ' + (useRedis ? 'Upstash Redis (en ligne).' : 'fichier local (' + path + ').'));
   loadAvatars();
-  charger('leaderboard', REDIS_KEY, PATH, d => { if (d) hydrate(d); }, () => { charge = true; ecrLb.reprendre(); }, 0);
+  charger('leaderboard', REDIS_KEY, PATH, d => {
+    sv.demarrage(d ? JSON.stringify(d) : null);   // AVANT hydrate (qui réutilise d) et avant toute écriture : la copie de départ est la sauvegarde telle que lue
+    if (d) hydrate(d);
+  }, () => { charge = true; ecrLb.reprendre(); }, 0);
 }
 
 function node(gameId) {

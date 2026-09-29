@@ -8,6 +8,7 @@
 // Physique continue à 30 Hz, comme le Sumo dont ce fichier reprend la structure.
 import { AR0, MARGE, PR, BR, POST_R, GOAL0, GOAL_SD, TERRAINS, ITEMS } from '../../public/games/foot/shared.js';
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
+import { classerManche } from '../fin-manche.js';
 
 const GID = 'foot';
 const MAX_SEATS = 10;
@@ -99,8 +100,8 @@ export function createFoot(room) {
       if (!p.playing || !p.name || p.bot) continue;   // les bots n'entrent pas au classement
       const e = lbEntry(p.name);
       e.games++;
-      if (winner >= 0 && p.team === winner) e.wins++;
-      bumpDaily(p.name, { win: winner >= 0 && p.team === winner, kills: p.kills, game: GID });
+      if (winner >= 0 && p.place === 1) e.wins++;
+      bumpDaily(p.name, { win: winner >= 0 && p.place === 1, kills: p.kills, game: GID });
       e.kills += p.kills; e.goals = (e.goals || 0) + p.goals;
       const surv = (p.elimTick >= 0 ? p.elimTick : endTick) / TICK_HZ;
       e.survSum += surv;
@@ -326,8 +327,8 @@ export function createFoot(room) {
     }
     winner = s.size === 1 ? [...s][0] : -1;
     if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
-    const viv = [...aliveTeams()];                   // encore en lice : classées par vies restantes (1 = vainqueur)
-    players.forEach(p => { if (p.playing && p.alive) p.place = 1 + viv.filter(u => (teamLives[u] || 0) > (teamLives[p.team] || 0)).length; });
+    // encore en lice : classées par vies restantes (le nul en tête partage la place 1) ; puis les équipes sorties, la dernière sortie d'abord
+    classerManche(players, winner, { score: p => (p.alive ? Math.max(0, teamLives[p.team] || 0) : 0) });
     pickups = [];
     emit({ type: 'whistle', k: 'end' });
     recordRound();
