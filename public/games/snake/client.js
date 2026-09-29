@@ -13,6 +13,7 @@ import { arenaSize } from '../../layout.js';   // taille du plateau : commune à
 import { lumiere, creerLumieres } from '../../lumiere.js';        // lueurs sur la pelouse : pommes spéciales, fantômes, repas, éclats de mort
 import { crepuscule, creerDuel } from '../../crepuscule.js';                 // le jardin passe du jour au crépuscule quand la manche s'achève
 import { creerJournal, blocFin } from '../../finpartie.js';
+import { createStreaks, createCallouts, streakText, createHitStop, drawFlash, drawDanger, drawSeatChip, readable, hudK } from '../../exploits.js';   // aides visuelles partagées (séries, arrêt sur image, vignette, pastilles, lisibilité)
 import { creerEcho } from '../../echo-virage.js';                   // chevron immédiat du virage enregistré (file de 2 virages côté serveur)       // écran de fin : longueur au fil de la manche + meilleure action
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
@@ -66,7 +67,7 @@ const CAUSE_MSG = { wall: 'Dans la haie !', rock: 'Contre un rocher !', snake: '
 const CAUSE_TXT = { wall: 'dans la haie', rock: 'contre un rocher', snake: 'contre ', head: 'choc frontal', self: 'mordu sa queue' };
 const DISP = 'Fredoka, "Segoe UI", sans-serif';   // police d'affichage (Google Fonts, chargée par la page)
 const TITLE_COL = '#f0a93a';                        // serpent du logo
-const INTERP_MS = 90;
+const INTERP_MS = 90;                               // plancher du retard d'affichage ; le retard réel vaut ~1,5× l'intervalle entre deux instantanés (cf. viewDelay)
 const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', KeyZ: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', KeyQ: 'left', ArrowRight: 'right', KeyD: 'right' };   // ZQSD / WASD : KeyW/KeyA = touches Z/Q en AZERTY ; KeyZ/KeyQ pour un clavier réglé en QWERTY
 const TAPER = [0.38, 0.55, 0.72, 0.87];             // effilement de la queue : 4 tronçons de largeur croissante
 // ambiance (coupée par reduceFx) : lucioles, pétales qui tombent, papillons qui flânent
@@ -180,7 +181,16 @@ export default (function () {
   const eatLast = new Float64Array(MAX_SEATS), eatRun = new Uint16Array(MAX_SEATS), eatBest = new Uint16Array(MAX_SEATS);
   const feast = new Uint16Array(MAX_SEATS), killsBy = new Uint16Array(MAX_SEATS), lenMax = new Uint16Array(MAX_SEATS);
   const corpse = new Set();                         // cases de nourriture laissées par un serpent mort
-  const music = createMusic(() => actx, () => A, MUSIC_THEME);
+  let music = createMusic(() => actx, () => A, MUSIC_THEME);   // recréée à chaque init() : dispose() au teardown retire pour de bon l'écouteur visibilitychange
+  // aides visuelles partagées (exploits.js) : séries d'éliminations, annonces, arrêt sur image, éclats, vignette de danger
+  const STK = createStreaks({ window: 5000 }), CALL = createCallouts(), HS = createHitStop(60);
+  const flashes = [];                               // éclats blancs à la position des victimes { x, y, born }
+  let hsAt = 0;                                     // instant (avec le retard d'interpolation) où l'arrêt sur image doit partir
+  let dangerT = 0, dangerK = 0;                     // vignette de danger : cible (0 / 0,4 / 1) et valeur lissée
+  let TOUCH = false;                                // écran tactile : les indications clavier disparaissent du canvas
+  const cvBox = { clientWidth: 510 };               // largeur CSS du canvas (mise à jour au redimensionnement) : évite de relire clientWidth à chaque image
+  let PRES = 1;                                     // px appareil par unité d'arène, arrondi au quart (motifs nets sur Retina, cache stable)
+  let cardSig = [], cardLvSig = [], cardPn = [], cardLv = [];   // HUD : dernière chaîne écrite par carte (innerHTML seulement si elle change)
   let hud, cards, startBtn, pauseBtn, modeBtn, variantBtn, rushBtn, botsBtn, diffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
 
   const $ = id => root.querySelector('#' + id);
@@ -199,7 +209,7 @@ export default (function () {
   function resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
     const size = arenaSize({ max: 760 });
-    cv.style.width = size + 'px'; cv.style.height = size + 'px';
+    cv.style.width = size + 'px'; cv.style.height = size + 'px'; cvBox.clientWidth = size || 510;
     cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr);
   }
 
@@ -225,9 +235,11 @@ export default (function () {
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const gly = `<span class="sc" title="motif du siège">${SEAT_GLYPH[i % SEAT_GLYPH.length] || ''}</span>`;   // constante : jamais de texte réseau ici
-      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${gly}${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.kills | 0} ⚡</span> ${tags.join('')}`;
-      const lv = cards[i].querySelector('.lv'); lv.style.color = col;
-      lv.textContent = p.playing ? (p.alive ? `● L${p.len} · 🍎${p.score}${p.ghost ? ' · 👻' : ''}` : '✖ ' + causeTxt(i, false)) : 'prêt';
+      const pnHtml = `${(window.__AV && window.__AV(p.name)) || ''}${gly}${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.kills | 0} ⚡</span> ${tags.join('')}`;
+      if (pnHtml !== cardSig[i]) { cardSig[i] = pnHtml; cardPn[i].innerHTML = pnHtml; }   // innerHTML seulement si la chaîne change (sinon avatars/tooltips recréés à chaque instantané)
+      cardLv[i].style.color = col;
+      const lvTxt = p.playing ? (p.alive ? `● L${p.len} · 🍎${p.score}${p.ghost ? ' · 👻' : ''}` : '✖ ' + causeTxt(i, false)) : 'prêt';
+      if (lvTxt !== cardLvSig[i]) { cardLvSig[i] = lvTxt; cardLv[i].textContent = lvTxt; }
     });
   }
   function renderLB() {
@@ -258,14 +270,15 @@ export default (function () {
     const mvpLine = mvp && !solo ? `<div class="emeta">⭐ MVP : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.kills} serpent${mvp.kills > 1 ? 's' : ''} arrêté${mvp.kills > 1 ? 's' : ''}</div>` : '';
     const fin = blocFin(J, { titre: m.rush ? 'Pommes au fil de la manche' : 'Longueur des serpents', couleur: colSeat, nom: nameOf });   // noms échappés, couleurs filtrées par finpartie.js
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : '#f3ecd2'}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} joueur${m.stats.nParts > 1 ? 's' : ''}</div>${mvpLine}<div class="elist">${rows}</div>${fin}<div class="ehint">Espace / clic pour rejouer</div>`;
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} joueur${m.stats.nParts > 1 ? 's' : ''}</div>${mvpLine}<div class="elist">${rows}</div>${fin}<div class="ehint">${TOUCH ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
   }
 
   // ───────────────────────── état réseau ─────────────────────────
   function onMessage(m) { if (m && m.t === 'welcome') mySeat = m.seat; }
   function onLb(d) { board = (d && d.board) || []; renderLB(); }
   function resetRound() {
-    buf = []; parts.length = 0; waves.length = 0; floats.length = 0; rushAlerted = duelAlerted = false;
+    buf = []; parts.length = 0; waves.length = 0; floats.length = 0; flashes.length = 0; rushAlerted = duelAlerted = false;
+    STK.reset(); hsAt = 0; dangerT = dangerK = 0;
     for (const k in bulges) delete bulges[k];
     deathCause = {}; foodBorn.clear(); angSet.fill(0);
     LUM.vider(); lumPend.length = 0; playMs = 0; corpse.clear();
@@ -314,6 +327,7 @@ export default (function () {
     const fxs = m.fx || []; let crashed = false;
     for (let i = 0; i < fxs.length; i++) { if (fxs[i] && fxs[i].type === 'crash') crashed = true; playFx(fxs[i], m, prevS); }
     trackFood(m, crashed);
+    dangerT = dangerAhead(m);                        // vignette : recalculée à chaque instantané (12 Hz), lissée à l'affichage
     if (m.gs === 'play') jSample(m, performance.now(), crashed);     // une mort : point forcé, la chute tombe au bon instant
     if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); jRoundEnd(m, performance.now()); }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte 3·2·1
@@ -395,9 +409,10 @@ export default (function () {
   }
 
   // ───────────────────────── effets ponctuels ─────────────────────────
-  // Les événements arrivent avec l'instantané le plus récent, mais le plateau est montré avec ~90 ms de
-  // retard (interpolation) : chaque effet est décalé d'autant pour tomber pile quand la tête arrive.
-  function viewDelay() { const hz = (snap && snap.shz) || TICK_HZ; return Math.max(INTERP_MS, 1100 / hz); }
+  // Les événements arrivent avec l'instantané le plus récent, mais le plateau est montré avec ~1,5 intervalle d'instantanés
+  // de retard (≈125 ms à 12 Hz : une gigue d'un paquet ne fait plus saccader les serpents) : chaque effet est décalé
+  // d'autant pour tomber pile quand la tête arrive.
+  function viewDelay() { const hz = (snap && snap.shz) || TICK_HZ; return Math.max(INTERP_MS, 1500 / hz); }
   function addPart(q) { if (parts.length >= MAXPART) parts.shift(); parts.push(q); }
   // o : { k, col (chaîne ou tableau ; triplet « r,g,b » pour K_SPARK), sp, r, life, g (gravité), up, dr (frein), dl, jit }
   function burst(x, y, n, o) {
@@ -480,9 +495,15 @@ export default (function () {
       psound(mine ? 'crashMe' : 'crash', f.x); music.sting('kill');
       if (mine) msgPerso('✖', CAUSE_MSG[cause], { bad: true });
       jCrash(f, m, cause, now);
+      if (cause === 'snake' && f.by >= 0 && f.by < MAX_SEATS && f.by !== seat) {   // seul cas où le tueur est connu (choc frontal / mur / rocher / morsure : pas d'auteur)
+        const bp = m.players[f.by], vp = m.players[seat];
+        if (!(teamMode && bp && vp && bp.team === vp.team)) { const tx = streakText(STK.kill(f.by, now)); if (tx) CALL.push(tx, colSeat(f.by), now + dl); }   // 2, 3, 4+ serpents arrêtés par le même en 5 s (le texte garde la couleur du tueur ; annonce conservée en « réduire les effets », sans animation)
+      }
       if (A.reduceFx) return;
       shakeMag = Math.max(shakeMag, mine ? 7 : 3.5);
       const x = Math.max(3, Math.min(ARENA - 3, px(f.x))), y = Math.max(3, Math.min(ARENA - 3, px(f.y))), col = colSeat(seat);
+      hsAt = hsAt ? Math.min(hsAt, now + dl) : now + dl;                                   // arrêt sur image 60 ms à l'instant où l'impact est affiché
+      if (flashes.length >= 12) flashes.shift(); flashes.push({ x, y, born: now + dl });   // éclat blanc sur la victime
       lumLater(now + dl, x, y, C * 5, '#fff0c8', 520, 0.9);                                  // éclair de l'impact sur l'herbe
       if (cause === 'wall') burst(x, y, 12, { k: K_LEAF, col: ['#3f8a3a', '#5fc36a', '#2a6a2e'], sp: C * 0.15, r: C * 0.24, g: 0.018, dr: 0.94, life: 950, dl });   // la haie perd des feuilles
       else if (cause === 'rock') { burst(x, y, 9, { k: K_CHIP, col: ['#8a857c', '#b3ada2', '#5a564f'], sp: C * 0.17, r: C * 0.16, g: 0.02, life: 700, dl }); burst(x, y, 4, { k: K_SPARK, col: '255,250,230', sp: C * 0.14, r: C * 0.14, life: 300, dl }); }
@@ -596,7 +617,7 @@ export default (function () {
     for (let k = 0; k < 4; k++) { ctx.lineWidth = wb * TAPER[k]; ctx.beginPath(); walk(TL * k / 4, TL * (k + 1) / 4 + 0.01); ctx.stroke(); }
     if (nb) { ctx.fillStyle = col; ctx.beginPath(); for (let i = 0; i < nb; i++) circ(ctx, BGX[i], BGY[i], C * 0.49); ctx.fill(); }
     ctx.lineWidth = wb; ctx.beginPath(); walk(TL, hD); ctx.stroke();
-    const pat = seat >= 0 ? seatPattern(ctx, seat, { size: Math.round(C * 1.5) }) : null;   // motif du siège (null pour le siège 0)
+    const pat = seat >= 0 ? seatPattern(ctx, seat, { size: Math.round(C * 1.5), res: PRES }) : null;   // motif du siège (null pour le siège 0) ; res : net sur Retina
     if (pat) { ctx.globalAlpha = alpha * 0.8; ctx.strokeStyle = pat; ctx.stroke(); }
     ctx.globalAlpha = alpha * 0.42; ctx.strokeStyle = T.dk; ctx.lineWidth = C * 0.22;  // rangée d'écailles le long de l'échine
     ctx.setLineDash([0.01, C * 0.46]); ctx.stroke(); ctx.setLineDash([]);
@@ -616,7 +637,7 @@ export default (function () {
     if (tongue > 0) { const L0 = C * 0.52, L1 = L0 + C * (0.22 + 0.42 * tongue), f = C * 0.16; ctx.strokeStyle = '#e2354f'; ctx.lineWidth = Math.max(0.6, C * 0.075); ctx.beginPath(); ctx.moveTo(L0, 0); ctx.lineTo(L1, 0); ctx.lineTo(L1 + f, -f * 0.8); ctx.moveTo(L1, 0); ctx.lineTo(L1 + f, f * 0.8); ctx.stroke(); }
     ctx.fillStyle = A.contrast ? '#ffffff' : T.dk; ctx.beginPath(); oval(ctx, C * 0.08, 0, C * 0.66, C * 0.53); ctx.fill();
     ctx.fillStyle = col; ctx.beginPath(); oval(ctx, C * 0.08, 0, C * 0.58, C * 0.45); ctx.fill();
-    const pat = seat >= 0 ? seatPattern(ctx, seat, { size: Math.round(C * 1.5) }) : null;
+    const pat = seat >= 0 ? seatPattern(ctx, seat, { size: Math.round(C * 1.5), res: PRES }) : null;
     if (pat) { ctx.fillStyle = pat; ctx.fill(); }
     ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.beginPath(); oval(ctx, C * 0.5, 0, C * 0.15, C * 0.28); ctx.fill();   // museau
     ctx.rotate(-ang); ctx.fillStyle = T.lt; ctx.globalAlpha = (alpha < 1 ? alpha : 1) * 0.45; ctx.beginPath(); oval(ctx, -C * 0.14, -C * 0.2, C * 0.2, C * 0.1); ctx.fill(); ctx.rotate(ang);
@@ -698,9 +719,55 @@ export default (function () {
       const ty = y - s * (C * 0.95 + bob);
       ctx.beginPath(); ctx.moveTo(x - k, ty - s * k * 1.1); ctx.lineTo(x + k, ty - s * k * 1.1); ctx.lineTo(x, ty); ctx.closePath();
       ctx.fillStyle = '#ffe14d'; ctx.fill(); ctx.lineJoin = 'round'; ctx.lineWidth = 1.4; ctx.strokeStyle = '#1d3a12'; ctx.stroke();
-      if (cd) { ctx.font = '700 12px ' + DISP; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 3; ctx.strokeStyle = '#10200e'; const ly = ty - s * (k * 1.1 + 8); ctx.strokeText('TOI', x, ly); ctx.fillStyle = '#fff4cf'; ctx.fillText('TOI', x, ly); }
+      if (cd) { const fs = readable(12, cvBox, ARENA); ctx.font = '700 ' + fs.toFixed(1) + 'px ' + DISP; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 3; ctx.strokeStyle = '#10200e'; const ly = ty - s * (k * 1.1 + fs * 0.7); ctx.strokeText('VOUS', x, ly); ctx.fillStyle = '#fff4cf'; ctx.fillText('VOUS', x, ly); }
     }
     ctx.restore();
+  }
+
+  // pastilles numérotées (n° de siège + glyphe du motif) au-dessus de chaque tête : toujours à partir de 7 joueurs (les teintes
+  // ne suffisent plus), sinon pendant le décompte et 2 s après le départ. Le mien la pose du côté opposé à la flèche « c'est moi ».
+  function drawChips(now) {
+    const gs = snap.gs, pl = snap.players || [];
+    if (gs !== 'play' && gs !== 'countdown' && gs !== 'paused') return;
+    let n = 0; for (let i = 0; i < pl.length; i++) if (pl[i] && pl[i].playing) n++;
+    if (!(n >= 7 || gs === 'countdown' || (gs === 'play' && now - playSince < 2000))) return;
+    const C = CELL, cs = readable(C, cvBox, ARENA, 17), off = C * 0.95 + cs / 2, arrow = gs === 'countdown' || (gs === 'play' && now - playSince < 2500);
+    for (let s = 0; s < MAX_SEATS; s++) {
+      if (!HON[s]) continue;
+      const x = Math.max(cs / 2 + 1, Math.min(ARENA - cs / 2 - 1, HX[s]));
+      let dir = -1;                                                     // -1 = au-dessus de la tête
+      if (s === mySeat && arrow) dir = HY[s] < C * 2.6 ? -1 : 1;        // la flèche est au-dessus (sauf près du bord haut) : la pastille passe de l'autre côté
+      if (HY[s] + dir * off < cs / 2 + 1) dir = 1; else if (HY[s] + dir * off > ARENA - cs / 2 - 1) dir = -1;
+      drawSeatChip(ctx, x, Math.max(cs / 2 + 1, Math.min(ARENA - cs / 2 - 1, HY[s] + dir * off)), s, colSeat(s), cs);
+    }
+  }
+  // danger : la case devant ma tête (1 pas, ou 2 pas à intensité réduite) est mortelle — mur, rocher, corps de serpent
+  // (queue exclue : elle se libère au pas suivant). Renvoie 0 / 0,4 / 1. Aucun effet en mode fantôme.
+  function dangerAhead(m) {
+    if (m.gs !== 'play' || mySeat < 0) return 0;
+    const pl = m.players || [], me = pl[mySeat];
+    if (!me || !me.playing || !me.alive || me.ghost || !me.path) return 0;
+    const P = me.path, e = P.length - 1;
+    if (e < 1 || !P[e] || !P[e - 1]) return 0;                          // tête seule après un wrap : cap inconnu
+    const hx = P[e][0], hy = P[e][1], dx = Math.sign(hx - P[e - 1][0]), dy = Math.sign(hy - P[e - 1][1]), wrap = (m.variant | 0) === 1, rk = m.rocks || [];
+    for (let d = 1; d <= 2; d++) {
+      let x = hx + dx * d, y = hy + dy * d;
+      if (wrap) { x = (x + GW) % GW; y = (y + GH) % GH; } else if (x < 0 || y < 0 || x >= GW || y >= GH) return d === 1 ? 1 : 0.4;
+      let bad = rk.indexOf(y * GW + x) >= 0;
+      for (let i = 0; i < pl.length && !bad; i++) {
+        const p = pl[i]; if (!p || !p.playing || !p.alive || !p.path) continue;
+        const q = p.path; let tail = null, prev = null;
+        for (let k = 0; k < q.length && !bad; k++) {
+          const c = q[k]; if (!c) { prev = null; continue; }
+          if (!tail) tail = c;
+          const x0 = prev ? Math.min(prev[0], c[0]) : c[0], x1 = prev ? Math.max(prev[0], c[0]) : c[0], y0 = prev ? Math.min(prev[1], c[1]) : c[1], y1 = prev ? Math.max(prev[1], c[1]) : c[1];   // tronçons rectilignes : la boîte englobante = le tronçon
+          if (x >= x0 && x <= x1 && y >= y0 && y <= y1 && !(x === tail[0] && y === tail[1])) bad = true;
+          prev = c;
+        }
+      }
+      if (bad) return d === 1 ? 1 : 0.4;
+    }
+    return 0;
   }
 
   // ───────────────────────── nourriture ─────────────────────────
@@ -937,7 +1004,7 @@ export default (function () {
 
   // ───────────────────────── particules, ondes, textes flottants ─────────────────────────
   function drawFx(now, kdt) {
-    if (A.reduceFx) { parts.length = 0; waves.length = 0; floats.length = 0; return; }
+    if (A.reduceFx) { parts.length = 0; waves.length = 0; floats.length = 0; flashes.length = 0; return; }
     ctx.save(); ctx.lineCap = 'round';
     for (let i = waves.length - 1; i >= 0; i--) {
       const q = waves[i], t = (now - q.born) / q.life; if (t >= 1) { waves.splice(i, 1); continue; } if (t < 0) continue;
@@ -973,8 +1040,12 @@ export default (function () {
       }
       ctx.globalCompositeOperation = 'source-over';
     }
+    for (let i = flashes.length - 1; i >= 0; i--) {   // éclat blanc de l'élimination (280 ms, s'estompe)
+      const q = flashes[i], t = (now - q.born) / 280; if (t >= 1) { flashes.splice(i, 1); continue; } if (t < 0) continue;
+      drawFlash(ctx, q.x, q.y, CELL * 1.25, t);
+    }
     if (floats.length) {
-      ctx.font = '700 13px ' + DISP; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.lineWidth = 3; ctx.strokeStyle = '#2a1a00';
+      ctx.font = '700 ' + readable(13, cvBox, ARENA).toFixed(1) + 'px ' + DISP; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.lineWidth = 3; ctx.strokeStyle = '#2a1a00';
       for (let i = floats.length - 1; i >= 0; i--) {
         const q = floats[i], t = (now - q.born) / 900; if (t >= 1) { floats.splice(i, 1); continue; } if (t < 0) continue;
         const y = q.y - 16 * (1 - (1 - t) * (1 - t)); ctx.globalAlpha = t < 0.7 ? 1 : (1 - t) / 0.3;
@@ -1002,8 +1073,9 @@ export default (function () {
   function drawRush() {                             // food-rush : progression du meneur sur une planchette (s'efface si une tête passe dessous)
     const pl = snap.players || []; let lead = 0;
     for (let i = 0; i < pl.length; i++) { const p = pl[i]; if (p && p.playing && p.score > lead) lead = p.score; }
-    const tgt = snap.rushTarget || 20, w = 176, h = 20, x = ARENA / 2 - w / 2, y = 5;
-    let a = 0.94; for (let s = 0; s < MAX_SEATS; s++) if (HON[s] && HY[s] < y + h + CELL * 1.5 && HX[s] > x - CELL && HX[s] < x + w + CELL) { a = 0.32; break; }
+    const tgt = snap.rushTarget || 20, w = 176, h = 20, k = hudK(cvBox, ARENA), x = 0, y = 0;   // bloc agrandi autour de son point d'ancrage (haut, centré) pour rester lisible sur téléphone
+    let a = 0.94; for (let s = 0; s < MAX_SEATS; s++) if (HON[s] && HY[s] < 5 + (y + h) * k + CELL * 1.5 && HX[s] > ARENA / 2 - w * k / 2 - CELL && HX[s] < ARENA / 2 + w * k / 2 + CELL) { a = 0.32; break; }
+    ctx.save(); ctx.translate(ARENA / 2 - w * k / 2, 5); ctx.scale(k, k);
     plank(x, y, w, h, a);
     ctx.save(); ctx.globalAlpha = a;
     ctx.save(); ctx.translate(x + 17, y + h / 2 + 1); paintFood(ctx, 'apple', 15, false); ctx.restore();
@@ -1012,7 +1084,7 @@ export default (function () {
     ctx.fillStyle = u >= 0.7 ? '#ffd24a' : '#8fd14f'; ctx.fillRect(bx, by, bw * u, 7);
     ctx.strokeStyle = 'rgba(255,240,200,0.5)'; ctx.lineWidth = 0.8; ctx.strokeRect(bx + 0.4, by + 0.4, bw - 0.8, 6.2);
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff4cf'; ctx.font = '700 12px ' + DISP; ctx.fillText(lead + ' / ' + tgt, x + w - 9, y + h / 2 + 1);
-    ctx.restore();
+    ctx.restore(); ctx.restore();
   }
 
   // ───────────────────────── écran titre : « SNAKE » posé sur un serpent qui ondule vers une pomme ─────────────────────────
@@ -1081,18 +1153,19 @@ export default (function () {
     drawTitle(c, c - 62, now);
     const n = snap.connected || 0, nb = snap.botCount || 0, tot = n + nb, vr = snap.variant | 0;
     const L1 = `${n} joueur${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (tot < 2 ? ' · solo : entraînement' : '')}`;
-    const L2 = VARIANT_SUB[vr] || VARIANT_SUB[0], L3 = snap.rush ? 'Food-rush : premier à ' + (snap.rushTarget || 20) + ' pommes' : '', L4 = '▶ Espace / clic pour lancer';
+    const L2 = VARIANT_SUB[vr] || VARIANT_SUB[0], L3 = snap.rush ? 'Food-rush : premier à ' + (snap.rushTarget || 20) + ' pommes' : '', L4 = TOUCH ? '▶ Touche l\'écran pour lancer' : '▶ Espace / clic pour lancer';   // pas d'indication clavier sur écran tactile
     const F1 = '600 15px ' + DISP, F2 = '500 12.5px ' + DISP, F4 = '700 13px ' + DISP;
     ctx.font = F1; let w = ctx.measureText(L1).width; ctx.font = F2; w = Math.max(w, ctx.measureText(L2).width, L3 ? ctx.measureText(L3).width : 0); ctx.font = F4; w = Math.max(w, ctx.measureText(L4).width);
     w = Math.min(ARENA - 24, w + 34);
-    const lines = L3 ? 4 : 3, h = 16 + lines * 19, y0 = c - 6;
-    plank(c - w / 2, y0, w, h);
-    ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-    let y = y0 + 17;
-    label(L1, c, y, F1, teamMode ? '#bfe3ff' : '#fff4cf'); y += 19;
-    label(L2, c, y, F2, '#e8dcb8'); y += 19;
-    if (L3) { label(L3, c, y, F2, '#ffd24a'); y += 19; }
-    label(L4, c, y, F4, '#c2f0b8');
+    const lines = L3 ? 4 : 3, h = 16 + lines * 19, y0 = c - 6, k = Math.min(hudK(cvBox, ARENA), (ARENA - 12) / w);   // planche agrandie depuis son bord haut (le titre reste au-dessus), sans déborder du canvas
+    ctx.save(); ctx.translate(c, y0); ctx.scale(k, k);
+    plank(-w / 2, 0, w, h);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    let y = 17;
+    label(L1, 0, y, F1, teamMode ? '#bfe3ff' : '#fff4cf'); y += 19;
+    label(L2, 0, y, F2, '#e8dcb8'); y += 19;
+    if (L3) { label(L3, 0, y, F2, '#ffd24a'); y += 19; }
+    label(L4, 0, y, F4, '#c2f0b8');
     ctx.restore();
   }
   function drawCountdown(now) {                     // tournesol qu'on effeuille : 3 · 2 · 1, puis GO
@@ -1118,7 +1191,7 @@ export default (function () {
     ctx.font = '700 ' + (n > 0 ? 58 : 30) + 'px ' + DISP; ctx.lineWidth = 6; ctx.strokeStyle = '#1e1005'; ctx.strokeText(s, 0, 3); ctx.fillStyle = '#fff4cf'; ctx.fillText(s, 0, 3);
     ctx.restore();
     ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-    label(n > 0 ? 'Les serpents sortent de l\'herbe…' : 'Ssss… à table !', c, c + 82, '600 14px ' + DISP, '#f3ecd2');
+    label(n > 0 ? 'Les serpents sortent de l\'herbe…' : 'Ssss… à table !', c, c + 82, '600 ' + readable(14, cvBox, ARENA).toFixed(1) + 'px ' + DISP, '#f3ecd2');
     ctx.restore();
   }
   function drawPause(now) {                         // pancarte suspendue « PAUSE » qui se balance, zzz de sieste
@@ -1133,7 +1206,7 @@ export default (function () {
     if (soft) { ctx.font = '700 13px ' + DISP; ctx.fillStyle = '#c2f0b8'; for (let k = 0; k < 3; k++) { const u = ((now / 1600) + k / 3) % 1; ctx.globalAlpha = Math.sin(u * Math.PI); ctx.fillText('z', w / 2 + 6 + u * 16, 30 - u * 26); } ctx.globalAlpha = 1; }
     ctx.restore();
     ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-    label('Sieste au jardin — P / Échap pour reprendre', c, c + 34, '500 14px ' + DISP, '#e8dcb8');
+    label(TOUCH ? 'Sieste au jardin — touche ▶ pour reprendre' : 'Sieste au jardin — P / Échap pour reprendre', c, c + 34, '500 ' + readable(14, cvBox, ARENA).toFixed(1) + 'px ' + DISP, '#e8dcb8');   // touche : pas de raccourci clavier affiché
     ctx.restore();
   }
 
@@ -1142,10 +1215,13 @@ export default (function () {
     if (destroyed) return;
     const now = performance.now(), dtm = lastFrame ? Math.min(100, Math.max(1, now - lastFrame)) : 16.7; lastFrame = now; NOW = now;
     const kdt = Math.min(3, Math.max(0.25, dtm / 16.7)), sc = cv.width / ARENA, soft = !A.reduceFx;
+    // arrêt sur image de 60 ms à chaque élimination (l'image précédente reste à l'écran) ; jamais en « réduire les effets »
+    if (soft) { if (hsAt && now >= hsAt) { HS.trigger(now); hsAt = 0; } if (HS.frozen(now)) return; } else hsAt = 0;
     let ox = 0, oy = 0;
     if (shakeMag > 0.3 && soft) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= Math.pow(0.85, kdt); } else shakeMag = 0;
+    if (ox || oy) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0d2c0f'; ctx.fillRect(0, 0, cv.width, cv.height); }   // secousse : le décor est décalé, on peint d'abord la marge (sinon une bande de l'image précédente reste visible)
     ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
-    SC = sc; CSC = sc / (window.devicePixelRatio || 1);
+    SC = sc; CSC = sc / (window.devicePixelRatio || 1); PRES = Math.max(1, Math.round(sc * 4) / 4);
     ensureTerrain(); ctx.drawImage(terrainCv, 0, 0, ARENA, ARENA);   // décor statique pré-rendu (1 drawImage au lieu de ~6000 tracés)
     if (snap && snap.variant === 1) drawPortal(now);
     updateDusk(dtm);
@@ -1162,7 +1238,12 @@ export default (function () {
     }
     drawFx(now, kdt);
     if (dusk > 0.01) crepuscule(ctx, 0, 0, ARENA, ARENA, dusk, { soleil: 'gauche', force: A.contrast || A.reduceFx ? 0.6 : 1 });   // étalonnage sur sol + pièces
-    if (snap) { drawMarkers(now); }                         // repères au-dessus du crépuscule : toujours nets
+    if (snap && snap.gs === 'play') {               // vignette de danger : ma tête va toucher quelque chose au prochain pas (figée, sans pulsation, en « réduire les effets »)
+      dangerK = soft ? dangerK + (dangerT - dangerK) * Math.min(1, dtm / 90) : dangerT * 0.6;
+      if (dangerK > 0.03) drawDanger(ctx, ARENA, ARENA, dangerK * (A.contrast ? 1 : 0.8), soft ? now : 0);
+    } else dangerK = 0;
+    if (snap) { drawMarkers(now); drawChips(now); }         // repères au-dessus du crépuscule : toujours nets
+    CALL.draw(ctx, ARENA, ARENA, now, A);                   // « DOUBLÉ ! » / « TRIPLÉ ! » / « CARNAGE ! »
     if (snap && snap.rush && (snap.gs === 'play' || snap.gs === 'countdown')) drawRush();
     if (snap && snap.gs === 'countdown') drawCountdown(now);
     if (snap && snap.gs === 'lobby') drawLobby(now);
@@ -1174,7 +1255,7 @@ export default (function () {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
     if (e.key === ' ' && snap && snap.gs !== 'play' && snap.gs !== 'paused') return e.repeat ? undefined : send({ t: 'start' });
-    if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) return send({ t: 'pause' });
+    if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) return e.repeat ? undefined : send({ t: 'pause' });   // touche tenue : jamais de re-envoi (la pause basculait en boucle)
     const d = DIR_KEYS[e.code]; if (d && !e.repeat) { send({ t: 'dir', d }); echoVirage(d); }   // la répétition auto renvoyait la même direction ~30×/s pour rien
   };
   function dpad(id, d) { const el = $(id); if (!el) return; el.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t: 'dir', d }); echoVirage(d); }); }
@@ -1196,6 +1277,8 @@ export default (function () {
       if (wrap && wrap.classList && wrap.classList.contains('canvas-wrap')) initGameMsg(wrap); }
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
+    cardPn = cards.map(el => el.querySelector('.pn')); cardLv = cards.map(el => el.querySelector('.lv'));   // cartes recréées : références et signatures repartent de zéro
+    cardSig = new Array(MAX_SEATS).fill(''); cardLvSig = new Array(MAX_SEATS).fill(null);
     startBtn = $('snStart'); pauseBtn = $('snPause'); modeBtn = $('snMode'); variantBtn = $('snVariant'); rushBtn = $('snRush'); botsBtn = $('snBots'); pauseFloat = $('snPauseFloat');
     lbBtn = $('snLbBtn'); lbPanel = $('snLbPanel'); lbBody = $('snLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
@@ -1214,11 +1297,17 @@ export default (function () {
     applyColors();
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown);
+    TOUCH = (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches) || 'ontouchstart' in window;   // indications clavier masquées sur écran tactile
+    music.dispose(); music = createMusic(() => actx, () => A, MUSIC_THEME);   // dispose() est définitif : chaque init() repart avec un moteur neuf
     music.start();
     rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
-  function teardown() { destroyed = true; music.stop(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); parts.length = 0; waves.length = 0; floats.length = 0; LUM.vider(); lumPend.length = 0;
+  function teardown() { destroyed = true; music.stop(); music.dispose(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); parts.length = 0; waves.length = 0; floats.length = 0; flashes.length = 0; LUM.vider(); lumPend.length = 0;
+    // Aucune touche « tenue » à relâcher (les virages sont des appuis ponctuels) ; en revanche l'AudioContext doit être libéré : un par visite
+    // s'accumulait, et le navigateur en plafonne le nombre. Il est recréé au prochain geste (unlockAudio).
+    if (actx) { const c = actx; actx = null; noiseBuf = null; try { const pr = c.close(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }
+    STK.reset(); hsAt = 0; dangerT = dangerK = 0; shakeMag = 0;
     J.fin(); jRound = -1; prevRound = -1; dusk = 0; }   // retour au jeu (autre salle, manche renumérotée) : journal et lumière repartent propres
 
   return { init, onState, onMessage, onLb, onA11y, teardown };

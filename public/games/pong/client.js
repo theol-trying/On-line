@@ -24,6 +24,7 @@ import { arenaSize } from '../../layout.js';   // taille du plateau : commune au
 import { lumiere, creerLumieres } from '../../lumiere.js';       // balles qui éclairent le sol, éclairs aux renvois / bumpers / vies perdues
 import { crepuscule, creerDuel } from '../../crepuscule.js';               // mort subite : l'arène glisse du jour au crépuscule
 import { creerJournal, blocFin } from '../../finpartie.js';      // écran de fin : courbe des vies + meilleure action
+import { createStreaks, createCallouts, streakText, createHitStop, drawFlash, drawDanger, drawSeatChip, readable } from '../../exploits.js';   // aides partagées : « DOUBLÉ ! », arrêt sur image, éclat, danger, pastilles, lisibilité
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -208,7 +209,13 @@ export default (function () {
   const edgeFlash = {}, barrierFlash = {}, wallFlash = {};
   const blockSeen = new Map();                             // plots bloqueurs : instant d'apparition (animation d'entrée)
   let actx = null, noiseBuf = null, sndPan = 0;
-  const music = createMusic(() => actx, () => A, MUSIC_THEME);
+  let music = createMusic(() => actx, () => A, MUSIC_THEME), musicOff = false;   // musicOff : dispose() appelé au teardown → init() en refait une
+  // Exploits (aides partagées) : séries d'éliminations, annonces, arrêt sur image, éclats, danger, pastilles, chrono de la dernière minute
+  const streaks = createStreaks({ window: 5000 }), callouts = createCallouts(), hitStop = createHitStop(60);
+  const elimFl = [];                                       // éclats blancs à l'endroit des éliminations (repère du terrain)
+  let dangerK = 0, patRes = 1, FS = 1, touch = false;      // danger lissé · px appareil par unité monde · zoom du terrain · écran tactile
+  let tlEl = null, tlTxt = null, tlShown = -1, tlPrev = null, tlVal = null;   // pastille du chrono (DOM, dans le HUD) · dernière valeur `tl` connue
+  let hudLv = [], hudPn = [], hudCol = [];                 // dernières chaînes posées dans les cartes : on ne réécrit le DOM que si elles changent
   let shakeMag = 0, ballPopUntil = 0, bannerTimer = null, curWinMode = 'survivor';
   let rafId = 0, destroyed = false, resizeH = null, lastFrame = 0, curInten = 0, countT = 0, lastFw = 0;
   let geo0 = null;                                         // sommets du terrain en début de manche : fantôme du rétrécissement
@@ -233,6 +240,10 @@ export default (function () {
   const ADD = () => TH.add ? 'lighter' : 'source-over';
   // intensité de l'éclairage dynamique : l'additif blanchirait le thème Clair, et le contraste renforcé veut un sol calme
   const lightK = () => (TH.add ? 1 : 0.4) * (A.contrast ? 0.6 : 1);
+  // Lisibilité téléphone : taille (unités du repère courant) pour qu'un texte de base `base` fasse au moins `minCss` px CSS à l'écran.
+  // `zoom` = facteur repère → canvas : FS (zoom du terrain) dans world(), 1 dans le repère 500 × 500 virtuel (avec `ww` = 500).
+  const rd = (base, minCss, zoom, ww) => readable(base * zoom, cv, ww || W, minCss) / zoom;
+  const isTouch = () => { try { return !!((window.matchMedia && matchMedia('(pointer: coarse)').matches) || 'ontouchstart' in window); } catch (e) { return false; } };
 
   function applyColors() {
     CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal;
@@ -254,17 +265,19 @@ export default (function () {
       cards[i].classList.toggle('hidden', !shown);
       if (!shown) return;
       const col = colOf(p);
-      cards[i].style.color = col;
+      if (hudCol[i] !== col) { hudCol[i] = col; cards[i].style.color = col; document.getElementById('lv' + i).style.color = col; }   // couleur : seulement si elle change
       const l = Math.max(0, p.lives);
-      const lvEl = document.getElementById('lv' + i); lvEl.style.color = col;
+      const lvEl = document.getElementById('lv' + i);
       const buffs = (p.buffs || []).map(([k, fr]) => { const c = BUFF_COL[k] || '#fff', pct = Math.max(0, Math.min(100, Math.round(fr * 100))); return `<span class="buff" style="background:linear-gradient(90deg,${c} ${pct}%,rgba(255,255,255,.12) ${pct}%);border-color:${c}66">${BUFF_ICON[k] || '?'}</span>`; }).join('');
-      lvEl.innerHTML = '●'.repeat(l) + '○'.repeat(Math.max(0, maxLives - l)) + (buffs ? ' ' + buffs : '');
+      const lvH = '●'.repeat(l) + '○'.repeat(Math.max(0, maxLives - l)) + (buffs ? ' ' + buffs : '');
+      if (hudLv[i] !== lvH) { hudLv[i] = lvH; lvEl.innerHTML = lvH; }                       // le HUD est appelé à chaque instantané (60 Hz) : pas de réécriture inutile
       const tags = [];
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const gl = `<span style="opacity:.75;margin-right:3px" title="motif de la raquette">${SEAT_GLYPH[i % SEAT_GLYPH.length]}</span>`;   // glyphe = motif du siège (constante, jamais du réseau)
-      document.getElementById('pn' + i).innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${gl}${p.name || ('P' + (i + 1))} <span class="sc">${p.score} pt</span> ${tags.join('')}`;
+      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}${gl}${p.name || ('P' + (i + 1))} <span class="sc">${p.score} pt</span> ${tags.join('')}`;
+      if (hudPn[i] !== pnH) { hudPn[i] = pnH; document.getElementById('pn' + i).innerHTML = pnH; }
       cards[i].classList.toggle('dead', p.playing && !p.alive);
       cards[i].classList.toggle('me', i === mySeat);
     });
@@ -350,7 +363,7 @@ export default (function () {
     es.innerHTML = `<div class="emeta" style="font-family:Orbitron,'Segoe UI',sans-serif;font-weight:800;letter-spacing:.32em;color:#ff5db4">GAME OVER</div>
       <div class="etitle" style="color:${champ ? colOf(champ) : '#fff'}">${title}</div>
       <div class="emeta">⏱ ${m.stats.durationSec}s · 🏓 ${m.stats.bounces} rebonds · ${m.stats.nParts} joueurs</div>
-      ${mvpLine}<div class="elist">${rows}</div>${finHtml}${podHtml}<div class="ehint"><b style="font-family:Orbitron,'Segoe UI',sans-serif;letter-spacing:.12em;color:#6ff0ff">CONTINUE ?</b> Espace / clic pour rejouer</div>`;
+      ${mvpLine}<div class="elist">${rows}</div>${finHtml}${podHtml}<div class="ehint"><b style="font-family:Orbitron,'Segoe UI',sans-serif;letter-spacing:.12em;color:#6ff0ff">CONTINUE ?</b> ${touch ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
   }
 
   /* ---- entrées réseau (appelées par le shell) ---- */
@@ -383,11 +396,12 @@ export default (function () {
     if (ge && ge.length && ((m.gs !== 'play' && m.gs !== 'paused' && m.gs !== 'over') || !geo0 || geo0.length !== ge.length * 2)) {
       geo0 = []; for (const e of ge) geo0.push(e.ax, e.ay);
     }
-    if (m.gs === 'countdown' && prevGs !== 'countdown') { breaks.length = 0; shards.length = 0; flashes.vider(); sdAcc = 0; }   // nouvelle manche : bords réparés, retour au jour
+    if (m.gs === 'countdown' && prevGs !== 'countdown') { breaks.length = 0; shards.length = 0; elimFl.length = 0; flashes.vider(); sdAcc = 0; streaks.reset(); dangerK = 0; }   // nouvelle manche : bords réparés, retour au jour
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     (m.fx || []).forEach(f => {
-      if (f.type === 'death') { music.sting('kill'); if (f.elim) addKill(f.by, f.side); }
+      if (f.type === 'death') { music.sting('kill'); if (f.elim) { addKill(f.by, f.side); streakKill(f); } }
+      else if (f.type === 'timeup') msgGlobal('⏱', 'Temps écoulé !', { color: '#ff5a5a' });   // la manche de 10 min est finie : au classement des vies
       else if (f.type === 'powerup') msgPowerup(f);   // remplace l'ancien banner() des malus : il s'affichait au centre, pour tout le monde, même quand le malus ne touchait que le ramasseur
     });
     journal(prev, m, performance.now());               // AVANT l'écran de fin (plus bas) : il lit ce journal
@@ -401,7 +415,7 @@ export default (function () {
     { let inten = 0;                                  // musique : 1 en jeu, 2 quand les échanges deviennent rapides
       if (m.gs === 'play' || m.gs === 'countdown') inten = (m.gs === 'play' && musicIntensity() > 0.55) ? 2 : 1;
       curInten = inten; music.setIntensity(inten); }
-    refreshHUD();
+    refreshHUD(); refreshTimer(m);
     if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } }
     else { endShown = false; $('endscreen').classList.add('hidden'); }
     const n = m.connected + m.botCount;
@@ -561,6 +575,7 @@ export default (function () {
     if (f.type === 'death') {                                // vie perdue : le bord se fissure (éliminé : il vole en éclats)
       const col = colSeat(f.side), mine = f.side === mySeat;
       shakeMag = Math.max(shakeMag, f.elim ? (mine ? 12 : 7) : (mine ? 9 : 4.5));
+      if (f.elim) { hitStop.trigger(now); push(elimFl, 6, { x: f.x, y: f.y, born: now + 60 }); }   // arrêt sur image 60 ms, puis éclat blanc qui s'estompe
       ring(f.x, f.y, 6, 66, 650, col, 5, 0, now); ring(f.x, f.y, 4, 40, 380, '#ffffff', 2, 0, now, 40);
       motes(f.x, f.y, 14, 0.6, 2.6, col, 600, 2.4, now);
       const pl = snap.players[f.side];
@@ -576,6 +591,30 @@ export default (function () {
         push(texts, CAP.texts, { x: tx, y: ty, born: now, txt: f.elim ? 'K.O.' : '−1', col, big: !!f.elim });
       }
     }
+  }
+  // Série d'éliminations d'un même auteur (5 s) : « DOUBLÉ ! » « TRIPLÉ ! » « CARNAGE ! ». Attribution = f.by (crédité, ≠ victime) ;
+  // sans auteur (mur, propre but) rien à annoncer. Actif même en « Réduire les effets » (l'annonce est un texte, sans animation d'échelle).
+  function streakKill(f) {
+    if (f.by == null || f.by < 0 || f.by === f.side) return;
+    const now = performance.now(), n = streaks.kill(f.by, now), t = streakText(n);
+    if (t) callouts.push(t, colSeat(f.by), now);
+  }
+  // Dernière minute : le serveur envoie `tl` (secondes restantes, entier) dès 60 s ; null avant. Pastille DOM dans le HUD (visible aussi sur
+  // téléphone : classe `me`), qui pulse à chaque seconde et passe au rouge sous 10 s. En pause le serveur renvoie tl = null : on garde la valeur.
+  function refreshTimer(m) {
+    if (m.gs === 'play') tlVal = m.tl == null ? null : m.tl;
+    else if (m.gs !== 'paused') tlVal = null;
+    if (!tlEl) return;
+    const v = tlVal;
+    if (v == null) { if (tlShown !== -1) { tlShown = -1; tlEl.classList.add('hidden'); } tlPrev = null; return; }
+    if (v === tlShown) return;
+    if (tlPrev == null) msgGlobal('⏱', 'Dernière minute !', { color: '#ffd76b' });
+    tlPrev = v; tlShown = v;
+    const urgent = v <= 10, col = urgent ? '#ff5a5a' : '#ffd76b';
+    tlTxt.textContent = '⏱ ' + Math.floor(v / 60) + ':' + ('0' + (v % 60)).slice(-2);
+    tlEl.style.color = col; tlEl.classList.remove('hidden');
+    if (urgent && v > 0) sound('count');                                  // tic-tac des 10 dernières secondes
+    if (!A.reduceFx && tlEl.animate) { try { tlEl.animate([{ transform: 'scale(' + (urgent ? 1.3 : 1.15) + ')' }, { transform: 'scale(1)' }], { duration: 380, easing: 'ease-out' }); } catch (e) {} }
   }
   function addKill(by, victim) {
     const el = document.createElement('div'); el.className = 'kf';
@@ -672,9 +711,9 @@ export default (function () {
     const spd = bb => Math.hypot(bb.vx || 0, bb.vy || 0);   // vitesse (unités/tick) : longueur et chaleur de la comète
     if (sa.balls.length === sb.balls.length)
       balls = sa.balls.map((ba, i) => { const bb = sb.balls[i];
-        if (Math.hypot(bb.x - ba.x, bb.y - ba.y) > 60) return { x: bb.x, y: bb.y, o: bb.o, gh: bb.gh, iv: bb.iv, sp: spd(bb) };
-        return { x: ba.x + (bb.x - ba.x) * al, y: ba.y + (bb.y - ba.y) * al, o: bb.o, gh: bb.gh, iv: bb.iv, sp: spd(bb) }; });
-    else balls = sb.balls.map(b => ({ x: b.x, y: b.y, o: b.o, gh: b.gh, iv: b.iv, sp: spd(b) }));
+        if (Math.hypot(bb.x - ba.x, bb.y - ba.y) > 60) return { x: bb.x, y: bb.y, o: bb.o, gh: bb.gh, iv: bb.iv, sp: spd(bb), vx: bb.vx || 0, vy: bb.vy || 0 };
+        return { x: ba.x + (bb.x - ba.x) * al, y: ba.y + (bb.y - ba.y) * al, o: bb.o, gh: bb.gh, iv: bb.iv, sp: spd(bb), vx: bb.vx || 0, vy: bb.vy || 0 }; });
+    else balls = sb.balls.map(b => ({ x: b.x, y: b.y, o: b.o, gh: b.gh, iv: b.iv, sp: spd(b), vx: b.vx || 0, vy: b.vy || 0 }));
     const pos = {};
     sb.players.forEach((pb, i) => { const pa = sa.players[i]; pos[i] = (pa && pa.edge === pb.edge) ? pa.pos + (pb.pos - pa.pos) * al : pb.pos; });
     return { balls, pos };
@@ -1048,7 +1087,7 @@ export default (function () {
     if (A.contrast) { ctx.strokeStyle = TH.add ? '#ffffff' : '#111111'; ctx.lineWidth = PAD_W + 3; seg(-hl, 0, hl, 0); }
     ctx.strokeStyle = shade(col, -0.45); ctx.lineWidth = PAD_W; seg(-hl, 0, hl, 0);                   // gaine
     ctx.strokeStyle = col; ctx.lineWidth = PAD_W - 2.4; seg(-hl, 0, hl, 0);                          // tube
-    const pat = seatPattern(ctx, p.seat, { size: Math.round(PAD_W * 1.4) });                         // motif du siège, aligné sur la raquette
+    const pat = seatPattern(ctx, p.seat, { size: Math.round(PAD_W * 1.4), res: patRes });                         // motif du siège, aligné sur la raquette
     if (pat) { ctx.strokeStyle = pat; seg(-hl, 0, hl, 0); }
     ctx.strokeStyle = ft < 1 ? '#ffffff' : (p.inv ? '#ff9be0' : shade(col, 0.72));                     // cœur lumineux (magenta si contrôles inversés)
     ctx.globalAlpha = al * (ft < 1 ? 1 : 0.85); ctx.lineWidth = Math.max(1.3, PAD_W * 0.18) + (ft < 1 ? 2.2 * (1 - ft) : 0); seg(-hl, 0, hl, 0);
@@ -1078,20 +1117,26 @@ export default (function () {
     ctx.moveTo(x - 5, y - 2); ctx.lineTo(x + 4.5, y - 2); ctx.moveTo(x + 2.4, y - 4.2); ctx.lineTo(x + 4.8, y - 2); ctx.lineTo(x + 2.4, y + 0.2);
     ctx.moveTo(x + 5, y + 2.4); ctx.lineTo(x - 4.5, y + 2.4); ctx.moveTo(x - 2.4, y + 0.2); ctx.lineTo(x - 4.8, y + 2.4); ctx.lineTo(x - 2.4, y + 4.6); ctx.stroke();
   }
-  function drawLabel(p, e) {
-    const isMe = p.seat === mySeat, col = colOf(p), [lx, ly] = pt(e, e.len / 2, PAD_OFF + PAD_W + 14);
+  // Étiquette d'un bord. Sur téléphone la police fait au moins ~9 px CSS (rd) et TOUT le bloc (pastille, icônes) grossit d'autant autour de
+  // son point d'ancrage (k) ; la pastille reste hors de la raquette (son décalage suit k). `chip` : pastille numérotée (siège + glyphe du motif).
+  function drawLabel(p, e, chip) {
+    const isMe = p.seat === mySeat, col = colOf(p);
+    const fs = rd(isMe ? 12 : 11, 9, FS), k = Math.min(2, fs / (isMe ? 12 : 11));
+    const [lx, ly] = pt(e, e.len / 2, PAD_OFF + PAD_W + 6 + 8 * k);
     const txt = isMe ? 'VOUS' : ((p.name || ('P' + (p.seat + 1))).slice(0, 8) + (p.bot ? '*' : ''));
     const icons = (p.lead ? 1 : 0) + (p.inv ? 1 : 0);
-    const aw = 0;
-    ctx.font = UI(isMe ? 12 : 11); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const tw = ctx.measureText(txt).width, tot = aw + tw + icons * 13, x0 = lx - tot / 2, alive = p.playing ? p.alive : true;
-    ctx.globalAlpha = alive ? 1 : 0.35; ctx.fillStyle = TH.label; ctx.beginPath(); rrect(ctx, x0 - 5, ly - 8, tot + 10, 16, 6); ctx.fill();   // pastille : lisible sur la grille
+    ctx.font = UI(fs); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const tw = ctx.measureText(txt).width, tot = tw + icons * 13 * k, x0 = lx - tot / 2, alive = p.playing ? p.alive : true;
+    ctx.globalAlpha = alive ? 1 : 0.35; ctx.fillStyle = TH.label; ctx.beginPath(); rrect(ctx, x0 - 5 * k, ly - 8 * k, tot + 10 * k, 16 * k, 6 * k); ctx.fill();   // pastille : lisible sur la grille
     if (isMe) { ctx.strokeStyle = rgba(col, 0.8); ctx.lineWidth = 1; ctx.stroke(); }
-    ctx.globalAlpha = alive ? (A.contrast ? 1 : 0.88) : 0.3; ctx.fillStyle = col; ctx.fillText(txt, x0 + aw + tw / 2, ly + 0.5);
-    let ix = x0 + aw + tw + 8;
-    if (p.lead) { crown(ix, ly); ix += 13; }
-    if (p.inv) invIcon(ix, ly);
+    ctx.globalAlpha = alive ? (A.contrast ? 1 : 0.88) : 0.3; ctx.fillStyle = col; ctx.fillText(txt, x0 + tw / 2, ly + 0.5);
+    let ix = x0 + tw + 8 * k;
+    if (icons) { ctx.save(); ctx.translate(ix, ly); ctx.scale(k, k); ctx.translate(-ix, -ly);   // icônes vectorielles (couronne, ⇄) : mises à l'échelle autour de leur ancre
+      if (p.lead) { crown(ix, ly); ix += 13; }
+      if (p.inv) invIcon(ix, ly);
+      ctx.restore(); }
     ctx.globalAlpha = 1;
+    if (chip && alive) { const cs = rd(18, 18, FS); drawSeatChip(ctx, x0 - 5 * k - cs / 2 - 1, ly, p.seat, col, cs); }   // n° du siège + glyphe : rattache l'étiquette à sa carte HUD
   }
 
   /* ---- dessin : bonus, bumpers, balles, effets ---- */
@@ -1165,7 +1210,7 @@ export default (function () {
     }
   }
   function drawFx(now, kdt) {
-    if (A.reduceFx) { rings.length = 0; sparks.length = 0; dots.length = 0; shards.length = 0; pops.length = 0; texts.length = 0; return; }
+    if (A.reduceFx) { rings.length = 0; sparks.length = 0; dots.length = 0; shards.length = 0; pops.length = 0; texts.length = 0; elimFl.length = 0; return; }
     ctx.lineCap = 'round';
     for (let i = rings.length - 1; i >= 0; i--) {                        // ondes : pleine, pointillée (fantôme), dentelée (malus), hexagonale (bouclier)
       const q = rings[i], t = (now - q.born) / q.life; if (t >= 1) { rings.splice(i, 1); continue; } if (t < 0) continue;
@@ -1198,6 +1243,10 @@ export default (function () {
     for (let i = pops.length - 1; i >= 0; i--) {                         // pictogramme du bonus ramassé : il gonfle et s'envole
       const q = pops[i], t = (now - q.born) / 460; if (t >= 1) { pops.splice(i, 1); continue; }
       const R = (PU_R + 7) * (1 + 1.2 * t); ctx.globalAlpha = 1 - t; ctx.drawImage(tokenSprite(q.t, q.bad), q.x - R, q.y - R - 14 * t, R * 2, R * 2);
+    }
+    for (let i = elimFl.length - 1; i >= 0; i--) {                       // éclat blanc de l'élimination (silhouette d'impact)
+      const q = elimFl[i], t = (now - q.born) / 260; if (t >= 1) { elimFl.splice(i, 1); continue; } if (t < 0) continue;
+      drawFlash(ctx, q.x, q.y, 46 * (W / 500), t);
     }
     const u = W / 500;
     for (let i = texts.length - 1; i >= 0; i--) {                        // « −1 » / « K.O. » : claque puis s'efface
@@ -1262,7 +1311,7 @@ export default (function () {
     ctx.restore(); ctx.globalAlpha = 1;
     drawTitle(250, 150, now);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = DISP(10); ctx.fillStyle = rgba(TH.B, 0.9); ctx.fillText('A R C A D E  ·  2  À  1 0  J O U E U R S', 250, 204);
+    ctx.font = DISP(rd(10, 9, 1, 500)); ctx.fillStyle = rgba(TH.B, 0.9); ctx.fillText('A R C A D E  ·  2  À  1 0  J O U E U R S', 250, 204);
     if (!snap) return;
     // plaque d'infos posée sur la grille
     ctx.fillStyle = TH.add ? 'rgba(6,3,18,0.7)' : 'rgba(255,255,255,0.72)'; ctx.beginPath(); rrect(ctx, 56, 292, 388, 158, 12); ctx.fill();
@@ -1271,22 +1320,22 @@ export default (function () {
     const n = snap.connected + snap.botCount, ink = TH.txt;
     const l1 = `${SHAPE[n] || (n + ' joueurs')} · ${snap.connected} humain${snap.connected > 1 ? 's' : ''}${snap.botCount ? ' + ' + snap.botCount + ' bot' + (snap.botCount > 1 ? 's' : '') : ''}`;
     fitFont(l1, DISP, 14, 360); ctx.fillStyle = ink; ctx.fillText(l1, 250, 318);
-    ctx.font = UI(13); ctx.fillStyle = teamMode ? TH.B : rgba(ink, 0.78); ctx.fillText(`${PRESET_LABEL[snap.preset] || snap.preset}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''}`, 250, 342);
-    ctx.font = '12px system-ui,sans-serif'; ctx.fillStyle = rgba(ink, 0.6); ctx.fillText(PRESET_DESC[snap.preset] || '', 250, 361);
+    ctx.font = UI(rd(13, 9, 1, 500)); ctx.fillStyle = teamMode ? TH.B : rgba(ink, 0.78); ctx.fillText(`${PRESET_LABEL[snap.preset] || snap.preset}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''}`, 250, 342);
+    ctx.font = rd(12, 9, 1, 500) + 'px system-ui,sans-serif'; ctx.fillStyle = rgba(ink, 0.6); ctx.fillText(PRESET_DESC[snap.preset] || '', 250, 361);
     if (snap.opts) { const o = snap.opts;
       let r = 'Victoire : ' + (WINMODE_LABEL[o.winMode] || o.winMode);
       if (o.winMode === 'rounds') r += ' (' + o.roundsTarget + ')'; else if (o.winMode === 'kills') r += ' (' + o.killsTarget + ')';
       if (o.sudden !== 'off') r += ' · Mort subite'; if (o.handicap) r += ' · Handicap';
-      fitFont(r, s => s + 'px system-ui,sans-serif', 11.5, 360); ctx.fillStyle = rgba(ink, 0.55); ctx.fillText(r, 250, 379);
+      fitFont(r, s => s + 'px system-ui,sans-serif', rd(11.5, 9, 1, 500), 360); ctx.fillStyle = rgba(ink, 0.55); ctx.fillText(r, 250, 379);
     }
     const blink = A.reduceFx || Math.floor(now / 530) % 2 === 0;           // invite clignotante « borne d'arcade »
-    const pr = n >= 2 ? '► ESPACE / CLIC POUR LANCER' : '► ESPACE / CLIC : ENTRAÎNEMENT SOLO';
+    const pr = n >= 2 ? (touch ? '► TOUCHE POUR LANCER' : '► ESPACE / CLIC POUR LANCER') : (touch ? '► TOUCHE : ENTRAÎNEMENT SOLO' : '► ESPACE / CLIC : ENTRAÎNEMENT SOLO');
     const ps = fitFont(pr, DISP, 13, 360);
     ctx.globalAlpha = blink ? 1 : 0.35; neonText(pr, 250, 410, ps, TH.A, TH.add ? '#ffffff' : TH.A); ctx.globalAlpha = 1;
-    if (n < 2) { ctx.font = '11.5px system-ui,sans-serif'; ctx.fillStyle = rgba(ink, 0.6); ctx.fillText('contre le mur — ou ajoute un adversaire avec « Bots »', 250, 432); }
+    if (n < 2) { ctx.font = rd(11.5, 9, 1, 500) + 'px system-ui,sans-serif'; ctx.fillStyle = rgba(ink, 0.6); ctx.fillText('contre le mur — ou ajoute un adversaire avec « Bots »', 250, 432); }
     if (board.length) {                                                  // « high score » : le recordman du classement
       const top = board.reduce((a, b) => ((b.wins || 0) > (a.wins || 0) ? b : a));
-      if ((top.wins || 0) > 0) { const rec = 'RECORD  ' + String(top.name || '?').slice(0, 14) + '  —  ' + top.wins + ' VICTOIRE' + (top.wins > 1 ? 'S' : ''); fitFont(rec, DISP, 11, 400); ctx.fillStyle = TH.add ? '#ffd76b' : '#9a6a00'; ctx.fillText(rec, 250, 472); }
+      if ((top.wins || 0) > 0) { const rec = 'RECORD  ' + String(top.name || '?').slice(0, 14) + '  —  ' + top.wins + ' VICTOIRE' + (top.wins > 1 ? 'S' : ''); fitFont(rec, DISP, rd(11, 9, 1, 500), 400); ctx.fillStyle = TH.add ? '#ffd76b' : '#9a6a00'; ctx.fillText(rec, 250, 472); }
     }
   }
   function drawCountdown(now) {
@@ -1306,7 +1355,7 @@ export default (function () {
     ctx.restore();
     const sub = n > 0 ? 'PRÊT ?' : 'C\'EST PARTI !';
     ctx.globalAlpha = 1; neonText(sub, 250, cy + 104, 15, TH.B, TH.add ? '#ffffff' : TH.B);
-    if (n > 0) { ctx.font = '12px system-ui,sans-serif'; ctx.fillStyle = rgba(TH.txt, 0.6); ctx.fillText('▲ ▼  pour placer ta raquette', 250, cy + 126); }
+    if (n > 0) { ctx.font = rd(12, 9, 1, 500) + 'px system-ui,sans-serif'; ctx.fillStyle = rgba(TH.txt, 0.6); ctx.fillText('▲ ▼  pour placer ta raquette', 250, cy + 126); }
   }
   function drawPause(now) {
     ctx.fillStyle = 'rgba(' + TH.veil + ',0.66)'; ctx.fillRect(0, 0, 500, 500);
@@ -1321,8 +1370,8 @@ export default (function () {
     ctx.fillStyle = TH.B; for (const [x, y] of [[118, cy - 60], [382, cy - 60], [118, cy + 52], [382, cy + 52]]) { ctx.beginPath(); ctx.arc(x, y, 2.2, 0, Math.PI * 2); ctx.fill(); }   // rivets
     neonText('PAUSE', 250, cy - 16, 44, TH.A, chromeGrad(cy - 16, 44));
     const blink = A.reduceFx || Math.floor(now / 600) % 2 === 0;
-    ctx.globalAlpha = blink ? 1 : 0.4; ctx.font = UI(13); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = TH.add ? 'rgba(255,255,255,0.8)' : rgba(TH.txt, 0.75);
-    ctx.fillText('P / Échap pour reprendre', 250, cy + 32); ctx.globalAlpha = 1;
+    ctx.globalAlpha = blink ? 1 : 0.4; ctx.font = UI(rd(13, 9, 1, 500)); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = TH.add ? 'rgba(255,255,255,0.8)' : rgba(TH.txt, 0.75);
+    ctx.fillText(touch ? 'Touche ▶ pour reprendre' : 'P / Échap pour reprendre', 250, cy + 32); ctx.globalAlpha = 1;
   }
   function drawServeArrow(now, world) {                                  // flèche du service (repère du TERRAIN : elle part de la balle)
     const sb = snap.balls && snap.balls[0];
@@ -1371,6 +1420,27 @@ export default (function () {
     ctx.restore(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   }
 
+  // Danger pour MOI : une balle visible qui fonce vers mon bord (vitesse de rapprochement > 5,5 u/tick (balle « chaude » : cf. hot)), à moins de ~110 u de la ligne, dans
+  // l'envergure du bord. Sans bouclier ni immunité (le renvoi est alors gratuit). Lissé pour ne pas clignoter ; en reduceFx : plafonné et fixe.
+  function updDanger(E, vballs, kdt) {
+    let target = 0;
+    const me = snap && mySeat >= 0 && snap.gs === 'play' ? snap.players[mySeat] : null;
+    const e = me && me.edge >= 0 && me.alive && !me.shield && !me.immune ? E[me.edge] : null;
+    if (e) {
+      const u = W / 500;
+      for (const b of vballs) {
+        if (b.iv) continue;
+        const d = (b.x - e.ax) * e.nx + (b.y - e.ay) * e.ny, s = (b.x - e.ax) * e.tx + (b.y - e.ay) * e.ty;
+        const vn = -(b.vx * e.nx + b.vy * e.ny);                       // > 0 : la balle se rapproche de la ligne
+        if (d < 0 || d > 110 * u || s < -e.len * 0.1 || s > e.len * 1.1 || vn < 5.5) continue;
+        const k = (1 - d / (110 * u)) * Math.min(1, (vn - 5.5) / 5);
+        if (k > target) target = k;
+      }
+    }
+    target *= A.reduceFx ? 0.5 : 0.9;
+    dangerK += (target - dangerK) * Math.min(1, 0.3 * kdt);
+    if (dangerK < 0.01) dangerK = 0;
+  }
   function draw() {
     if (destroyed) return;
     const now = performance.now(), kdt = Math.min(3, Math.max(0.25, (now - (lastFrame || now - 16.7)) / 16.7)); lastFrame = now;
@@ -1379,11 +1449,13 @@ export default (function () {
       if (snap.sd && g0 === 'play') sdAcc += kdt * 16.7;
       else if (g0 === 'lobby' || g0 === 'countdown' || (g0 === 'play' && !snap.sd)) sdAcc = 0;
     }
+    if (!A.reduceFx && hitStop.frozen(now)) return;    // arrêt sur image (60 ms) à l'élimination : on garde la dernière image affichée
     const sc = cv.width / W;
     let ox = 0, oy = 0;
     if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.86; }
     else shakeMag = 0;
     const fit = geoFit(snap && snap.geo, snap && snap.gs);
+    FS = fit.s || 1; patRes = Math.max(1, Math.min(4, Math.round(sc * FS)));   // zoom du terrain (textes lisibles) · résolution des motifs de raquette (stable → cache)
     // `base` : repère du CANVAS (fonds) · `world` : repère du TERRAIN recadré · `vbase` : écrans en 500 × 500 virtuels.
     const base = () => ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
     const world = () => ctx.setTransform(sc * fit.s, 0, 0, sc * fit.s, sc * (fit.tx + ox), sc * (fit.ty + oy));
@@ -1393,6 +1465,7 @@ export default (function () {
     // sur les étoiles de la colonne. On efface en repère brut : la secousse décale `base()`.
     const ambiant = document.body.classList.contains('dock') && document.body.classList.contains('playing');
     if (ambiant) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); }
+    else if (ox || oy) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, cv.width, cv.height); }   // secousse : la marge découverte par le décalage est repeinte (sinon une bande de l'image précédente reste visible)
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     const view = computeView(now);
     const vballs = view ? view.balls : (snap ? snap.balls : []);
@@ -1407,25 +1480,29 @@ export default (function () {
       const E = geo.edges, gs = snap.gs, over = gs === 'over';
       drawField(E, fit, now);
       drawLights(E, vballs, now, gs === 'play' || gs === 'paused' || gs === 'countdown');
+      let nP = 0; for (const q of snap.players) if (q.playing && q.edge >= 0) nP++;
+      const chips = nP >= 7 || gs === 'countdown' || (gs === 'play' && now - countT < 2000);   // pastilles n° : toujours à 7+ (les teintes ne suffisent plus), sinon au décompte et 2 s après le coup d'envoi
       drawEdges(E, now, (gs === 'play' || gs === 'paused') ? vballs : null);
       drawPowerups(now);
       snap.players.forEach(p => {
         if (p.edge < 0) return;
         const e = E[p.edge]; if (!e) return;
-        drawLabel(p, e);
+        drawLabel(p, e, chips);
         if (p.playing && !p.alive) return;
-        drawPaddle(p, e, vpos(p.seat), now, over && p.playing && p.alive);
+        drawPaddle(p, e, vpos(p.seat), now, over && snap.winner >= 0 && p.playing && p.alive && p.team === snap.winner);   // halo d'or : seulement l'équipe gagnante, jamais sur une égalité (winner = -1)
       });
       drawBumpers(now);
       if (gs === 'play' || gs === 'paused' || gs === 'countdown') drawBalls(vballs, now, gs === 'play', kdt);
       else trails = [];
-      if (over && !A.reduceFx && now - lastFw > 650 && dots.length < 160) {   // fin : feux d'artifice aux couleurs des vainqueurs
-        lastFw = now; const win = snap.players.filter(p => p.playing && p.alive), bw = fit.bw || W, bh = fit.bh || H;
+      if (over && snap.winner >= 0 && !A.reduceFx && now - lastFw > 650 && dots.length < 160) {   // fin : feux d'artifice aux couleurs des vainqueurs
+        lastFw = now; const win = snap.players.filter(p => snap.winner >= 0 && p.playing && p.alive && p.team === snap.winner), bw = fit.bw || W, bh = fit.bh || H;
         const c = win.length ? colOf(win[Math.floor(Math.random() * win.length)]) : TH.A;
         motes(W / 2 + (Math.random() - 0.5) * bw * 0.6, H / 2 + (Math.random() - 0.5) * bh * 0.5, 22, 1.2, 3.2, c, 1100, 2.2, now, 0.03);
       }
       drawFx(now, kdt);
       drawDusk(E);                               // étalonnage PAR-DESSUS sol + pièces, sous les écrans / voiles
+      base(); updDanger(E, vballs, kdt); drawDanger(ctx, W, H, dangerK, A.reduceFx ? 0 : now);   // vignette rouge : balle rapide qui fonce sur MON bord (fixe, sans pulsation, en « Réduire les effets »)
+      callouts.draw(ctx, W, H, now, A);          // « DOUBLÉ ! » « TRIPLÉ ! » « CARNAGE ! »
     } else trails = [];
     vbase();                                     // les voiles et écrans qui suivent couvrent tout le CANVAS
     if (snap.gs === 'countdown') { drawCountdown(now); drawServeArrow(now, world); }
@@ -1473,7 +1550,7 @@ export default (function () {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
     if (e.key === ' ' && !e.repeat && snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' });
-    if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) send({ t: 'pause' });
+    if (!e.repeat && (e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) send({ t: 'pause' });   // touche tenue : jamais de re-envoi (sinon pause/reprise en boucle)
     if (!e.repeat) setKey(e.code, true);
   };
   const onKeyUp = e => setKey(e.code, false);
@@ -1508,6 +1585,12 @@ export default (function () {
       el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn" id="pn${i}">P${i + 1}</div><div class="lv" id="lv${i}"></div></div>`;
       hud.appendChild(el); return el;
     });
+    hudLv = []; hudPn = []; hudCol = [];   // cartes recréées : les chaînes en cache ne valent plus rien
+    tlEl = document.createElement('div'); tlEl.className = 'pc me hidden';   // chrono de la dernière minute (classe me : reste visible sur téléphone en partie)
+    tlEl.innerHTML = '<div class="dot"></div><div class="inf"><div class="pn"><span></span></div></div>';
+    tlTxt = tlEl.querySelector('span'); tlTxt.style.cssText = 'font-size:17px;font-weight:800;font-variant-numeric:tabular-nums';
+    hud.appendChild(tlEl); tlShown = -1; tlPrev = null; tlVal = null;
+    touch = isTouch(); dangerK = 0; elimFl.length = 0; streaks.reset();
     startBtn = $('startBtn'); pauseBtn = $('pauseBtn'); botsBtn = $('botsBtn'); modeBtn = $('modeBtn'); presetBtn = $('presetBtn'); pauseFloat = $('pauseFloat');
     optBtn = $('optBtn'); optionsPanel = $('options');
     optLives = $('optLives'); optSpeed = $('optSpeed'); optPu = $('optPu'); optAccel = $('optAccel');
@@ -1550,12 +1633,17 @@ export default (function () {
     resizeH = resizeCanvas;
     addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
+    if (musicOff) { music = createMusic(() => actx, () => A, MUSIC_THEME); musicOff = false; }   // dispose() au teardown précédent : nouvel ordonnanceur + écouteur de visibilité
     music.start();
     rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
   function teardown() {
-    destroyed = true; cancelAnimationFrame(rafId); music.stop();
+    destroyed = true; cancelAnimationFrame(rafId); music.stop(); music.dispose(); musicOff = true;
+    clearTimeout(bannerTimer);
+    if (input.up || input.dn) { input.up = input.dn = false; try { send({ t: 'input', up: false, dn: false }); } catch (e) {} }   // touches tenues : relâchées côté serveur (sinon la raquette file seule)
+    if (actx) { const c0 = actx; actx = null; noiseBuf = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {} }   // ferme l'AudioContext (nouveau au prochain geste)
+    elimFl.length = 0; dangerK = 0; streaks.reset();
     J.fin(); flashes.vider(); sdAcc = 0;   // singleton : un retour en cours de manche ne doit pas prolonger l'ancien journal
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
   }

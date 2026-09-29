@@ -12,6 +12,8 @@ import { arenaSize } from '../../layout.js';   // taille du plateau : commune à
 import { lumiere, creerLumieres } from '../../lumiere.js';
 import { crepuscule, creerDuel } from '../../crepuscule.js';
 import { creerJournal, blocFin } from '../../finpartie.js';
+// aides visuelles partagées : enchaînements (DOUBLÉ !), arrêt sur image + éclat à l'élimination, vignette de danger, pastilles de siège, lisibilité mobile
+import { createStreaks, createCallouts, streakText, createHitStop, drawFlash, drawDanger, drawSeatChip, readable, hudK } from '../../exploits.js';
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -82,6 +84,8 @@ const INTERP_MS = 55;
 // (mesuré côté client, pauses exclues) : rien avant 60 s, nuit « pleine » (plafonnée par crepuscule.js) à 150 s.
 const DUSK_T0 = 60, DUSK_LEN = 90;
 const STREAK_MS = 5000;                                   // deux chars détruits en moins de 5 s = doublé
+const CHIP_MS = 2000, HS_MS = 60, FLASH_MS = 260;         // pastille de siège après (ré)apparition ; arrêt sur image ; éclat blanc à l'élimination
+const NOMUSIC = { start() {}, stop() {}, setIntensity() {}, sting() {}, dispose() {} };   // avant init / après teardown : jamais d'appel sur null
 const SHELL_MATCH2 = 32 * 32;                             // appariement d'un obus d'un état à l'autre (6,5 px/tick)
 const KEYMAP = { ArrowLeft: 'left', KeyA: 'left', KeyQ: 'left', ArrowRight: 'right', KeyD: 'right', ArrowUp: 'fwd', KeyW: 'fwd', KeyZ: 'fwd', ArrowDown: 'back', KeyS: 'back' };   // ZQSD / WASD : KeyW/KeyA = touches Z/Q en AZERTY ; KeyZ/KeyQ pour un clavier réglé en QWERTY
 
@@ -111,6 +115,16 @@ function bevel(g, x, y, w, h, b, light, dark) {
 }
 const rgbMemo = {};
 function rgbOf(hex) { return rgbMemo[hex] || (rgbMemo[hex] = hexRgb(hex).join(',')); }
+// le cercle (x, y, r) touche-t-il le rectangle ? (barre de jauge qui s'estompe sous une pièce)
+function boxHit(x, y, r, x0, y0, x1, y1) { return x + r > x0 && x - r < x1 && y + r > y0 && y - r < y1; }
+// texte centré sur 1 à 3 lignes (coupe aux espaces) : un texte agrandi pour rester lisible sur téléphone ne déborde plus du plateau
+function wrapText(g, txt, x, y, maxW, lh, stroke) {
+  const words = String(txt).split(' '); let line = '', n = 0;
+  const put = s => { if (stroke) g.strokeText(s, x, y + n * lh); g.fillText(s, x, y + n * lh); n++; };
+  for (const w of words) { const t = line ? line + ' ' + w : w; if (line && g.measureText(t).width > maxW && n < 2) { put(line); line = w; } else line = t; }
+  if (line) put(line);
+  return n;
+}
 
 export default (function () {
   let A, send, root, cv, ctx, togglePanel = () => {}, closePanels = () => {};
@@ -126,9 +140,13 @@ export default (function () {
   const J = creerJournal();                             // journal de manche : vies par siège + moments marquants (écran de fin)
   let roundMs = 0, lastPlayT = 0, livesKey = '', prevShells = null;
   let msgKilled = {}, msgBarrels = [];                  // contexte du message réseau en cours (destructions déjà comptées, barils sautés)
-  const streak = {};                                    // siège -> heures de ses dernières destructions (doublé, triplé…)
+  const STK = createStreaks({ window: STREAK_MS });     // destructions enchaînées par tireur (doublé, triplé…)
+  let CALL = createCallouts(); const HS = createHitStop(HS_MS);   // annonces « DOUBLÉ ! » ; arrêt sur image à chaque char détruit
+  const flashes = [];                                   // éclats blancs à l'endroit d'un char détruit { x, y, born }
+  const spawnAt = {}, prevLv = {}, prevInv = {};        // siège -> heure de (ré)apparition (pastille numérotée 2 s) ; vies / invulnérabilité de l'état précédent
+  let nPlay = 0, hudA = 1, touch = false;               // équipages en lice ; opacité courante de la jauge du bas ; écran tactile (pas d'indications clavier)
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0;
-  const music = createMusic(() => actx, () => A, MUSIC_THEME);
+  let music = NOMUSIC;                                  // recréé à chaque init() : dispose() au teardown est définitif pour l'instance
   const input = { left: false, right: false, fwd: false, back: false, fire: false };
   let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, diffBtn, arenaBtn, winBtn, ffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
   const DIFF_NAMES = ['Facile', 'Normale', 'Difficile'];
@@ -169,11 +187,13 @@ export default (function () {
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const gly = `<span style="opacity:.7;font-size:.9em" title="motif du siège">${SEAT_GLYPH[i % SEAT_GLYPH.length]}</span>`;   // rappel du motif peint sur la caisse (constante : aucune donnée réseau injectée)
-      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${esc(p.name || ('P' + (i + 1)))} ${gly} <span class="sc">🏆${p.score | 0} · ${p.kills | 0}⚡</span> ${tags.join('')}`;
+      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}${esc(p.name || ('P' + (i + 1)))} ${gly} <span class="sc">🏆${p.score | 0} · ${p.kills | 0}⚡</span> ${tags.join('')}`;
+      if (cards[i].__pn !== pnH) { cards[i].__pn = pnH; cards[i].querySelector('.pn').innerHTML = pnH; }   // innerHTML seulement si le texte change (pas de re-décodage d'avatar à chaque état)
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       const counts = [p.shield ? '⛉' + p.shield : '', p.mineN ? '◈' + p.mineN : ''].filter(Boolean).join(' ');
       const bars = (p.buffs || []).map(([k, fr]) => { const d = PU[k] || { i: '?', c: '#fff' }, pct = Math.max(0, Math.min(100, Math.round(fr * 100))); return `<span class="buff" style="background:linear-gradient(90deg,${d.c} ${pct}%,rgba(255,255,255,.12) ${pct}%);border-color:${d.c}66">${d.i}</span>`; }).join('');
-      lv.innerHTML = p.playing ? (p.alive ? ('❤'.repeat(Math.max(0, p.lives | 0)) + (counts ? ' · ' + counts : '') + (p.emp ? ' ⚡' : '') + (bars ? ' ' + bars : '')) : '✖ détruit') : 'prêt';
+      const lvH = p.playing ? (p.alive ? ('❤'.repeat(Math.max(0, p.lives | 0)) + (counts ? ' · ' + counts : '') + (p.emp ? ' ⚡' : '') + (bars ? ' ' + bars : '')) : '✖ détruit') : 'prêt';
+      if (cards[i].__lv !== lvH) { cards[i].__lv = lvH; lv.innerHTML = lvH; }
     });
   }
   function renderLB() {
@@ -204,7 +224,7 @@ export default (function () {
     const mvpLine = mvp ? `<div class="emeta">⭐ As du canon : <b style="color:${colSeat(mvp.seat)}">${esc(nameOf(mvp))}</b> — ${mvp.kills} char${mvp.kills > 1 ? 's' : ''} détruit${mvp.kills > 1 ? 's' : ''}, ${mvp.dmg | 0} touche${(mvp.dmg | 0) > 1 ? 's' : ''}</div>` : '';
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : K.sand}">${title}</div>
       <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} équipages · objectif ${m.winTarget} manche(s)</div>${mvpLine}
-      <div class="elist">${rows}</div>${finBloc(m)}<div class="ehint">Espace / clic pour rejouer</div>`;
+      <div class="elist">${rows}</div>${finBloc(m)}<div class="ehint">${touch ? 'Touchez pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
   }
   // courbe des vies de la manche + meilleure action (finpartie.js échappe les noms et filtre les couleurs)
   function finBloc(m) {
@@ -216,7 +236,7 @@ export default (function () {
     parts.length = 0; rings.length = 0; scorch.length = 0; prints.length = 0; wrecks.length = 0; scorchVer++;
     for (const k in tread) delete tread[k];
     for (const k in recoil) delete recoil[k];
-    for (const k in streak) delete streak[k];
+    STK.reset(); flashes.length = 0;
     LUM.vider(); roundMs = 0; lastPlayT = 0;
     J.fin(); prevShells = null;                         // nouvelle manche (ou retour après teardown) : le journal repart au prochain 'play'
   }
@@ -254,9 +274,11 @@ export default (function () {
     else if (atMine) { txt = 'a piégé ' + vn + ' avec une mine'; w = 5; }
     if (kp.alive && kp.lives === 1) { txt += ', à une seule vie'; w += 1; }
     J.moment(now, by, txt, w);
-    const st = streak[by] || (streak[by] = []);
-    st.push(now); while (st.length && now - st[0] > STREAK_MS) st.shift();
-    if (st.length >= 2) J.moment(now, by, st.length === 2 ? 'a signé un doublé' : st.length === 3 ? 'a signé un triplé' : 'a détruit ' + st.length + ' chars en quelques secondes', 5 + st.length * 3);
+    const n = STK.kill(by, now);                         // destructions de ce tireur dans les 5 dernières secondes
+    if (n >= 2) {
+      J.moment(now, by, n === 2 ? 'a signé un doublé' : n === 3 ? 'a signé un triplé' : 'a détruit ' + n + ' chars en quelques secondes', 5 + n * 3);
+      CALL.push(streakText(n), colSeat(by), now);        // annonce plein écran, aux couleurs du tireur (aucun nom : constantes seules)
+    }
   }
   function onMessage(m) { if (m && m.t === 'welcome') mySeat = m.seat; }
   function onLb(d) { board = (d && d.board) || []; renderLB(); }
@@ -283,6 +305,13 @@ export default (function () {
     else if (m.gs === 'play') { if (lastPlayT) roundMs += Math.min(250, tNow - lastPlayT); lastPlayT = tNow; }
     else lastPlayT = 0;
     if (m.gs === 'play' && !J.actif()) { J.debut(tNow); livesKey = ''; }   // début de manche (ou arrivée en cours de manche)
+    nPlay = 0;                                               // pastilles numérotées : équipages en lice ; (ré)apparition = départ des 2 s d'affichage
+    for (const p of m.players) {
+      if (!p.playing) continue; nPlay++;
+      const s = p.seat, pl = prevLv[s], inv = !!p.invuln;
+      if (m.gs === 'countdown' || (p.alive && (pl === undefined || pl === 0 || p.lives < pl)) || (inv && !prevInv[s])) spawnAt[s] = tNow;
+      prevLv[s] = p.alive ? (p.lives | 0) : 0; prevInv[s] = inv;
+    }
     msgKilled = {}; msgBarrels = [];
     (m.fx || []).forEach(playFx);
     if (msgBarrels.length >= 2) {                            // chaîne de barils : attribuée au tireur de l'obus qui l'a déclenchée
@@ -366,8 +395,9 @@ export default (function () {
   function direPU(kind, seat) {
     const m = PU_MSG[kind]; if (!m || !m.t) return;       // `m.t` : garde-fou si `kind` tombe sur une clé du prototype
     const d = PU[kind] || { i: '?', c: '#fff' };
-    if (m.g) msgGlobal(d.i, m.t, { color: d.c });
-    else if (seat === mySeat) msgPerso(d.i, m.t, { color: d.c });
+    const txt = kind === 'mine' && touch ? 'Mine prête : bouton ◈' : m.t;   // écran tactile : pas de touche E à citer
+    if (m.g) msgGlobal(d.i, txt, { color: d.c });
+    else if (seat === mySeat) msgPerso(d.i, txt, { color: d.c });
   }
 
   // ───────────────────────── particules et effets ponctuels ─────────────────────────
@@ -492,6 +522,7 @@ export default (function () {
       const isMine = !!(minesBefore && minesBefore.some(mm => mm.x === f.x && mm.y === f.y));
       addScorch(f.x, f.y, f.small ? 16 : 24, 'boom');
       if (!fx) return;
+      if (!f.small && !isMine) { HS.trigger(now); flashes.push({ x: f.x, y: f.y, born: now + HS_MS }); if (flashes.length > 8) flashes.shift(); }   // char détruit : arrêt sur image 60 ms + éclat blanc (la boom d'une mine n'est pas une élimination)
       shakeMag = Math.max(shakeMag, isMine ? 6 : f.seat === mySeat ? (f.small ? 7 : 12) : (f.small ? 3 : 7));
       explosion(f.x, f.y, f.small ? 0.7 : 1, colSeat(f.seat), false);
       LUM.ajouter(f.x, f.y, isMine ? 90 : f.small ? 85 : 135, isMine ? '#ff7a5a' : '#ff9a48', f.small ? 550 : 850, 0.8);   // l'explosion embrase le sable alentour
@@ -745,7 +776,7 @@ export default (function () {
     g.fillStyle = 'rgba(255,240,210,0.12)'; g.fillRect(-R * 1.02, -R * 0.95, R * 2.04, R * 0.05); g.fillRect(-R * 1.02, R * 0.9, R * 2.04, R * 0.05);
     const hull = () => { g.beginPath(); g.moveTo(-R * 0.98, -R * 0.64); g.lineTo(R * 0.78, -R * 0.64); g.lineTo(R * 1.02, -R * 0.42); g.lineTo(R * 1.02, R * 0.42); g.lineTo(R * 0.78, R * 0.64); g.lineTo(-R * 0.98, R * 0.64); g.closePath(); };
     hull(); g.fillStyle = rgbStr(base); g.fill();
-    const pat = seat >= 0 ? seatPattern(g, seat, { size: Math.round(R * 0.8) }) : null;   // motif du siège sur la caisse (il tourne avec le char)
+    const pat = seat >= 0 ? seatPattern(g, seat, { size: Math.round(R * 0.8), res: S }) : null;   // res = px appareil par unité monde : motif net sur Retina (le sprite n'est reconstruit que si la taille change)   // motif du siège sur la caisse (il tourne avec le char)
     if (pat) { g.fillStyle = pat; g.fill(); }
     const rg = g.createRadialGradient(-R * 0.1, 0, R * 0.1, 0, 0, R * 1.15);              // bombé : centre clair, bords sombres (lisible à toute orientation)
     rg.addColorStop(0, 'rgba(255,245,220,0.16)'); rg.addColorStop(0.7, 'rgba(0,0,0,0)'); rg.addColorStop(1, 'rgba(0,0,0,0.3)');
@@ -907,7 +938,7 @@ export default (function () {
       ctx.beginPath(); ctx.moveTo(-0.5, -5); ctx.lineTo(5.6, 0); ctx.lineTo(-0.5, 5); ctx.closePath(); ctx.fill();
       ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(-6.2, -3); ctx.lineTo(-2.4, -3); ctx.moveTo(-7, 0); ctx.lineTo(-2, 0); ctx.moveTo(-6.2, 3); ctx.lineTo(-2.4, 3); ctx.stroke();
     } else if (t === 'pierce') {                      // ➳ flèche qui traverse un mur
-      ctx.globalAlpha = 0.45; ctx.fillRect(-1.1, -5.8, 2.2, 11.6); ctx.globalAlpha = 1;
+      const ga = ctx.globalAlpha; ctx.globalAlpha = ga * 0.45; ctx.fillRect(-1.1, -5.8, 2.2, 11.6); ctx.globalAlpha = ga;   // (alpha de l'appelant conservé : jauge du bas estompée)
       ctx.lineWidth = 1.7; ctx.beginPath(); ctx.moveTo(-6.4, 0); ctx.lineTo(3.4, 0); ctx.moveTo(-6, 0); ctx.lineTo(-7.6, -2.2); ctx.moveTo(-6, 0); ctx.lineTo(-7.6, 2.2); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(6.8, 0); ctx.lineTo(2.6, -2.9); ctx.lineTo(2.6, 2.9); ctx.closePath(); ctx.fill();
     } else if (t === 'mine') {                        // ◈
@@ -945,6 +976,21 @@ export default (function () {
     ctx.save(); ctx.strokeStyle = 'rgba(232,210,160,0.1)'; ctx.lineWidth = 1; ctx.lineCap = 'round'; ctx.beginPath();   // volutes de sable
     for (const d of AMB_WISP) { const x = (d.ph * 100 + now / 1000 * d.v) % (W + 60) - 30, y = d.y * W + Math.sin(now / 1400 + d.ph) * d.a; ctx.moveTo(x, y); ctx.quadraticCurveTo(x - d.l * 0.5, y - 2, x - d.l, y - d.l * WIND_Y / WIND_X); }
     ctx.stroke(); ctx.restore();
+  }
+
+  // Brume de chaleur : 7 filets clairs qui ondulent en montant sur l'arène, chacun sur son cycle (naissent, dérivent, s'effacent).
+  // 7 tracés de 7 points par image, aucune allocation ; atténuée avec le contraste renforcé (ne doit jamais gêner la lecture des pièces).
+  function drawHaze(now) {
+    const W = ARENA, amp = A.contrast ? 0.5 : 1;
+    ctx.save(); ctx.strokeStyle = 'rgb(255,238,205)'; ctx.lineWidth = 1.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (let k = 0; k < 7; k++) {
+      const ph = (now / 11000 + k * 0.1429) % 1, y = W * (1.04 - 1.08 * ph), x0 = ((k * 0.3819 + 0.11) % 1) * W * 0.78 + W * 0.05, len = 70 + (k % 3) * 30;
+      ctx.globalAlpha = Math.sin(ph * Math.PI) * 0.075 * amp;
+      ctx.beginPath();
+      for (let i = 0; i <= 6; i++) { const px = x0 + len * i / 6, py = y + Math.sin(now / 340 + k * 1.9 + i * 1.3) * 3.2; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // ───────────────────────── écrans : titre, pause, compte à rebours ─────────────────────────
@@ -1017,8 +1063,9 @@ export default (function () {
       ctx.restore();
     }
     // bandeau « OPÉRATION DÉSERT » au pochoir sous la plaque
-    ctx.font = Math.round(Math.max(10, fs * 0.26)) + 'px ' + TITLE_FONT; ctx.fillStyle = 'rgba(230,207,152,0.8)';
-    const sub = 'OPÉRATION DÉSERT', sw = ctx.measureText(sub).width, sy = py + ph + fs * 0.34;
+    const sfs = Math.round(readable(Math.max(10, fs * 0.26), cv, ARENA));   // ≥ 9 px CSS
+    ctx.font = sfs + 'px ' + TITLE_FONT; ctx.fillStyle = 'rgba(230,207,152,0.85)';
+    const sub = 'OPÉRATION DÉSERT', sw = ctx.measureText(sub).width, sy = py + ph + Math.max(fs * 0.34, sfs * 0.8);
     ctx.fillText(sub, cx, sy);
     ctx.strokeStyle = 'rgba(224,169,46,0.45)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx - sw / 2 - 30, sy); ctx.lineTo(cx - sw / 2 - 8, sy); ctx.moveTo(cx + sw / 2 + 8, sy); ctx.lineTo(cx + sw / 2 + 30, sy); ctx.stroke();
     ctx.restore();
@@ -1058,12 +1105,14 @@ export default (function () {
     ctx.font = '40px ' + TITLE_FONT; ctx.lineJoin = 'round'; ctx.lineWidth = 5; ctx.strokeStyle = K.ink; ctx.strokeText('PAUSE', c, py + ph / 2 + 1);
     const tg = ctx.createLinearGradient(0, py + ph / 2 - 20, 0, py + ph / 2 + 20); tg.addColorStop(0, K.goldHi); tg.addColorStop(0.5, K.gold); tg.addColorStop(1, K.goldLo);
     ctx.fillStyle = tg; ctx.fillText('PAUSE', c, py + ph / 2 + 1);
-    ctx.font = '14px system-ui,sans-serif'; ctx.fillStyle = 'rgba(230,207,152,0.75)'; ctx.fillText('Cessez-le-feu — P / Échap pour reprendre', c, py + ph + 24);
+    const fs = readable(14, cv, ARENA);
+    ctx.font = fs + 'px system-ui,sans-serif'; ctx.fillStyle = 'rgba(230,207,152,0.9)';
+    wrapText(ctx, touch ? 'Cessez-le-feu — touchez ▶ pour reprendre' : 'Cessez-le-feu — P / Échap pour reprendre', c, py + ph + 10 + fs, ARENA * 0.92, fs * 1.25);   // écran tactile : pas de raccourci clavier
     ctx.restore();
   }
   function drawCountdown(c, now) {
     const n = snap.count || 0, anim = !A.reduceFx, pulse = anim ? 1 + 0.06 * Math.sin(now / 110) : 1, cy = c - 6;
-    ctx.fillStyle = 'rgba(20,14,6,0.32)'; ctx.fillRect(0, 0, ARENA, ARENA);
+    ctx.fillStyle = 'rgba(20,14,6,0.32)'; ctx.fillRect(-20, -20, ARENA + 40, ARENA + 40);   // marge : une secousse qui finit ne laisse pas de liseré non voilé
     ctx.save(); ctx.translate(c, cy);
     ctx.fillStyle = 'rgba(23,19,10,0.72)'; ctx.beginPath(); ctx.arc(0, 0, 70, 0, 6.283); ctx.fill();
     ctx.save(); ctx.rotate(anim ? now / 2400 : 0);    // viseur : couronne graduée qui tourne, croisillon
@@ -1078,17 +1127,29 @@ export default (function () {
     const tg = ctx.createLinearGradient(0, -34, 0, 34); tg.addColorStop(0, K.goldHi); tg.addColorStop(0.5, K.gold); tg.addColorStop(1, K.goldLo);
     ctx.fillStyle = tg; ctx.fillText(lab, 0, 3);
     ctx.restore();
-    ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = 'bold 14px system-ui,sans-serif'; ctx.lineJoin = 'round'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(23,19,10,0.85)';
-    const sub = n > 0 ? 'Chargement des canons…' : 'Feu à volonté !'; ctx.strokeText(sub, c, cy + 100); ctx.fillStyle = K.sand; ctx.fillText(sub, c, cy + 100);
+    const fs = readable(14, cv, ARENA);                 // ≥ 9 px CSS même sur un petit écran
+    ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = 'bold ' + fs + 'px system-ui,sans-serif'; ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(4, fs * 0.28); ctx.strokeStyle = 'rgba(23,19,10,0.85)'; ctx.fillStyle = K.sand;
+    wrapText(ctx, n > 0 ? 'Chargement des canons…' : 'Feu à volonté !', c, cy + 100, ARENA * 0.92, fs * 1.2, true);
     ctx.restore();
   }
   // jauge du joueur local, en bas : obus disponibles (2 douilles) + bonus actifs (pictogramme + temps restant)
-  function drawHudBar(me, now) {
+  // Elle occupe la rangée du bas, donc le terrain : elle passe à ~0,3 d'opacité dès qu'un char visible, une mine, un obus ou
+  // un bonus se trouve dessous (lissé ; instantané en « réduire les effets »). Bloc mis à l'échelle autour de son ancre bas-centre (lisible sur téléphone).
+  function drawHudBar(me, now, kdt) {
     const used = (snap.shells || []).filter(s => s.o === mySeat).length, avail = Math.max(0, MAX_SHELLS - used);
     const chips = (me.buffs || []).map(b => [b[0], Math.max(0, Math.min(1, b[1])), 0]);
     if (me.shield) chips.push(['shield', 1, me.shield]); if (me.mineN) chips.push(['mine', 1, me.mineN]);
-    const cw = 20, aw = MAX_SHELLS * 9 + 4, total = aw + chips.length * (cw + 4), y = ARENA - 17, x0 = ARENA / 2 - total / 2;
-    ctx.save();
+    const cw = 20, aw = MAX_SHELLS * 9 + 4, total = aw + chips.length * (cw + 4), y = -17, x0 = -total / 2;
+    const k = Math.min(hudK(cv, ARENA), (ARENA - 12) / (total + 14)), ax = ARENA / 2, ay = ARENA - 5, hw = (total / 2 + 7) * k, top = ay - 24 * k;
+    let under = false;
+    for (let i = 0; i < vis.length && !under; i++) under = boxHit(vis[i].vx, vis[i].vy, TANK_R + 2, ax - hw, top, ax + hw, ay);
+    const mines = snap.mines || [], shells = snap.shells || [], pks = snap.pickups || [];
+    for (let i = 0; i < mines.length && !under; i++) under = boxHit(mines[i].x, mines[i].y, 9, ax - hw, top, ax + hw, ay);
+    for (let i = 0; i < shells.length && !under; i++) under = boxHit(shells[i].x, shells[i].y, SHELL_R + 2, ax - hw, top, ax + hw, ay);
+    for (let i = 0; i < pks.length && !under; i++) under = boxHit(pks[i].x, pks[i].y, 14, ax - hw, top, ax + hw, ay);
+    const tgt = under ? 0.3 : 1;
+    hudA = A.reduceFx ? tgt : hudA + (tgt - hudA) * Math.min(1, 0.25 * kdt);
+    ctx.save(); ctx.globalAlpha = hudA; ctx.translate(ax, ay); ctx.scale(k, k);
     ctx.fillStyle = 'rgba(22,17,9,0.62)'; ctx.beginPath(); rr(ctx, x0 - 7, y - 12, total + 14, 24, 6); ctx.fill();
     ctx.strokeStyle = 'rgba(224,169,46,0.35)'; ctx.lineWidth = 1; ctx.stroke();
     for (let i = 0; i < MAX_SHELLS; i++) {           // douilles : laiton plein = obus prêt
@@ -1106,7 +1167,7 @@ export default (function () {
       ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 2; ctx.stroke();
       ctx.strokeStyle = d.c; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * fr); ctx.stroke();   // temps restant
       drawPU(k, x, y, 6.5, d.c);
-      if (cnt > 1) { ctx.font = 'bold 9px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.fillText('×' + cnt, x + 8, y + 7); }
+      if (cnt > 1) { ctx.font = 'bold 10px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.lineWidth = 2.4; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeText('×' + cnt, x + 8, y + 7); ctx.fillText('×' + cnt, x + 8, y + 7); }
       x += cw + 4;
     }
     ctx.restore();
@@ -1159,7 +1220,9 @@ export default (function () {
   const vis = [];                                     // chars visibles de cette image (réutilisé : pas d'allocation)
   function draw() {
     if (destroyed) return;
-    const now = performance.now(), kdt = Math.min(3, Math.max(0.25, (now - (lastFrame || now - 16.7)) / 16.7)); lastFrame = now;
+    const now = performance.now();
+    if (!A.reduceFx && HS.frozen(now)) { lastFrame = now; return; }      // arrêt sur image (60 ms) sur un char détruit : on garde la dernière image affichée
+    const kdt = Math.min(3, Math.max(0.25, (now - (lastFrame || now - 16.7)) / 16.7)); lastFrame = now;
     const sc = cv.width / ARENA, c = ARENA / 2, fx = !A.reduceFx, R = TANK_R;
     let ox = 0, oy = 0;
     if (shakeMag > 0.3 && fx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= Math.pow(0.86, kdt); } else shakeMag = 0;
@@ -1222,6 +1285,9 @@ export default (function () {
       drawParts(0, now, kdt);                          // poussière, éclats, mottes : au sol, sous les chars
       // chars — passe 1 : chenilles au sol + ombres ; passe 2 : caisses ; passe 3 : états, barres, repères
       const me = mySeat >= 0 ? snap.players[mySeat] : null, myRadar = !!(me && me.radar), over = snap.gs === 'over';
+      const wt = over && typeof snap.winner === 'number' && snap.winner >= 0 ? snap.winner : -1;   // équipe victorieuse (-1 : égalité ou pas de fin) : seule elle est auréolée
+      const cs = Math.min(28, readable(15, cv, ARENA, 16));                                         // taille d'une pastille : chiffre ≥ 7 px CSS (une seule mesure du canvas par image)
+      const chipsOn = nPlay >= 7 || snap.gs === 'countdown';                                     // pastilles numérotées : toujours à 7+ équipages, sinon décompte puis 2 s après une (ré)apparition
       vis.length = 0;
       for (const p of snap.players) {
         if (!p.playing || !p.alive) continue;
@@ -1245,7 +1311,7 @@ export default (function () {
           if (tr.mv > 0.3 && Math.random() < 0.1 * kdt) smokeAt(tr.vx - ca * R * 1.05 - sa * R * 0.35, tr.vy - sa * R * 1.05 + ca * R * 0.35, 1, '110,104,94', 2, 650, 0.3, tr.va + Math.PI);   // échappement
           if (p.lives <= 1 && Math.random() < 0.22 * kdt) smokeAt(tr.vx - ca * R * 0.7, tr.vy - sa * R * 0.7, 1, '52,50,50', 3, 1100, 0.35);   // fumée de char endommagé
           if (p.lives <= 1 && Math.random() < 0.15 * kdt) embersAt(tr.vx - ca * R * 0.7, tr.vy - sa * R * 0.7, 1, 0.6);
-          if (over && overAt && now - overAt < 3200 && Math.random() < 0.45 * kdt) smokeAt(tr.vx, tr.vy, 1, rgbOf(col), 4, 1600, 0.5);   // fumigène de victoire aux couleurs du siège
+          if (wt >= 0 && p.team === wt && overAt && now - overAt < 3200 && Math.random() < 0.45 * kdt) smokeAt(tr.vx, tr.vy, 1, rgbOf(col), 4, 1600, 0.5);   // fumigène de victoire aux couleurs du siège
         }
       }
       for (const tr of vis) {
@@ -1286,7 +1352,11 @@ export default (function () {
           ctx.globalAlpha = 1; const ty = y - R - 13; ctx.fillStyle = K.gold; ctx.strokeStyle = K.ink; ctx.lineWidth = 1.2;
           ctx.beginPath(); ctx.moveTo(x - 5, ty - 6); ctx.lineTo(x + 5, ty - 6); ctx.lineTo(x, ty); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
         }
-        if (over && !A.reduceFx) { ctx.save(); ctx.strokeStyle = K.gold; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.5 + 0.4 * Math.sin(now / 180); ctx.beginPath(); ctx.arc(x, y, R + 9, 0, 6.283); ctx.stroke(); ctx.restore(); }   // vainqueur(s) auréolé(s)
+        if (wt >= 0 && p.team === wt) { ctx.save(); ctx.strokeStyle = K.gold; ctx.lineWidth = A.contrast ? 3.5 : 2.5; ctx.globalAlpha = A.reduceFx ? 0.9 : 0.5 + 0.4 * Math.sin(now / 180); ctx.beginPath(); ctx.arc(x, y, R + 9, 0, 6.283); ctx.stroke(); ctx.restore(); }   // vainqueur(s) auréolé(s) : seulement s'il y a un vainqueur, et lui seul (fixe en « réduire les effets »)
+        if (chipsOn || now - (spawnAt[p.seat] || -1e9) < CHIP_MS) {   // pastille numérotée (n° + motif du siège) au-dessus de la barre de vie et du chevron « moi »
+          const cy0 = Math.max(cs / 2 + 2, y - R - 21 - cs / 2);
+          ctx.save(); ctx.globalAlpha = al; drawSeatChip(ctx, Math.max(cs / 2 + 2, Math.min(ARENA - cs / 2 - 2, x)), cy0, p.seat, col, cs); ctx.restore();
+        }
         if (al > 0.3 || p.seat === mySeat) {          // barre de vie : 3 segments, rouge à 1 vie
           const MAXL = 3, bw = R * 2, bh = 3, bx0 = x - bw / 2, by0 = y - R - 8, seg = bw / MAXL;
           ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(bx0 - 1, by0 - 1, bw + 2, bh + 2);
@@ -1318,6 +1388,11 @@ export default (function () {
         ctx.restore();
       }
       drawParts(1, now, kdt); drawParts(2, now, kdt);   // fumée puis lumières additives
+      if (fx && snap.gs === 'play') drawHaze(now);      // brume de chaleur : filets qui ondulent en montant, très discrets
+      if (fx) for (let i = flashes.length - 1; i >= 0; i--) {   // éclat blanc à la place d'un char détruit
+        const q = flashes[i], age = now - q.born; if (age >= FLASH_MS) { flashes.splice(i, 1); continue; }
+        if (age >= 0) drawFlash(ctx, q.x, q.y, R * 1.7, age / FLASH_MS);
+      } else flashes.length = 0;
       if (fx && rings.length) {                        // ondes de choc
         ctx.save();
         for (let i = rings.length - 1; i >= 0; i--) { const q = rings[i], tt = (now - q.born) / q.life; if (tt >= 1) { rings.splice(i, 1); continue; } if (tt < 0) continue; const e = 1 - (1 - tt) * (1 - tt); ctx.globalAlpha = 0.7 * (1 - tt); ctx.strokeStyle = q.col; ctx.lineWidth = q.lw * (1 - tt * 0.6); ctx.beginPath(); ctx.arc(q.x, q.y, q.r0 + (q.r1 - q.r0) * e, 0, 6.283); ctx.stroke(); }
@@ -1325,25 +1400,31 @@ export default (function () {
       } else if (!fx) { rings.length = 0; parts.length = 0; }
       // la manche s'étire : le soleil se couche sur le désert (étalonnage par-dessus l'arène, sous la jauge et les écrans)
       if (dusk > 0) crepuscule(ctx, -20, -20, ARENA + 40, ARENA + 40, dusk, { soleil: 'gauche', force: (A.reduceFx ? 0.55 : 1) * (A.contrast ? 0.6 : 1) });
-      if (me && me.playing && me.alive && snap.gs === 'play') drawHudBar(me, now);
+      if (me && me.playing && me.alive && snap.gs === 'play' && me.lives === 1) {   // dernière vie : vignette rouge pulsée sur les bords (fixe en « réduire les effets »), posée sur l'écran sans secousse
+        ctx.save(); ctx.setTransform(sc, 0, 0, sc, 0, 0); drawDanger(ctx, ARENA, ARENA, A.contrast ? 0.55 : 0.45, A.reduceFx ? 0 : now); ctx.restore();
+      }
+      if (me && me.playing && me.alive && snap.gs === 'play') drawHudBar(me, now, kdt);
     }
 
     if (snap && snap.gs === 'countdown') drawCountdown(c, now);
     if (snap && (snap.gs === 'lobby' || snap.gs === 'paused')) {
-      ctx.fillStyle = 'rgba(12,9,4,0.66)'; ctx.fillRect(0, 0, ARENA, ARENA);
+      ctx.fillStyle = 'rgba(12,9,4,0.66)'; ctx.fillRect(-20, -20, ARENA + 40, ARENA + 40);
       if (snap.gs === 'paused') drawPause(c);
       else {
         drawTitle(c, c - 84, now);
         const n = snap.connected || 0, nb = snap.botCount || 0, tot = n + nb;
         ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(230,207,152,.8)'; ctx.font = '15px system-ui,sans-serif';
-        ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''} · ${snap.winTarget === 1 ? '1 manche' : snap.winTarget + ' manches'}`, c, c + 6);
-        ctx.fillStyle = 'rgba(230,207,152,.66)'; ctx.font = 'bold 13px system-ui,sans-serif';
-        ctx.fillText(tot >= 2 ? '▶ Espace / clic pour lancer l\'assaut' : 'En attente d\'un 2ᵉ pilote… (ou ajoute un bot 🤖)', c, c + 32);
+        const f1 = readable(15, cv, ARENA), f2 = readable(13, cv, ARENA), mw = ARENA * 0.92;   // ≥ 9 px CSS ; les lignes se replient au lieu de déborder
+        ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(230,207,152,.9)'; ctx.font = f1 + 'px system-ui,sans-serif';
+        const n1 = wrapText(ctx, `${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''} · ${snap.winTarget === 1 ? '1 manche' : snap.winTarget + ' manches'}`, c, c + 6, mw, f1 * 1.2);
+        const y2 = c + 6 + (n1 - 1) * f1 * 1.2 + (f1 + f2) / 2 + 8;
+        ctx.fillStyle = 'rgba(230,207,152,.82)'; ctx.font = 'bold ' + f2 + 'px system-ui,sans-serif';
+        const n2 = wrapText(ctx, tot >= 2 ? (touch ? '▶ Touchez pour lancer l\'assaut' : '▶ Espace / clic pour lancer l\'assaut') : 'En attente d\'un 2ᵉ pilote… (ou ajoute un bot 🤖)', c, y2, mw, f2 * 1.2);
         ctx.restore();
-        drawParade(c, c + 84, now);
+        drawParade(c, Math.min(ARENA - 30, Math.max(c + 84, y2 + (n2 - 1) * f2 * 1.2 + f2 + 26)), now);   // le char de parade descend si les textes agrandis prennent de la place
       }
     }
+    CALL.draw(ctx, ARENA, ARENA, now, A);              // « DOUBLÉ ! » / « TRIPLÉ ! » / « CARNAGE ! » au tiers haut
   }
   function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }   // filet : une erreur de rendu ne fige plus le jeu
 
@@ -1355,8 +1436,8 @@ export default (function () {
     unlockAudio();
     const playing = snap && (snap.gs === 'play' || snap.gs === 'paused');
     if (e.key === ' ') { if (snap && snap.gs !== 'play' && snap.gs !== 'paused') { if (!e.repeat) send({ t: 'start' }); return; } setIn('fire', true); return; }   // Espace TENU au moment de la fin : pas un « Rejouer »
-    if ((e.code === 'KeyE' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && playing) { send({ t: 'mine' }); return; }
-    if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && playing) { send({ t: 'pause' }); return; }
+    if ((e.code === 'KeyE' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && playing) { if (!e.repeat) send({ t: 'mine' }); return; }   // touche TENUE : une seule mine
+    if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && playing) { if (!e.repeat) send({ t: 'pause' }); return; }                // idem : pas de pause/reprise en boucle
     const a = KEYMAP[e.code]; if (a && !e.repeat) setIn(a, true);
   };
   const onKeyUp = e => { if (e.key === ' ') { setIn('fire', false); return; } const a = KEYMAP[e.code]; if (a) setIn(a, false); };
@@ -1392,16 +1473,24 @@ export default (function () {
     if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
     if (premiere) { hold('tkLeft', 'left'); hold('tkRight', 'right'); hold('tkFwd', 'fwd'); hold('tkBack', 'back'); hold('tkFire', 'fire'); }
     const mineBtn = $('tkMine'); if (mineBtn && premiere) mineBtn.addEventListener('pointerdown', e => { e.preventDefault(); send({ t: 'mine' }); });
+    try { touch = matchMedia('(pointer: coarse)').matches; } catch { touch = 'ontouchstart' in window; }   // écran tactile : les indications clavier (Espace, E, P) sont masquées
+    for (const k in prevLv) delete prevLv[k]; for (const k in prevInv) delete prevInv[k]; for (const k in spawnAt) delete spawnAt[k];
+    flashes.length = 0; CALL = createCallouts(); STK.reset(); hudA = 1;   // annonces en cours d'une partie précédente : abandonnées
     applyColors(); resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
+    music = createMusic(() => actx, () => A, MUSIC_THEME);   // instance neuve : la précédente a été dispose()ée au teardown
     music.start();
     rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
   function teardown() {
-    destroyed = true; music.stop(); cancelAnimationFrame(rafId);
+    destroyed = true; cancelAnimationFrame(rafId);
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
-    for (const k in input) input[k] = false;           // touches relâchées côté client SANS rien envoyer : le hub a peut-être déjà changé de jeu
+    let held = false; for (const k in input) if (input[k]) { input[k] = false; held = true; }
+    if (held && send) { try { pushInput(); } catch {} }   // touche tenue au moment de quitter : on envoie l'état « relâché » (sinon le char continue seul). Inoffensif si le hub a déjà changé de jeu : tout à faux
+    music.stop(); music.dispose(); music = NOMUSIC;    // ordonnanceur arrêté + écouteur visibilitychange retiré (dispose) ; init() en recrée un
+    if (actx) { try { actx.close(); } catch {} actx = null; noiseBuf = null; }   // AudioContext libéré : unlockAudio() en rouvre un au retour sur le jeu
+    parts.length = 0; rings.length = 0; flashes.length = 0;
   }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };

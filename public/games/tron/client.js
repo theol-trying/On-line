@@ -13,6 +13,7 @@ import { arenaSize } from '../../layout.js';   // taille du plateau : commune au
 import { lumiere, creerLumieres } from '../../lumiere.js';      // phares, halos de traînée, dérésolutions qui éclairent le sol
 import { crepuscule, creerDuel } from '../../crepuscule.js';               // jour → crépuscule pendant que l'arène se referme
 import { creerJournal, blocFin } from '../../finpartie.js';
+import { createStreaks, createCallouts, createHitStop, drawFlash, drawDanger as drawDangerVig, drawSeatChip, streakText, readable, hudK } from '../../exploits.js';   // aides visuelles partagées (enchaînements, arrêt sur image, vignette, pastilles)
 import { creerEcho } from '../../echo-virage.js';                 // chevron immédiat du virage enregistré (file de 2 virages côté serveur)
 const ECHO = creerEcho();     // courbe de la manche + meilleure action (écran de fin)
 
@@ -81,7 +82,7 @@ const THEMES = {
 const DISP = "Orbitron, 'Segoe UI', system-ui, sans-serif";   // police d'affichage (Google Fonts, chargée par la page)
 // fond animé : fines lignes de néon qui tombent (pluie de code) — coupé par reduceFx
 const AMB_RAIN = Array.from({ length: 14 }, () => ({ x: Math.random(), v: 30 + Math.random() * 70, l: 18 + Math.random() * 40, ph: Math.random() * 1000 }));
-const INTERP_MS = 80;
+const INTERP_MS = 100;                                  // ≈ 1,5 × l'intervalle des instantanés (15 Hz = 67 ms) : jamais à court de données à interpoler
 const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', KeyZ: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', KeyQ: 'left', ArrowRight: 'right', KeyD: 'right' };   // ZQSD / WASD : KeyW/KeyA = touches Z/Q en AZERTY ; KeyZ/KeyQ pour un clavier réglé en QWERTY
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -103,6 +104,13 @@ function spaced(g, txt, x, y, sp) {
   const al = g.textAlign; g.textAlign = 'left'; let cx = x - tot / 2;
   for (let i = 0; i < ch.length; i++) { g.fillText(ch[i], cx, y); cx += ws[i] + sp; }
   g.textAlign = al;
+}
+// texte espacé à la taille `fs` (police d'affichage), rétréci si la ligne dépasse ~94 % de l'arène (utilise le remplissage courant)
+function spacedFit(g, txt, x, y, fs, sp) {
+  g.font = '600 ' + fs + 'px ' + DISP;
+  const w = g.measureText(txt).width + sp * (String(txt).length - 1), mx = ARENA * 0.94;
+  if (w > mx) { const r = mx / w; g.font = '600 ' + (fs * r) + 'px ' + DISP; sp *= r; }
+  spaced(g, txt, x, y, sp);
 }
 // Pictogrammes vectoriels (boîte ±6 unités, mise à l'échelle par s/6). Servent au sol (hologrammes), au HUD
 // et aux alertes : même dessin partout, identique sur tous les OS.
@@ -143,7 +151,11 @@ export default (function () {
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, boostHeld = false, killcam = null;
   let lastFrame = 0, wallFlash = 0, invFlash = 0, lastFw = 0;
   let occ = null;                                        // occupation de la grille (reconstruite à 15 Hz) : alerte « mur devant »
-  const music = createMusic(() => actx, () => A, MUSIC_THEME);
+  let music = createMusic(() => actx, () => A, MUSIC_THEME);   // recréé à chaque init() : teardown() le dispose (module singleton)
+  // Exploits / lisibilité : enchaînements d'éliminations, annonces, arrêt sur image, éclats blancs, vignette de danger
+  const streaks = createStreaks({ window: 5000 }), callouts = createCallouts(), hitStop = createHitStop(60), hitFlashes = [];
+  let dangK = 0, goAt = 0, boostBtnHeld = false, touch = false, minU = 13, hk = 1;   // minU : taille mini d'un texte (unités monde) ≈ 9,5 px CSS ; hk : échelle des blocs HUD
+  const rd = b => Math.max(b, minU), chipCol = {}, pnLast = [];   // rd() : texte lisible ; chipCol : couleur de pastille (foncée si le siège est clair) ; pnLast : dernier HTML des cartes
   // Couche « vitrine » : éclairage dynamique, crépuscule, journal de manche (côté client seulement)
   const LUM = creerLumieres(24), J = creerJournal({ pas: 750 });
   let duskT = 0, jClock = 0, jLast = 0;                  // jClock : temps de JEU (les pauses ne comptent pas)
@@ -188,13 +200,17 @@ export default (function () {
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const glyph = SEAT_GLYPH[i % SEAT_GLYPH.length];   // constante : rappel du motif porté par la moto
-      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}<span class="sg" style="opacity:.8">${glyph}</span> ${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.kills | 0} ⚡</span> ${tags.join('')}`;
+      const html = `${(window.__AV && window.__AV(p.name)) || ''}<span class="sg" style="opacity:.8">${glyph}</span> ${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.kills | 0} ⚡</span> ${tags.join('')}`;
+      if (pnLast[i] !== html) { pnLast[i] = html; cards[i].querySelector('.pn').innerHTML = html; }   // pas de réécriture du DOM (et de l'avatar) si rien n'a changé
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
-      if (!p.playing) { lv.textContent = 'prêt'; return; }
-      if (!p.alive) { lv.textContent = '✖ dérésolu'; return; }
-      // états visibles de tous : ce qu'on regarde d'un coin d'œil en pleine course
-      const st = []; if (p.boosting) st.push('⚡'); if (p.speed) st.push('»'); if (p.ghost) st.push('◌'); if (p.brk) st.push('⊘'); if (p.inv) st.push('⇄');
-      lv.textContent = '● en ligne' + (st.length ? ' · ' + st.join(' ') : '');
+      let lvt;
+      if (!p.playing) lvt = 'prêt';
+      else if (!p.alive) lvt = '✖ dérésolu';
+      else {                                            // états visibles de tous : ce qu'on regarde d'un coin d'œil en pleine course
+        const st = []; if (p.boosting) st.push('⚡'); if (p.speed) st.push('»'); if (p.ghost) st.push('◌'); if (p.brk) st.push('⊘'); if (p.inv) st.push('⇄');
+        lvt = '● en ligne' + (st.length ? ' · ' + st.join(' ') : '');
+      }
+      if (lv.textContent !== lvt) lv.textContent = lvt;
     });
   }
   function renderLB() {
@@ -223,7 +239,7 @@ export default (function () {
     }).join('');
     const mvpLine = mvp ? `<div class="emeta">⭐ MVP : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.kills} élimination${mvp.kills > 1 ? 's' : ''}</div>` : '';
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : '#fff'}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} pilotes</div>${mvpLine}<div class="elist">${rows}</div>${blocFin(J, { titre: 'Distance parcourue (cases)', couleur: s => colSeat(s), nom: pname })}<div class="ehint">Espace / clic pour rejouer</div>`;
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} pilotes</div>${mvpLine}<div class="elist">${rows}</div>${blocFin(J, { titre: 'Distance parcourue (cases)', couleur: s => colSeat(s), nom: pname })}<div class="ehint">${touch ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
   }
 
   // ───────────────────────── état réseau ─────────────────────────
@@ -240,7 +256,7 @@ export default (function () {
     if (m.round !== prevRound) {
       J.fin(); LUM.vider(); duskT = 0; jLast = 0;
       for (const k in dist) delete dist[k]; for (const k in lastHead) delete lastHead[k]; for (const k in lastKill) delete lastKill[k];
-      prevRound = m.round; buf = []; killcam = null; prevShrink = 0;
+      prevRound = m.round; buf = []; killcam = null; prevShrink = 0; streaks.reset(); hitFlashes.length = 0; dangK = 0;
       voxels.length = 0; sparks.length = 0; rings.length = 0; flashes.length = 0; labels.length = 0; cutGhosts.length = 0; derez.length = 0; embers.length = 0;
       for (const k in deadAt) delete deadAt[k]; for (const k in angView) delete angView[k]; for (const k in headPos) delete headPos[k];
     }
@@ -254,7 +270,7 @@ export default (function () {
     journal(m);
     if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte 3·2·1 (bip même sans musique)
-    if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); }
+    if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); goAt = tNow; }   // goAt : les pastilles numérotées restent 2 s après le départ
     lastCount = m.count;
     const shr = (m.shrink | 0) > 0; if (shr && !prevSd) { music.sting('alert'); msgGlobal(SHRINK_MSG.i, SHRINK_MSG.t, { bad: true }); } prevSd = shr;    // riser : l'arène se referme
     if ((m.shrink | 0) > prevShrink && m.gs === 'play') wallAdvance();   // chaque avancée du mur : éclair + étincelles + bourdon laser
@@ -457,14 +473,19 @@ export default (function () {
     if (f.type === 'crash') {
       psound('derez', f.x); music.sting('kill');
       deadAt[f.seat] = now;
-      if (f.seat === mySeat && !A.reduceFx) killcam = { x: f.x, y: f.y, born: now };   // killcam sur ta propre collision
+      if (f.seat === mySeat && !A.reduceFx) killcam = { x: clampG(f.x, GW), y: clampG(f.y, GH), born: now };   // killcam sur ta propre collision
       if (f.seat === mySeat) msgPerso('✖', f.by >= 0 && f.by !== f.seat ? 'Dérésolu : traînée adverse' : 'Dérésolution !', { bad: true });
       const col = colSeat(f.seat), hp = headPos[f.seat], cx = clampG(f.x, GW), cy = clampG(f.y, GH);
       const x = hp ? hp.x : px(cx), y = hp ? hp.y : px(cy), a = hp ? hp.a : 0;
       capPush(derez, { seat: f.seat, col, x, y, a, born: now }, 10);
       capPush(labels, { x, y, txt: 'DÉRÉSOLU', sub: f.by >= 0 && f.by !== f.seat ? 'par ' + canvasName(f.by) : '', col, born: now }, 5);
       journalCrash(f);
+      if (f.by >= 0 && f.by !== f.seat && snap) {       // « DOUBLÉ ! / TRIPLÉ ! / CARNAGE ! » : plusieurs éliminations du même pilote en 5 s (le tir ami ne compte pas)
+        const kp = snap.players[f.by], vp = snap.players[f.seat];
+        if (kp && vp && !(teamMode && kp.team === vp.team)) callouts.push(streakText(streaks.kill(f.by, now)), colSeat(f.by), now);
+      }
       if (A.reduceFx) return;
+      hitStop.trigger(now); capPush(hitFlashes, { x, y, born: now + 60 }, 8);   // arrêt sur image 60 ms + éclat blanc sur la victime (plein éclat à la reprise du dessin)
       LUM.ajouter(x, y, CELL * 7.5, col, 760, 0.95 * lk());       // la dérésolution éclaire la grille alentour
       LUM.ajouter(x, y, CELL * 3.6, '#ffffff', 300, 0.7 * lk());
       shakeMag = Math.max(shakeMag, f.seat === mySeat ? 9 : 3.5);
@@ -620,7 +641,7 @@ export default (function () {
     const bg = g.createLinearGradient(0, -0.4 * u, 0, 0.4 * u);                                     // carénage : bords sombres, arête claire
     bg.addColorStop(0, dk); bg.addColorStop(0.5, rgbStr(mix(base, [255, 255, 255], 0.18))); bg.addColorStop(1, dk);
     body(); g.fillStyle = bg; g.fill();
-    const pat = seatPattern(g, seat, { size: Math.max(4, u * 1.3) }); if (pat) { g.fillStyle = pat; g.fill(); }
+    const pat = seatPattern(g, seat, { size: Math.max(4, u * 1.3), res: Math.round(ps * 100) / 100 }); if (pat) { g.fillStyle = pat; g.fill(); }
     g.strokeStyle = hexToLight(base); g.lineWidth = 0.07 * u; g.lineCap = 'round';                   // liserés néon latéraux
     g.beginPath(); g.moveTo(-1.8 * u, -0.29 * u); g.lineTo(0.05 * u, -0.31 * u); g.moveTo(-1.8 * u, 0.29 * u); g.lineTo(0.05 * u, 0.31 * u); g.stroke();
     g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 0.1 * u; g.beginPath(); g.moveTo(-1.9 * u, 0); g.lineTo(-0.8 * u, 0); g.stroke();   // arête dorsale
@@ -688,7 +709,7 @@ export default (function () {
     ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     if (!TH.glow) { ctx.translate(0.9, 1.4); buildPath(pts, hx, hy); ctx.strokeStyle = 'rgba(20,30,60,0.2)'; ctx.lineWidth = C * 0.86; ctx.stroke(); ctx.translate(-0.9, -1.4); }   // ombre portée
     buildPath(pts, hx, hy);
-    const pat = seatPattern(ctx, p.seat, { size: C * 1.6 });
+    const pat = seatPattern(ctx, p.seat, { size: C * 1.6, res: Math.round(cv.width / ARENA * 100) / 100 });
     if (dead) {                                                 // traînée d'un pilote éliminé : reste un MUR, bien visible, mais éteinte
       if (A.contrast) { ctx.strokeStyle = TH.glow ? '#000000' : '#1a2238'; ctx.lineWidth = C * 0.98; ctx.stroke(); }
       ctx.strokeStyle = st.deadEdge; ctx.lineWidth = C * 0.84; ctx.stroke();
@@ -857,7 +878,7 @@ export default (function () {
 
   // ───────────────────────── particules et effets d'événements ─────────────────────────
   function drawFx(now, kdt) {
-    if (A.reduceFx) { voxels.length = 0; sparks.length = 0; rings.length = 0; flashes.length = 0; embers.length = 0; cutGhosts.length = 0; }
+    if (A.reduceFx) { voxels.length = 0; sparks.length = 0; rings.length = 0; flashes.length = 0; embers.length = 0; cutGhosts.length = 0; hitFlashes.length = 0; }
     ctx.save();
     // traînées coupées qui se dissolvent en pointillés
     for (let i = cutGhosts.length - 1; i >= 0; i--) {
@@ -878,6 +899,10 @@ export default (function () {
         ctx.drawImage(spr.cv, 0, sh * j, spr.cv.width, sh, spr.x + off, spr.y + spr.h * j / 5, spr.w, spr.h / 5);
       }
       ctx.restore();
+    }
+    for (let i = hitFlashes.length - 1; i >= 0; i--) {   // éclat blanc à l'élimination (coupé par reduceFx : la liste reste vide)
+      const q = hitFlashes[i], t = (now - q.born) / 240; if (t >= 1) { hitFlashes.splice(i, 1); continue; }
+      drawFlash(ctx, q.x, q.y, CELL * 2.4, t);
     }
     if (FX) {
       // éclairs (dégradé radial : quelques-uns à la fois seulement)
@@ -924,23 +949,24 @@ export default (function () {
     ctx.globalAlpha = 1; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
     for (let i = labels.length - 1; i >= 0; i--) {
       const q = labels[i], t = (now - q.born) / 1300; if (t >= 1) { labels.splice(i, 1); continue; }
-      const x = Math.max(56, Math.min(ARENA - 56, q.x)), y = Math.max(26, Math.min(ARENA - 40, q.y - 16 - (FX ? 14 * t : 0)));
+      const f1 = rd(15), f2 = rd(10), mx = Math.max(56 * f1 / 15, q.sub ? q.sub.length * f2 * 0.42 : 0), sy = f1 * 0.5 + f2 * 0.75;   // tailles lisibles sur téléphone ; marges proportionnelles
+      const x = Math.max(mx, Math.min(ARENA - mx, q.x)), y = Math.max(f1 * 1.75, Math.min(ARENA - (q.sub ? sy + f2 : f1) - 6, q.y - 16 - (FX ? 14 * t : 0)));
       const s = !FX ? 1 : t < 0.1 ? 0.6 + 0.5 * t / 0.1 : t < 0.2 ? 1.1 - 0.1 * (t - 0.1) / 0.1 : 1;
       ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.globalAlpha = t > 0.7 ? (1 - t) / 0.3 : 1;
-      ctx.font = '800 15px ' + DISP; ctx.lineWidth = 4; ctx.strokeStyle = TH.glow ? 'rgba(2,4,10,0.9)' : 'rgba(255,255,255,0.95)'; ctx.strokeText(q.txt, 0, 0);
+      ctx.font = '800 ' + f1 + 'px ' + DISP; ctx.lineWidth = 4 * f1 / 15; ctx.strokeStyle = TH.glow ? 'rgba(2,4,10,0.9)' : 'rgba(255,255,255,0.95)'; ctx.strokeText(q.txt, 0, 0);
       ctx.fillStyle = q.col; ctx.fillText(q.txt, 0, 0);
-      if (q.sub) { ctx.font = '600 10px ' + DISP; ctx.lineWidth = 3; ctx.strokeText(q.sub, 0, 14); ctx.fillStyle = TH.glow ? '#ffffff' : TH.ink; ctx.fillText(q.sub, 0, 14); }
+      if (q.sub) { ctx.font = '600 ' + f2 + 'px ' + DISP; ctx.lineWidth = 3 * f2 / 10; ctx.strokeText(q.sub, 0, sy); ctx.fillStyle = TH.glow ? '#ffffff' : TH.ink; ctx.fillText(q.sub, 0, sy); }
       ctx.restore();
     }
     ctx.restore();
   }
 
   // ───────────────────────── alerte « obstacle devant » (joueur local) ─────────────────────────
-  function drawDanger(me, now) {
-    if (!occ || !me.path || !me.path.length) return;
+  function drawDanger(me, now) {                          // renvoie la distance (en cases) du premier obstacle, 0 si rien devant
+    if (!occ || !me.path || !me.path.length) return 0;
     const q = me.path, n = q.length; let dx = 0, dy = 0;
     if (n >= 2) { dx = Math.sign(q[n - 1][0] - q[n - 2][0]); dy = dx ? 0 : Math.sign(q[n - 1][1] - q[n - 2][1]); }
-    if (!dx && !dy) return;
+    if (!dx && !dy) return 0;
     const look = (me.speed || me.boosting) ? 6 : 4, hx = me.head.x, hy = me.head.y;
     for (let k = 1; k <= look; k++) {
       const x = hx + dx * k, y = hy + dy * k; let hit = false;
@@ -961,8 +987,9 @@ export default (function () {
       ctx.beginPath(); ctx.moveTo(cx - s, cy - s); ctx.lineTo(cx + s, cy + s); ctx.moveTo(cx + s, cy - s); ctx.lineTo(cx - s, cy + s); ctx.stroke();
       ctx.strokeRect(cx - s * 1.35, cy - s * 1.35, s * 2.7, s * 2.7);
       ctx.restore();
-      return;
+      return k;
     }
+    return 0;
   }
 
   // ───────────────────────── écran titre : « TRON » tracé comme une traînée de light-cycle ─────────────────────────
@@ -1019,46 +1046,52 @@ export default (function () {
       }
       ctx.setLineDash([]); ctx.shadowBlur = 0;
     }
-    ctx.globalAlpha = 1; ctx.fillStyle = acc; ctx.font = '600 10px ' + DISP; spaced(ctx, 'LIGHT CYCLES', cx, cy + fs * 0.78, 3.2);
+    ctx.globalAlpha = 1; ctx.fillStyle = acc; spacedFit(ctx, 'LIGHT CYCLES', cx, cy + fs * 0.78 + (rd(10) - 10) * 0.4, rd(10), 3.2);
     ctx.restore();
   }
 
   // ───────────────────────── HUD canvas : jauge de boost, bonus actifs, alerte d'inversion ─────────────────────────
   function drawGauge(me, now) {
-    const W = ARENA, bw = 176, bh = 9, bx = (W - bw) / 2, by = W - 20, b = Math.max(0, Math.min(1, (me.boost || 0) / 100));
+    // Bloc ancré au bas-centre (et l'alerte d'inversion au haut-centre), agrandi de hk sur téléphone ; les textes font au moins ~9,5 px CSS
+    const W = ARENA, k = hk, fs = Math.max(8, minU / k), u = fs / 8, bw = 176, bh = 9, bx = (W - bw) / 2, by = W - 20, b = Math.max(0, Math.min(1, (me.boost || 0) / 100));
     const hp = headPos[mySeat]; let al = 1;
-    if (hp && hp.y > by - 44 && Math.abs(hp.x - W / 2) < bw / 2 + 36) al = 0.35;  // ma moto passe dessous : la jauge s'efface
+    const tags = []; if (me.speed) tags.push('speed'); if (me.ghost) tags.push('ghost'); if (me.brk) tags.push('breaker');
+    const ph = fs * 1.75, ty = by - fs - 11 - ph, top = tags.length ? ty : by - fs - 7;   // haut du bloc (repère du bloc)
+    const topW = W - (W - top) * k;                                                 // …et en unités monde
+    if (hp && hp.y > topW - 10 && Math.abs(hp.x - W / 2) < (bw / 2 + 36) * k) al = 0.35;   // ma moto passe dessous : la jauge s'efface
     const gcol = b > 0.6 ? '#7ff0bd' : b > 0.25 ? '#9fe6ff' : '#ff7a7a';       // vert = plein, bleu = ok, rouge = à sec
-    ctx.save(); ctx.globalAlpha = al;
-    plate(ctx, bx - 26, by - 15, bw + 34, bh + 20, 5); ctx.fillStyle = 'rgba(4,8,18,0.78)'; ctx.fill();
+    ctx.save(); ctx.translate(W / 2, W); ctx.scale(k, k); ctx.translate(-W / 2, -W); ctx.globalAlpha = al;
+    plate(ctx, bx - 26 * u, by - fs - 7, bw + 34 * u, fs + bh + 13, 5); ctx.fillStyle = 'rgba(4,8,18,0.78)'; ctx.fill();
     ctx.strokeStyle = A.contrast ? '#ffffff' : rgba(TH.glow ? TH.accent : '#9fb4d8', 0.55); ctx.lineWidth = 1; ctx.stroke();
-    picto(ctx, 'bolt', bx - 14, by - 1, 6, gcol);
-    ctx.font = '600 8px ' + DISP; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left'; ctx.fillStyle = gcol; ctx.fillText('BOOST', bx, by - 4);
-    ctx.fillStyle = 'rgba(220,235,255,0.6)'; ctx.fillText('(Maj)', bx + 40, by - 4);
+    picto(ctx, 'bolt', bx - 14 * u, by - 1, 6 * u, gcol);
+    ctx.font = '600 ' + fs + 'px ' + DISP; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left'; ctx.fillStyle = gcol; ctx.fillText('BOOST', bx, by - 4);
+    if (!touch) { ctx.fillStyle = 'rgba(220,235,255,0.6)'; ctx.fillText('(Maj)', bx + ctx.measureText('BOOST').width + fs * 0.6, by - 4); }   // raccourci clavier : inutile sur écran tactile
     ctx.textAlign = 'right'; ctx.fillStyle = gcol; ctx.fillText(Math.round(b * 100) + ' %', bx + bw, by - 4);
     const N = 14, gap = 1.6, sw = (bw - gap * (N - 1)) / N, lit = b * N;
     ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); for (let i = Math.ceil(lit); i < N; i++) ctx.rect(bx + i * (sw + gap), by, sw, bh); ctx.fill();
     ctx.fillStyle = gcol; ctx.beginPath(); for (let i = 0; i < Math.floor(lit); i++) ctx.rect(bx + i * (sw + gap), by, sw, bh); ctx.fill();
     const fr = lit - Math.floor(lit); if (fr > 0.02 && lit < N) { ctx.globalAlpha = al * (0.25 + 0.75 * fr); ctx.fillRect(bx + Math.floor(lit) * (sw + gap), by, sw, bh); ctx.globalAlpha = al; }
     if (me.boosting && FX) { ctx.globalAlpha = al * (0.35 + 0.3 * Math.sin(now / 70)); ctx.fillStyle = '#ffffff'; ctx.beginPath(); for (let i = 0; i < Math.floor(lit); i++) ctx.rect(bx + i * (sw + gap), by, sw, bh); ctx.fill(); ctx.globalAlpha = al; }
-    // bonus actifs : pastilles pictogramme + nom
-    const tags = []; if (me.speed) tags.push('speed'); if (me.ghost) tags.push('ghost'); if (me.brk) tags.push('breaker');
+    // bonus actifs : pastilles pictogramme + nom (libellé court si la rangée déborderait de l'arène)
     if (tags.length) {
-      ctx.font = '600 8px ' + DISP; const ws = tags.map(t => ctx.measureText(t === 'breaker' ? 'CASSE-MUR PRÊT' : PU[t].n).width + 22), tot = ws.reduce((s, w) => s + w + 6, -6);
-      let x = W / 2 - tot / 2; const ty = by - 33;
+      ctx.font = '600 ' + fs + 'px ' + DISP;
+      const lab = (t, short) => t === 'breaker' ? (short ? 'CASSE-MUR' : 'CASSE-MUR PRÊT') : PU[t].n, widths = short => tags.map(t => ctx.measureText(lab(t, short)).width + fs * 2.75);
+      let short = false, ws = widths(false), tot = ws.reduce((s, w) => s + w + 6, -6);
+      if (tot * k > W - 10) { short = true; ws = widths(true); tot = ws.reduce((s, w) => s + w + 6, -6); }
+      let x = W / 2 - tot / 2;
       tags.forEach((t, i) => {
-        const d = PU[t]; plate(ctx, x, ty, ws[i], 14, 3); ctx.fillStyle = 'rgba(4,8,18,0.8)'; ctx.fill(); ctx.strokeStyle = d.c; ctx.lineWidth = 1; ctx.stroke();
-        picto(ctx, t, x + 8, ty + 7, 4.2, d.c); ctx.fillStyle = d.c; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(t === 'breaker' ? 'CASSE-MUR PRÊT' : d.n, x + 15, ty + 7.5);
+        const d = PU[t]; plate(ctx, x, ty, ws[i], ph, 3); ctx.fillStyle = 'rgba(4,8,18,0.8)'; ctx.fill(); ctx.strokeStyle = d.c; ctx.lineWidth = 1; ctx.stroke();
+        picto(ctx, t, x + fs, ty + ph / 2, 4.2 * u, d.c); ctx.fillStyle = d.c; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(lab(t, short), x + fs * 1.9, ty + ph / 2 + 0.5);
         x += ws[i] + 6;
       });
     }
     ctx.restore();
     if (me.inv) {                                          // alerte inversion, en haut
-      const pa = FX ? 0.65 + 0.35 * Math.sin(now / 90) : 1, c = PU.invert.c;
-      ctx.save(); ctx.globalAlpha = pa; ctx.font = '800 13px ' + DISP; const tw = ctx.measureText('CONTRÔLES INVERSÉS').width;
-      plate(ctx, W / 2 - tw / 2 - 26, 6, tw + 44, 22, 5); ctx.fillStyle = 'rgba(30,4,24,0.82)'; ctx.fill(); ctx.strokeStyle = c; ctx.lineWidth = 1.4; ctx.stroke();
-      picto(ctx, 'invert', W / 2 - tw / 2 - 12, 17, 6, c);
-      ctx.fillStyle = c; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText('CONTRÔLES INVERSÉS', W / 2 - tw / 2 + 2, 17.5);
+      const pa = FX ? 0.65 + 0.35 * Math.sin(now / 90) : 1, c = PU.invert.c, f2 = Math.max(13, minU / k), h2 = f2 * 1.7;
+      ctx.save(); ctx.translate(W / 2, 0); ctx.scale(k, k); ctx.globalAlpha = pa; ctx.font = '800 ' + f2 + 'px ' + DISP; const tw = ctx.measureText('CONTRÔLES INVERSÉS').width;
+      plate(ctx, -tw / 2 - 26, 6, tw + 44, h2, 5); ctx.fillStyle = 'rgba(30,4,24,0.82)'; ctx.fill(); ctx.strokeStyle = c; ctx.lineWidth = 1.4; ctx.stroke();
+      picto(ctx, 'invert', -tw / 2 - 12, 6 + h2 / 2, 6, c);
+      ctx.fillStyle = c; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText('CONTRÔLES INVERSÉS', -tw / 2 + 2, 6.5 + h2 / 2);
       ctx.restore();
     }
   }
@@ -1067,6 +1100,8 @@ export default (function () {
   function draw() {
     if (destroyed) return;
     const now = performance.now(), dtm = Math.min(50, Math.max(4, now - (lastFrame || now - 16.7))), kdt = dtm / 16.7; lastFrame = now;
+    if (!A.reduceFx && hitStop.frozen(now)) return;      // arrêt sur image 60 ms à chaque élimination : on garde l'image précédente (l'horloge des effets repart normalement ensuite)
+    minU = readable(0, cv, ARENA, 9.5); hk = hudK(cv, ARENA);   // taille mini de texte (unités monde) et échelle des blocs HUD, d'après la taille CSS réelle du canvas
     const sc = cv.width / ARENA, c = ARENA / 2;
     let ox = 0, oy = 0;
     if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.85; } else shakeMag = 0;
@@ -1076,8 +1111,11 @@ export default (function () {
       if (age < D) { const w = Math.sin(Math.PI * age / D), z = 1 + 0.35 * w, cpx = killcam.x * CELL + CELL / 2, cpy = killcam.y * CELL + CELL / 2; sscale = sc * z; tax = (ox * sc) * (1 - w) + (cv.width / 2 - cpx * sscale) * w; tay = (oy * sc) * (1 - w) + (cv.height / 2 - cpy * sscale) * w; }
       else killcam = null;
     }
-    ctx.setTransform(sscale, 0, 0, sscale, tax, tay);
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    if (sscale !== sc || ox || oy) {                     // killcam / tremblement : le décor ne couvre plus tout le canvas → fond peint sur TOUT le canvas (repère identité), aucune trace de l'image d'avant
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = TH.bg; ctx.fillRect(0, 0, cv.width, cv.height);
+    }
+    ctx.setTransform(sscale, 0, 0, sscale, tax, tay);
     ctx.fillStyle = TH.bg; ctx.fillRect(-20, -20, ARENA + 40, ARENA + 40);   // sous le décor : bords découverts par le tremblement
     ensureDecor(); ctx.drawImage(decorCv, 0, 0, ARENA, ARENA);
     drawAmbient(now);
@@ -1105,7 +1143,7 @@ export default (function () {
         const h = headPos[p.seat] || (headPos[p.seat] = { x: 0, y: 0, a: 0 }); h.x = hx; h.y = hy; h.a = ang; h.dx = Math.sign(dx); h.dy = Math.sign(dy);
         drawMoto(p, hx, hy, ang, now);
         if (p.boosting && FX && snap.gs === 'play' && Math.random() < 0.7 * kdt) { const rx = hx - Math.cos(ang) * 2.2 * CELL, ry = hy - Math.sin(ang) * 2.2 * CELL; capPush(embers, { x: rx, y: ry, vx: -Math.cos(ang) * 1.3 + (Math.random() - 0.5) * 0.8, vy: -Math.sin(ang) * 1.3 + (Math.random() - 0.5) * 0.8, col: colSeat(p.seat), born: now, life: 260 + Math.random() * 200 }, 160); }
-        if (over) {                                                                                // vainqueur(s) : auréole pulsée
+        if (over && snap.winner >= 0 && p.team === snap.winner) {                                  // vainqueur(s) seulement (rien en cas d'égalité) : auréole pulsée
           ctx.save(); ctx.strokeStyle = colSeat(p.seat); ctx.lineWidth = 2.2; ctx.globalAlpha = FX ? 0.5 + 0.4 * Math.sin(now / 180) : 0.8;
           ctx.beginPath(); ctx.arc(hx - Math.cos(ang) * CELL * 0.8, hy - Math.sin(ang) * CELL * 0.8, CELL * 2.2 + 3, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
           if (FX && now - lastFw > 850) { lastFw = now; const fx0 = hx + (Math.random() - 0.5) * 90, fy0 = hy + (Math.random() - 0.5) * 90; spawnSparks(fx0, fy0, 18, colSeat(p.seat), 2.6); spawnSparks(fx0, fy0, 6, '#ffffff', 1.6); LUM.ajouter(fx0, fy0, 38, colSeat(p.seat), 620, 0.6 * lk()); ring(fx0, fy0, 2, 26, colSeat(p.seat), 1.6, 520, 'sq'); }
@@ -1115,6 +1153,18 @@ export default (function () {
         const x = px(clampG(p.head.x, GW)), y = px(clampG(p.head.y, GH)), s = CELL * 0.45;
         ctx.save(); ctx.strokeStyle = tstyle(colSeat(p.seat)).deadEdge; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x - s, y - s); ctx.lineTo(x + s, y + s); ctx.moveTo(x + s, y - s); ctx.lineTo(x - s, y + s); ctx.stroke(); ctx.restore();
       }
+      // pastilles numérotées au-dessus des motos : toujours à partir de 7 pilotes, sinon pendant le décompte et 2 s après le départ
+      if (snap.gs === 'play' || snap.gs === 'countdown' || snap.gs === 'paused') {
+        let np = 0; for (const p of pl) if (p.playing) np++;
+        if (np >= 7 || snap.gs === 'countdown' || (snap.gs === 'play' && now - goAt < 2000)) {
+          const cs = readable(20, cv, ARENA, 21), off = CELL * 1.5 + cs / 2, mg = cs / 2 + 2;
+          for (const p of pl) {
+            const h = headPos[p.seat]; if (!p.playing || !p.alive || !h) continue;
+            const col = colSeat(p.seat), cc = chipCol[col] || (chipCol[col] = (() => { const r = hexRgb(col); return (0.299 * r[0] + 0.587 * r[1] + 0.114 * r[2]) > 140 ? rgbStr(mix(r, [0, 0, 0], 0.55)) : col; })());   // texte blanc : on fonce les teintes claires
+            drawSeatChip(ctx, Math.max(mg, Math.min(ARENA - mg, h.x)), Math.max(mg, Math.min(ARENA - mg, h.dy < 0 ? h.y + off : h.y - off)), p.seat, cc, cs);   // cap vers le haut : pastille sous la moto (ne masque pas l'avant)
+          }
+        }
+      }
       if (me && me.playing && me.alive && !over && headPos[mySeat] && snap.gs !== 'countdown') {
         const h = headPos[mySeat]; drawMeMarker(h.x, h.y, now);
         ECHO.dessiner(ctx, h.x + (h.dx || 0) * CELL * 0.6, h.y + (h.dy || 0) * CELL * 0.6, Math.max(9, CELL * 1.7), h.dx || 0, h.dy || 0, '#ffffff', now, !FX);
@@ -1122,7 +1172,12 @@ export default (function () {
     }
     drawFx(now, kdt);
     drawDusk(dtm);                                       // étalonnage par-dessus l'arène ; HUD, alertes et voiles restent nets
-    if (me && me.playing && me.alive && snap.gs === 'play') { drawDanger(me, now); drawGauge(me, now); }
+    const hudOn = !!(me && me.playing && me.alive && snap.gs === 'play');
+    const dk = hudOn ? drawDanger(me, now) : 0;          // croix « obstacle devant » ; dk = distance du 1er obstacle (1 = la case juste devant ma tête)
+    dangK += ((A.reduceFx || !hudOn ? 0 : dk === 1 ? 0.7 : dk === 2 ? 0.3 : 0) - dangK) * Math.min(1, dtm / 110);   // vignette rouge lissée ; reduceFx : seule la croix statique reste
+    if (dangK > 0.02) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); drawDangerVig(ctx, cv.width, cv.height, dangK, now); ctx.restore(); }   // plein canvas, indépendante du tremblement / killcam
+    if (hudOn) drawGauge(me, now);
+    callouts.draw(ctx, ARENA, ARENA, now, A);            // « DOUBLÉ ! / TRIPLÉ ! / CARNAGE ! »
     if (invFlash && now - invFlash < 700) {                 // inversion subie : liseré magenta qui pulse au bord de l'écran
       const t = (now - invFlash) / 700; ctx.save(); ctx.strokeStyle = PU.invert.c;
       for (let k = 0; k < 3; k++) { ctx.globalAlpha = (0.5 - k * 0.15) * (1 - t); ctx.lineWidth = 6 + k * 6; ctx.strokeRect(0, 0, ARENA, ARENA); }
@@ -1143,8 +1198,9 @@ export default (function () {
         }
         ctx.restore();
         if (p.seat === mySeat) {
-          ctx.save(); ctx.font = '800 10px ' + DISP; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.lineJoin = 'round'; ctx.lineWidth = 3; ctx.strokeStyle = TH.glow ? '#02060c' : '#ffffff';
-          const ly = hp.y - s - 4 - (dy < -0.5 ? CELL * 3.6 : 0); ctx.strokeText('VOUS', hp.x, ly); ctx.fillStyle = col; ctx.fillText('VOUS', hp.x, ly); ctx.restore();
+          const fv = rd(10); ctx.save(); ctx.font = '800 ' + fv + 'px ' + DISP; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.lineJoin = 'round'; ctx.lineWidth = 3 * fv / 10; ctx.strokeStyle = TH.glow ? '#02060c' : '#ffffff';
+          const ly = dy < -0.5 ? hp.y - s - 4 - CELL * 3.6 : hp.y - CELL * 1.5 - readable(20, cv, ARENA, 21) - 4;   // au-dessus de la pastille numérotée (elle passe SOUS la moto quand elle vise vers le haut)
+          ctx.strokeText('VOUS', hp.x, ly); ctx.fillStyle = col; ctx.fillText('VOUS', hp.x, ly); ctx.restore();
         }
       });
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1160,8 +1216,7 @@ export default (function () {
       if (FX && TH.glow) { ctx.shadowColor = TH.accent; ctx.shadowBlur = 20; }
       ctx.fillStyle = TH.ink; ctx.font = titleFont(n > 0 ? 64 : 40); ctx.fillText(n > 0 ? String(n) : 'GO', 0, 3);
       ctx.restore();
-      ctx.font = '600 11px ' + DISP; ctx.fillStyle = TH.ink;
-      spaced(ctx, n > 0 ? 'INITIALISATION DE LA GRILLE' : 'EN PISTE !', c, c + 80, 2.4);
+      ctx.fillStyle = TH.ink; spacedFit(ctx, n > 0 ? 'INITIALISATION DE LA GRILLE' : 'EN PISTE !', c, c + 72 + rd(11) * 0.7, rd(11), 2.4);
     }
     if (snap && (snap.gs === 'lobby' || snap.gs === 'paused')) {
       ctx.fillStyle = TH.veil; ctx.fillRect(0, 0, ARENA, ARENA); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1170,22 +1225,22 @@ export default (function () {
         ctx.font = titleFont(40);
         if (FX) { const j = Math.sin(now / 300) * 1.2; ctx.globalAlpha = 0.55; ctx.fillStyle = TH.accent2; ctx.fillText('PAUSE', c - 2 + j, c - 8); ctx.fillStyle = TH.accent; ctx.fillText('PAUSE', c + 2 - j, c - 8); ctx.globalAlpha = 1; }   // décalage chromatique
         ctx.fillStyle = TH.ink; ctx.fillText('PAUSE', c, c - 8);
-        ctx.font = '600 11px ' + DISP; ctx.fillStyle = TH.accent; spaced(ctx, 'PROGRAMME SUSPENDU', c, c + 24, 2.4);
-        ctx.fillStyle = TH.sub; ctx.font = '14px system-ui, sans-serif'; ctx.fillText('P / Échap pour reprendre', c, c + 46);
+        ctx.fillStyle = TH.accent; spacedFit(ctx, 'PROGRAMME SUSPENDU', c, c + 24, rd(11), 2.4);
+        ctx.fillStyle = TH.sub; ctx.font = rd(14) + 'px system-ui, sans-serif'; ctx.fillText(touch ? 'Touche ▶ pour reprendre' : 'P / Échap pour reprendre', c, c + 24 + Math.max(22, rd(14) * 1.5), ARENA * 0.94);   // « P / Échap » : clavier seulement
       } else {
         drawTitle(c, c - 62, now);
         const n = snap.connected || 0, nb = snap.botCount || 0, tot = n + nb;
-        ctx.fillStyle = teamMode ? TH.accent : TH.sub; ctx.font = '15px system-ui, sans-serif';
-        ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''}`, c, c + 8);
+        ctx.fillStyle = teamMode ? TH.accent : TH.sub; ctx.font = rd(15) + 'px system-ui, sans-serif';
+        ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''}`, c, c + 8, ARENA * 0.94);
         // grille de départ : une mini-moto par pilote connecté (sa couleur) + une grise par bot
         const icons = []; snap.players.forEach(p => { if (p.connected) icons.push([p.seat, colSeat(p.seat)]); });
         for (let k = 0; k < nb && icons.length < MAX_SEATS; k++) icons.push([0, TH.glow ? '#7c86a0' : '#8a93a8']);
         const gapI = 30, x0 = c - (icons.length - 1) * gapI / 2 + 7;
         icons.forEach((ic, k) => { const spr = motoSprite(ic[0], ic[1], 6); ctx.drawImage(spr.cv, x0 + k * gapI + spr.x, c + 34 + spr.y, spr.w, spr.h); });
-        ctx.font = 'bold 13px system-ui, sans-serif'; ctx.fillStyle = TH.sub;
-        const hint = tot >= 2 ? 'Espace / clic pour lancer' : 'En attente d\'un 2ᵉ pilote… (ou ajoute un bot)';
-        if (tot >= 2) { const tw = ctx.measureText(hint).width; picto(ctx, 'play', c - tw / 2 - 10, c + 62, 5, TH.accent); }
-        ctx.fillText(hint, c + (tot >= 2 ? 6 : 0), c + 62);
+        const fh = rd(13), hy = c + 52 + fh * 0.7; ctx.font = 'bold ' + fh + 'px system-ui, sans-serif'; ctx.fillStyle = TH.sub;
+        const hint = tot >= 2 ? (touch ? 'Touche l’écran pour lancer' : 'Espace / clic pour lancer') : 'En attente d\'un 2ᵉ pilote… (ou ajoute un bot)';   // « Espace » : clavier seulement
+        if (tot >= 2) { const tw = Math.min(ctx.measureText(hint).width, ARENA * 0.86); picto(ctx, 'play', c - tw / 2 - 10, hy, 5, TH.accent); }
+        ctx.fillText(hint, c + (tot >= 2 ? 6 : 0), hy, ARENA * 0.86);
       }
     }
   }
@@ -1195,12 +1250,13 @@ export default (function () {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
     if (e.key === ' ' && snap && snap.gs !== 'play' && snap.gs !== 'paused') return e.repeat ? undefined : send({ t: 'start' });
-    if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) return send({ t: 'pause' });
+    if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) return e.repeat ? undefined : send({ t: 'pause' });   // touche tenue : un seul basculement
     if ((e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !boostHeld) { boostHeld = true; send({ t: 'boost', on: true }); return; }
     const d = DIR_KEYS[e.code]; if (d && !e.repeat) { send({ t: 'dir', d }); echoVirage(d); }   // la répétition auto renvoyait la même direction ~30×/s pour rien
   };
   const onKeyUp = e => { if (e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') { boostHeld = false; send({ t: 'boost', on: false }); } };
-  const onBlur = () => { if (boostHeld) { boostHeld = false; send({ t: 'boost', on: false }); } };
+  const releaseBoost = () => { if (boostHeld || boostBtnHeld) { boostHeld = false; boostBtnHeld = false; send({ t: 'boost', on: false }); } };   // relâche le boost tenu (clavier OU bouton tactile)
+  const onBlur = releaseBoost;
   function dpad(id, d) { const el = $(id); if (!el) return; el.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t: 'dir', d }); echoVirage(d); }); }
   function echoVirage(d) { const me = snap && mySeat >= 0 && snap.players ? snap.players[mySeat] : null, h = headPos[mySeat]; if (me && me.alive && h) ECHO.appui(d, h.dx || 0, h.dy || 0, !!me.inv); }
 
@@ -1213,6 +1269,9 @@ export default (function () {
     const premiere = !cable; cable = true;
     destroyed = false;              // module singleton réutilisé : réarmer la boucle de rendu après un précédent teardown
     A = ctx0.a11y; send = ctx0.send; root = ctx0.root;
+    touch = typeof matchMedia === 'function' ? matchMedia('(pointer: coarse)').matches : 'ontouchstart' in window;   // écran tactile : on masque les indications clavier
+    music.dispose(); music = createMusic(() => actx, () => A, MUSIC_THEME);   // teardown() a disposé le précédent (singleton réutilisé)
+    boostHeld = false; boostBtnHeld = false; pnLast.length = 0; dangK = 0;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('trc'); ctx = cv.getContext('2d'); hud = $('trHud'); endEl = $('trEnd');
     const wrap = cv.parentElement;                                                  // cadre du canvas : support des bandeaux bonus/malus
@@ -1233,7 +1292,7 @@ export default (function () {
     if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
     if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
     if (premiere) { dpad('trUp', 'up'); dpad('trDown', 'down'); dpad('trLeft', 'left'); dpad('trRight', 'right'); }
-    const bb = $('trBoost'); if (bb && premiere) { const on = e => { e.preventDefault(); send({ t: 'boost', on: true }); }; const off = e => { e.preventDefault(); send({ t: 'boost', on: false }); }; bb.addEventListener('pointerdown', on); bb.addEventListener('pointerup', off); bb.addEventListener('pointerleave', off); bb.addEventListener('pointercancel', off); }
+    const bb = $('trBoost'); if (bb && premiere) { const on = e => { e.preventDefault(); boostBtnHeld = true; send({ t: 'boost', on: true }); }; const off = e => { e.preventDefault(); boostBtnHeld = false; send({ t: 'boost', on: false }); }; bb.addEventListener('pointerdown', on); bb.addEventListener('pointerup', off); bb.addEventListener('pointerleave', off); bb.addEventListener('pointercancel', off); }
     applyColors();                  // vide aussi les caches de sprites/dégradés : ils appartiennent au contexte
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
@@ -1241,7 +1300,12 @@ export default (function () {
     rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
-  function teardown() { destroyed = true; music.stop(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur); }
+  function teardown() {
+    destroyed = true; releaseBoost();                     // aucune touche/bouton ne reste « tenu » côté serveur
+    music.stop(); music.dispose(); cancelAnimationFrame(rafId);
+    removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
+    if (actx) { try { actx.close(); } catch {} actx = null; noiseBuf = null; }   // libère le contexte audio (les navigateurs en limitent le nombre) ; unlockAudio() en recrée un au prochain geste
+  }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };
 })();

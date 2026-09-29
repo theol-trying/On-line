@@ -16,6 +16,8 @@ import { arenaSize } from '../../layout.js';   // taille du plateau : commune au
 import { lumiere, creerLumieres } from '../../lumiere.js';
 import { crepuscule, creerDuel } from '../../crepuscule.js';
 import { creerJournal, blocFin } from '../../finpartie.js';
+// aides visuelles partagées (vague 2) : enchaînements « DOUBLÉ ! », arrêt sur image, éclat, vignette de danger, pastilles de siège, textes lisibles
+import { createStreaks, streakText, createCallouts, createHitStop, drawFlash, drawDanger, drawSeatChip, readable } from '../../exploits.js';
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -71,6 +73,8 @@ const PICK_COL = { bomb: '#8a86a6', flame: '#ff7a2a', speed: '#2fd49a', kick: '#
   shield: '#4aa8ff', line: '#8f82ff', reverse: '#ff4a5a', slow: '#e08a3a', auto: '#ff4a5a', skull: '#b04ae0' };
 // fond animé : ombres de nuages qui défilent doucement (identité cartoon) — coupé par reduceFx
 const AMB_CLOUDS = Array.from({ length: 5 }, () => ({ y: 0.05 + Math.random() * 0.85, v: 5 + Math.random() * 7, s: 22 + Math.random() * 26, ph: Math.random() * 1000 }));
+// pluie fine de la mort subite : 40 traits qui tombent en biais (coupée par reduceFx)
+const RAIN = Array.from({ length: 40 }, () => ({ x: Math.random(), v: 0.5 + Math.random() * 0.4, ph: Math.random() }));
 const INTERP_MS = 55;
 const KEYMAP = { ArrowUp: 'up', KeyW: 'up', KeyZ: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', KeyQ: 'left', ArrowRight: 'right', KeyD: 'right' };   // ZQSD / WASD : KeyW/KeyA = touches Z/Q en AZERTY ; KeyZ/KeyQ pour un clavier réglé en QWERTY
 const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -193,7 +197,14 @@ export default (function () {
   let blastSet = new Set();
   let lastDrop = { i: -1, t: 0 }, goAt = 0;
   let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0;
-  const music = createMusic(() => actx, () => A, MUSIC_THEME);
+  let music = createMusic(() => actx, () => A, MUSIC_THEME);   // recréée à chaque init : dispose() (teardown) est définitif
+  const streaks = createStreaks({ window: 5000 }), hitStop = createHitStop(60);
+  let callouts = createCallouts();
+  const hitFlashes = [];                              // éclats blancs d'élimination { x, y, born } (plafonnés, coupés par reduceFx)
+  let stkK = {};                                      // par siège : éliminations vues au dernier état (attribution = hausse de ⚡)
+  let minU = 0, touch = false;                        // taille mini d'un texte en unités d'arène (≥ 9 px CSS) ; écran tactile (pas d'indications clavier)
+  let dangerK = 0, dangerSm = 0, rainK = 0;           // danger : cible / lissé ; pluie de mort subite : opacité lissée
+  const rd = base => Math.max(base, minU);            // texte de base `base` (unités d'arène), relevé si l'écran est petit
   const input = { up: false, down: false, left: false, right: false };
   let hud, cards, startBtn, pauseBtn, modeBtn, genBtn, ffBtn, revBtn, botsBtn, diffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
   const DIFF_NAMES = ['Facile', 'Normale', 'Difficile'];
@@ -203,7 +214,7 @@ export default (function () {
   const cpx = c => (c + 0.5) * CELL;
   function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; FX = A.reduceFx ? 0 : 1; sprKey = ''; bgKey = ''; terrainKey = ''; seatCache = {}; overlayG = null; }
   function addP(p) { if (parts.length >= MAXP) parts.splice(0, parts.length - MAXP + 1); parts.push(p); }
-  function clearFx() { parts.length = 0; rings.length = 0; poofs.length = 0; wallAnims.length = 0; dropAnims.length = 0; scorch.length = 0; bombEnt.clear(); blastBorn.clear(); blastSet = new Set(); for (const k in anim) delete anim[k]; lastDrop = { i: -1, t: 0 }; flashes.vider(); dusk = 0; playMs = 0; }
+  function clearFx() { parts.length = 0; rings.length = 0; poofs.length = 0; wallAnims.length = 0; dropAnims.length = 0; scorch.length = 0; bombEnt.clear(); blastBorn.clear(); blastSet = new Set(); for (const k in anim) delete anim[k]; lastDrop = { i: -1, t: 0 }; flashes.vider(); dusk = 0; playMs = 0; streaks.reset(); hitFlashes.length = 0; stkK = {}; dangerSm = 0; }
   // ── éclairage dynamique : flashs d'explosion éphémères (plafonnés) + lueurs continues recalculées à chaque image
   const flashes = creerLumieres(18);
   let dusk = 0, playMs = 0;                          // crépuscule affiché (lissé) et temps de jeu vu par ce client
@@ -227,16 +238,17 @@ export default (function () {
       const shown = p.connected || p.playing;
       cards[i].classList.toggle('hidden', !shown);
       if (!shown) return;
-      const col = colSeat(i); cards[i].style.color = col; cards[i].classList.toggle('dead', p.playing && !p.alive && !p.rvn); cards[i].classList.toggle('me', i === mySeat);
+      const el = cards[i], col = colSeat(i); if (el._col !== col) { el._col = col; el.style.color = col; el._lv.style.color = col; } el.classList.toggle('dead', p.playing && !p.alive && !p.rvn); el.classList.toggle('me', i === mySeat);
       const tags = [];
       if (teamMode) tags.push(`<span class="badge" style="background:${col}28;color:${col}">ÉQ.${TEAM_LETTER[p.team]}</span>`);
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const gly = `<span class="sc" style="color:${col}" title="motif du siège">${SEAT_GLYPH[i % SEAT_GLYPH.length]}</span>`;   // glyphe = motif porté par le personnage
-      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}${esc(p.name || ('P' + (i + 1)))} ${gly} <span class="sc">${p.kills | 0} ⚡</span> ${tags.join('')}`;
-      const lv = cards[i].querySelector('.lv'); lv.style.color = col;
+      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}${esc(p.name || ('P' + (i + 1)))} ${gly} <span class="sc">${p.kills | 0} ⚡</span> ${tags.join('')}`;
+      if (pnH !== el._pnH) { el._pnH = pnH; el._pn.innerHTML = pnH; }   // innerHTML seulement si la chaîne change (pas de reconstruction du DOM à chaque état)
       const ab = [p.kick ? '🦵' : '', p.remote ? '📡' : '', p.ghost ? '👻' : '', p.throw ? '🧤' : '', p.line ? '📏' : '', p.shield ? '🛡' : '', p.rev ? '🔀' : '', p.slow ? '🐌' : '', p.auto ? '⏱' : '', p.skull ? '💀' : ''].filter(Boolean).join('');
-      lv.innerHTML = p.playing ? (p.alive ? `💣${p.bombs} 🔥${p.power} 👟${p.speed}${ab ? ' · ' + ab : ''}` : (p.rvn ? '☠ revanche (bord)' : '✖ éliminé')) : 'prêt';
+      const lvH = p.playing ? (p.alive ? `💣${p.bombs} 🔥${p.power} 👟${p.speed}${ab ? ' · ' + ab : ''}` : (p.rvn ? '☠ revanche (bord)' : '✖ éliminé')) : 'prêt';
+      if (lvH !== el._lvH) { el._lvH = lvH; el._lv.innerHTML = lvH; }
     });
   }
   function renderLB() {
@@ -260,13 +272,13 @@ export default (function () {
     const rows = parts2.map(p => {
       const col = colSeat(p.seat), medal = medals[p.place - 1] || ('#' + p.place);
       const res = p.alive ? (champ && p.team === champ.team ? 'dernier bonbon debout' : 'survivant·e') : `a sauté à ${Math.round((p.elimTick || 0) / TICK_HZ)}s`;
-      return `<div class="erow ${p.alive ? 'win' : ''}"><span class="eplace">${medal}</span>
+      return `<div class="erow ${p.alive && champ && p.team === champ.team ? 'win' : ''}"><span class="eplace">${medal}</span>
         <span class="ename" style="color:${col}">${esc(p.name || ('P' + (p.seat + 1)))}${teamMode ? ` <small>Éq.${TEAM_LETTER[p.team]}</small>` : ''}${mvp && mvp.seat === p.seat ? ' <small>⭐ MVP</small>' : ''}</span>
         <span class="estat">⚡ ${p.kills | 0}</span><span class="eres">${res}</span></div>`;
     }).join('');
     const mvpLine = mvp ? `<div class="emeta">⭐ MVP : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.kills} élimination${mvp.kills > 1 ? 's' : ''}</div>` : '';
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : '#fff'}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} bombeur${m.stats.nParts > 1 ? 's' : ''}</div>${mvpLine}<div class="elist">${rows}</div>${blocFin(J, { titre: 'Puissance 💣 + 🔥 au fil de la manche', couleur: colSeat, nom: nomSeat })}<div class="ehint">Espace / clic pour rejouer</div>`;
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} bombeur${m.stats.nParts > 1 ? 's' : ''}</div>${mvpLine}<div class="elist">${rows}</div>${blocFin(J, { titre: 'Puissance 💣 + 🔥 au fil de la manche', couleur: colSeat, nom: nomSeat })}<div class="ehint">${touch ? 'Touchez pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
   }
   // Journal tenu à chaque état reçu (aucune donnée serveur en plus) : puissance par bombeur + faits marquants.
   // Le serveur ne dit pas qui a tué qui : on le déduit de la hausse des éliminations (⚡) d'un état à l'autre.
@@ -296,6 +308,19 @@ export default (function () {
       if (jSd && m.stats && !m.stats.solo) m.players.forEach(p => { if (p.playing && p.alive) J.moment(now, p.seat, 'tient jusqu\'au bout de la mort subite', 4); });
       J.fin();
     }
+  }
+
+  // Enchaînements : le serveur ne dit pas qui a tué qui (le 'boom' ne porte que la victime), mais la hausse des
+  // éliminations (⚡) d'un siège d'un état à l'autre donne l'auteur, comme pour le journal. 2 éliminations dans les
+  // 5 s = « DOUBLÉ ! », 3 = « TRIPLÉ ! », 4+ = « CARNAGE ! » (les éliminations de l'équipe comptent : le ⚡ aussi).
+  function trackStreaks(m, now) {
+    const live = m.gs === 'play' || m.gs === 'over';
+    m.players.forEach(p => {
+      const k = p.kills | 0, k0 = stkK[p.seat]; stkK[p.seat] = k;
+      if (!live || k0 == null || k <= k0) return;      // première vue (arrivée en cours) ou remise à zéro : simple ligne de base
+      let n = 0; for (let i = k0; i < k; i++) n = streaks.kill(p.seat, now);
+      const t = streakText(n); if (t) callouts.push(t, colSeat(p.seat), now);
+    });
   }
 
   // ───────────────────────── état réseau ─────────────────────────
@@ -342,7 +367,7 @@ export default (function () {
       const fa = booms.length > 1 ? 0.95 / Math.sqrt(booms.length) : 0.95;
       for (let i = 0; i < booms.length && i < 6; i++) flashes.ajouter(cpx(booms[i] % GW), cpx((booms[i] / GW) | 0), CELL * 3.2, '#ffc864', 560, fa);
     }
-    journal(m, now);
+    journal(m, now); trackStreaks(m, now);
     (m.fx || []).forEach(playFx);
     if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); confettiRain(); }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte musical 3·2·1
@@ -515,6 +540,7 @@ export default (function () {
       psound('pouf', f.x); music.sting('kill');
       poofs.push({ x, y, seat: f.seat, name: snap ? nomAvatar(snap.players[f.seat]) : null, born: now, an: anim[f.seat] ? { dir: anim[f.seat].dir, ph: 0, mv: false } : null }); if (poofs.length > 12) poofs.shift();
       if (A.reduceFx) return;
+      hitStop.trigger(now); hitFlashes.push({ x, y, born: now + 60 }); if (hitFlashes.length > 8) hitFlashes.shift();   // arrêt sur image 60 ms, puis éclat blanc sur la victime
       shake(f.seat === mySeat ? 9 : 5);
       const col = colSeat(f.seat);
       bits(x, y, 12, [col, K.cream, K.lemon, K.pink], 2.8, 900);
@@ -742,6 +768,7 @@ export default (function () {
 
   // ───────────────────────── personnages ─────────────────────────
   let seatCache = {}, seatN = 0;
+  const patRes = () => Math.round(PXU * 4) / 4;        // px appareil par unité d'arène, arrondi au quart : la tuile du motif n'est pas reconstruite à chaque image
   function seatStyle(seat, col) {                    // dégradés en repère local (réutilisables d'une image à l'autre)
     const key = seat + '|' + col; if (seatCache[key]) return seatCache[key];
     if (++seatN > 60) { seatCache = {}; seatN = 0; }
@@ -805,7 +832,7 @@ export default (function () {
     }
     // ── tête : casque (couleur + motif du siège), reflet, visière
     ctx.beginPath(); ctx.arc(0, hy, 10, 0, TAU); ctx.fillStyle = S.head; ctx.fill();
-    const pat = seatPattern(ctx, seat, { size: 8, ink: 'rgba(255,255,255,0.36)' });
+    const pat = seatPattern(ctx, seat, { size: 8, ink: 'rgba(255,255,255,0.36)', res: patRes() });   // res : motif net sur écran Retina
     if (pat) { ctx.fillStyle = pat; ctx.fill(); }
     ctx.strokeStyle = K.ink; ctx.lineWidth = 1.6; ctx.stroke();
     ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); oval(ctx, -3.6, hy - 5.2, 3.2, 1.6); ctx.fill();
@@ -862,7 +889,7 @@ export default (function () {
     for (let k = 0; k < 3; k++) { const x0 = 10 - k * 6.67; ctx.quadraticCurveTo(x0 - 3.3, 4 + (k % 2 ? -wv : wv), x0 - 6.67, 8); }
     ctx.closePath();
     ctx.fillStyle = col; ctx.fill();
-    const pat = seatPattern(ctx, seat, { size: 8, ink: 'rgba(255,255,255,0.36)' }); if (pat) { ctx.fillStyle = pat; ctx.fill(); }
+    const pat = seatPattern(ctx, seat, { size: 8, ink: 'rgba(255,255,255,0.36)', res: patRes() }); if (pat) { ctx.fillStyle = pat; ctx.fill(); }
     ctx.strokeStyle = me ? '#fff' : K.ink; ctx.lineWidth = me ? 2 : 1.5; ctx.stroke();
     ctx.globalAlpha = 1;
         ctx.fillStyle = K.ink; ctx.beginPath(); oval(ctx, -3.6, -3, 2, 2.8); oval(ctx, 3.6, -3, 2, 2.8); ctx.fill();
@@ -941,14 +968,28 @@ export default (function () {
     flashes.dessiner(ctx, now);
   }
   function drawRange(now) {                          // prévisualisation de portée des bombes
+    const me = snap.gs === 'play' && mySeat >= 0 ? snap.players[mySeat] : null, meOk = !!(me && me.playing && me.alive);
+    const mgx = meOk ? Math.floor(me.x / CELL) : -1, mgy = meOk ? Math.floor(me.y / CELL) : -1;
+    let dMin = 999;                                   // mèche la plus courte parmi les bombes (< 1 s) dont la portée me couvre
     (snap.bombs || []).forEach(b => {
       const danger = b.f <= 30;                                   // mèche < ~1 s : on alerte
       const a = danger ? (A.reduceFx ? 0.32 : 0.16 + 0.22 * (0.5 + 0.5 * Math.sin(now / 80))) : 0.11;
       const cells = rangeCells(snap.grid, b.x, b.y, b.p);
+      if (meOk && !b.r && b.f <= 30 && b.f < dMin && ((b.x === mgx && b.y === mgy) || cells.some(c => c[0] === mgx && c[1] === mgy))) dMin = b.f;
       ctx.fillStyle = `rgba(255,${danger ? 90 : 170},60,${a})`; ctx.beginPath();
       cells.forEach(([gx, gy]) => rr(ctx, gx * CELL + 3, gy * CELL + 3, CELL - 6, CELL - 6, 7)); ctx.fill();
       if (danger || A.contrast) { ctx.strokeStyle = `rgba(255,${danger ? 110 : 190},70,${danger ? 0.55 : 0.4})`; ctx.lineWidth = 1.5; ctx.stroke(); }
     });
+    dangerK = dMin < 999 ? 0.4 + 0.6 * (1 - dMin / 30) : 0;   // plus la mèche est courte, plus la vignette est franche
+  }
+  // pluie fine de la mort subite (traits obliques, un seul tracé) ; opacité lissée dans draw() ; rien avec reduceFx
+  function drawRain(now) {
+    const span = ARENA + 40;
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineWidth = A.contrast ? 1.8 : 1.2;
+    ctx.strokeStyle = A.contrast ? '#ebf5ff' : '#bed7ff'; ctx.globalAlpha = rainK * (A.contrast ? 0.6 : 0.36);
+    ctx.beginPath();
+    for (let i = 0; i < RAIN.length; i++) { const r = RAIN[i], x = r.x * ARENA, y = (now * r.v + r.ph * span) % span - 20; ctx.moveTo(x + 2, y - 6); ctx.lineTo(x - 2, y + 6); }
+    ctx.stroke(); ctx.restore();
   }
   function drawDropWarn(now) {                        // mort subite : ombre du prochain bloc qui grandit avant l'impact
     if (!snap.sd || snap.gs !== 'play' || lastDrop.i < 0 || !spiral) return;
@@ -982,7 +1023,7 @@ export default (function () {
     }
   }
   function drawBombs(now, kdt) {
-    ctx.font = `800 12px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    ctx.font = `800 ${Math.min(18, Math.round(rd(12)))}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';   // compte à rebours de la bombe : ≥ 9 px CSS
     (snap.bombs || []).forEach(b => {
       const key = b.y * GW + b.x; let e = bombEnt.get(key);
       if (!e) { e = { born: now - 1000, ph: 0, t0: 0, dur: 0 }; bombEnt.set(key, e); }
@@ -1040,6 +1081,9 @@ export default (function () {
   }
   function drawPlayers(now) {
     const pv = viewPlayers(now), over = snap.gs === 'over', list = [];
+    const wt = typeof snap.winner === 'number' ? snap.winner : -1;   // équipe gagnante (null en cours de manche, -1 = égalité : personne n'est couronné)
+    const nPl = snap.players.reduce((n, p) => n + (p.playing ? 1 : 0), 0);
+    const chipsOn = (snap.gs === 'play' || snap.gs === 'countdown') && (nPl >= 7 || snap.gs === 'countdown' || now - goAt < 2000);   // pastilles : ≥ 7 joueurs, décompte, 2 s après le départ
     snap.players.forEach(p => {
       if (!p.playing) return;
       const t = (pv && pv[p.seat]) || p;
@@ -1048,7 +1092,7 @@ export default (function () {
       if (d < 30 && d > 0.05) { an.ph += d * 0.32; an.mt = now; if (Math.abs(dx) > Math.abs(dy) * 1.3) an.dir = dx > 0 ? 0 : 2; else if (Math.abs(dy) > Math.abs(dx) * 1.3) an.dir = dy > 0 ? 1 : 3; }
       an.x = t.x; an.y = t.y; an.mv = now - an.mt < 110;
       if (!p.alive) { if (p.rvn) list.push({ p, t, an, rv: true }); return; }
-      list.push({ p, t, an, rv: false });
+      list.push({ p, t, an, rv: false, crown: over && wt >= 0 && p.team === wt });   // couronne : seulement l'équipe gagnante (jamais en cas d'égalité)
     });
     list.sort((a, b) => a.t.y - b.t.y);
     for (const e of list) {
@@ -1064,16 +1108,22 @@ export default (function () {
         drawRevenant(p.seat, t.x, t.y, p.seat === mySeat, now, nomAvatar(p));
         continue;
       }
-      drawBomber(p.seat, t.x, t.y, { an: e.an, name: nomAvatar(p), me: p.seat === mySeat && !over, crown: over, ghost: p.ghost, invuln: p.invuln, shield: p.shield > 0, kick: p.kick, throw: p.throw, remote: p.remote, line: p.line, rev: p.rev, slow: p.slow, auto: p.auto, skull: p.skull, speed: p.speed | 0 }, now);
+      drawBomber(p.seat, t.x, t.y, { an: e.an, name: nomAvatar(p), me: p.seat === mySeat && !over, crown: e.crown, ghost: p.ghost, invuln: p.invuln, shield: p.shield > 0, kick: p.kick, throw: p.throw, remote: p.remote, line: p.line, rev: p.rev, slow: p.slow, auto: p.auto, skull: p.skull, speed: p.speed | 0 }, now);
       if (FX && (p.skull || p.ghost) && Math.random() < 0.05) addP({ k: 'bub', x: t.x + (Math.random() - 0.5) * 16, y: t.y - 4, vx: 0, vy: -0.5, z: 0, vz: 0, born: now, life: 700, r: 1.5 + Math.random() * 1.5, col: p.skull ? '192,112,240' : '220,215,255', rot: 0, vr: 0 });
     }
     for (let i = poofs.length - 1; i >= 0; i--) if (!drawPoof(poofs[i], now)) poofs.splice(i, 1);
+    for (let i = hitFlashes.length - 1; i >= 0; i--) { const h = hitFlashes[i], t = (now - h.born) / 240; if (t >= 1) { hitFlashes.splice(i, 1); continue; } if (t >= 0) drawFlash(ctx, h.x, h.y, CELL * 0.8, t); }   // éclat blanc d'élimination (né après l'arrêt sur image)
     // étiquettes par-dessus tous les sprites (nom, ou « VOUS »)
-    ctx.font = 'bold 10px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.lineJoin = 'round';
+    const lfs = Math.round(rd(10));                   // ≥ 9 px CSS même sur petit écran ; noms raccourcis quand le texte grossit (pas de chevauchement)
+    ctx.font = 'bold ' + lfs + 'px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.lineJoin = 'round';
+    const nmax = lfs > 12 ? 5 : 8, chipS = Math.min(CELL, Math.max(17, minU * 1.9));
     for (const e of list) {
       if (e.rv) continue;
-      const p = e.p, lab = p.seat === mySeat ? 'VOUS' : (p.name || ('P' + (p.seat + 1))).slice(0, 8), ly = e.t.y - (over ? 35 : 25);
+      const p = e.p, lab = p.seat === mySeat ? 'VOUS' : (p.name || ('P' + (p.seat + 1))).slice(0, nmax), ly = e.t.y - (e.crown ? 35 : 25);
       ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(35,19,38,0.85)'; ctx.strokeText(lab, e.t.x, ly); ctx.fillStyle = p.seat === mySeat ? K.lemon : '#fff'; ctx.fillText(lab, e.t.x, ly);
+      if (chipsOn || (p.invuln && snap.gs === 'play')) {   // pastille numérotée au-dessus du nom : toujours à ≥ 7 joueurs, sinon décompte / départ / retour de revanche (2 s d'invulnérabilité)
+        drawSeatChip(ctx, Math.max(chipS / 2, Math.min(ARENA - chipS / 2, e.t.x)), Math.max(chipS / 2 + 1, ly - lfs - chipS / 2 - 2), p.seat, colSeat(p.seat), chipS);
+      }
     }
   }
   function drawDrops(now) {                           // blocs de mort subite en chute (ombre au sol qui grandit)
@@ -1150,7 +1200,15 @@ export default (function () {
     ctx.restore();
     return { right: x, fs };
   }
-  function inkText(s, x, y, font, fill) { ctx.font = font; ctx.lineJoin = 'round'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(28,10,32,0.85)'; ctx.strokeText(s, x, y); ctx.fillStyle = fill; ctx.fillText(s, x, y); }
+  // maxW (optionnel) : si le texte déborde, il est comprimé en largeur autour de son point d'ancrage (reste dans le canvas)
+  function inkText(s, x, y, font, fill, maxW) {
+    ctx.font = font; ctx.lineJoin = 'round'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(28,10,32,0.85)';
+    const w = maxW ? ctx.measureText(s).width : 0, k = w > maxW ? maxW / w : 1;
+    if (k < 1) { ctx.save(); ctx.translate(x, y); ctx.scale(k, 1); x = 0; y = 0; }
+    ctx.strokeText(s, x, y); ctx.fillStyle = fill; ctx.fillText(s, x, y);
+    if (k < 1) ctx.restore();
+  }
+  const sf = (base, bold) => (bold === false ? '' : 'bold ') + Math.round(rd(base)) + 'px system-ui,sans-serif';   // police système lisible (≥ 9 px CSS)
   function playTri(x, y, s, col) { ctx.fillStyle = col; ctx.strokeStyle = K.ink; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x - s * 0.5, y - s * 0.6); ctx.lineTo(x + s * 0.6, y); ctx.lineTo(x - s * 0.5, y + s * 0.6); ctx.closePath(); ctx.fill(); ctx.stroke(); }
   function drawConfetti(now) {                        // vermicelles qui tombent en boucle sur l'écran titre (sans allocation)
     if (!FX) return;
@@ -1182,12 +1240,12 @@ export default (function () {
     ctx.save(); ctx.translate(w.right + w.fs * 0.1, c - 46 - w.fs * 0.05); drawFuse(w.fs / 26, 1, true, now, 9); ctx.restore();   // mèche allumée au bout du mot
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const n = snap.connected, nb = snap.botCount || 0;
-    inkText(`${n} joueur${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n + nb < 2 ? ' (solo : entraînement)' : '')}`, c, c + 4, '15px system-ui,sans-serif', teamMode ? '#9fd0ff' : 'rgba(255,244,226,.9)');
+    inkText(`${n} joueur${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : (n + nb < 2 ? ' (solo : entraînement)' : '')}`, c, c + 4, sf(15, false), teamMode ? '#9fd0ff' : 'rgba(255,244,226,.9)', ARENA - 16);
     let y = c + 28;
-    if (snap.revenge) { const txt = 'Revanche — les morts bombardent depuis le bord et peuvent revenir'; ctx.font = 'bold 13px system-ui,sans-serif'; const tw = Math.min(ctx.measureText(txt).width, ARENA - 40); drawPickIcon(ctx, 'skull', c - tw / 2 - 10, y, 8); inkText(txt, c + 6, y, 'bold 13px system-ui,sans-serif', '#ff9b6b'); y += 24; }
-    const hint = 'Espace / clic pour allumer la mèche'; ctx.font = 'bold 14px system-ui,sans-serif'; const hw = ctx.measureText(hint).width;
+    if (snap.revenge) { const txt = 'Revanche — les morts bombardent depuis le bord et peuvent revenir'; ctx.font = sf(13); const tw = Math.min(ctx.measureText(txt).width, ARENA - 40); drawPickIcon(ctx, 'skull', c - tw / 2 - 10, y, 8); inkText(txt, c + 6, y, sf(13), '#ff9b6b', ARENA - 40); y += 24; }
+    const hint = touch ? 'Touchez pour allumer la mèche' : 'Espace / clic pour allumer la mèche'; ctx.font = sf(14); const hw = Math.min(ctx.measureText(hint).width, ARENA - 40);   // écran tactile : pas d'indication clavier
     const pulse = FX ? 0.75 + 0.25 * Math.sin(now / 300) : 1;
-    ctx.globalAlpha = pulse; playTri(c - hw / 2 - 12, y + 6, 11, K.lemon); inkText(hint, c + 4, y + 6, 'bold 14px system-ui,sans-serif', K.cream); ctx.globalAlpha = 1;
+    ctx.globalAlpha = pulse; playTri(c - hw / 2 - 12, y + 6, 11, K.lemon); inkText(hint, c + 4, y + 6, sf(14), K.cream, ARENA - 40); ctx.globalAlpha = 1;
   }
   function drawCountdown(now) {
     const c = ARENA / 2, n = snap.count || 0;
@@ -1196,7 +1254,7 @@ export default (function () {
     ctx.save(); ctx.translate(c, c - 6); ctx.scale(pulse, pulse); bigBomb(0, 0, 44, n > 0 ? n / 3 : 0.1, true, now); ctx.restore();
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = `800 64px ${FONT}`; ctx.lineJoin = 'round'; ctx.lineWidth = 8; ctx.strokeStyle = K.ink; ctx.strokeText(n > 0 ? '' + n : '!', c - 3, c + 2); ctx.fillStyle = '#fff'; ctx.fillText(n > 0 ? '' + n : '!', c - 3, c + 2);
-    inkText(n > 0 ? 'Mèche allumée…' : 'BOUM !', c, c + 72, 'bold 15px system-ui,sans-serif', K.cream);
+    inkText(n > 0 ? 'Mèche allumée…' : 'BOUM !', c, c + 72, sf(15), K.cream, ARENA - 16);
   }
   function drawGoBurst(now) {                          // « BOUM ! » de bande dessinée au lancement
     const T = FX ? 650 : 450, t = (now - goAt) / T; if (!goAt || t >= 1 || t < 0) return;
@@ -1214,13 +1272,15 @@ export default (function () {
     if (FX) { ctx.save(); ctx.strokeStyle = 'rgba(220,210,230,0.55)'; ctx.lineWidth = 2.4; ctx.lineCap = 'round'; const s = 24 / 11.5, tip = fuseAt(0.55), tx = c + tip[0] * s, ty = c - 74 + tip[1] * s; ctx.beginPath(); ctx.moveTo(tx, ty); for (let k = 1; k <= 8; k++) ctx.lineTo(tx + Math.sin(now / 400 + k * 0.9) * (2 + k * 0.6), ty - k * 4); ctx.stroke(); ctx.restore(); }
     candyWord('PAUSE', c, c - 4, 42, now, false, [K.pink, K.lemon, K.mint, K.sky, K.orange], ARENA * 0.7);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    inkText('Mèche soufflée — P / Échap pour reprendre', c, c + 36, '14px system-ui,sans-serif', 'rgba(255,244,226,.85)');
+    inkText(touch ? 'Mèche soufflée — touchez ▶ pour reprendre' : 'Mèche soufflée — P / Échap pour reprendre', c, c + 36, sf(14, false), 'rgba(255,244,226,.85)', ARENA - 16);   // écran tactile : pas d'indication clavier
   }
 
   function draw() {
     if (destroyed) return;
     const now = performance.now(), dtMs = Math.min(100, Math.max(0, now - (lastFrame || now - 16.7))), kdt = Math.min(3, Math.max(0.25, dtMs / 16.7)); lastFrame = now;
     const sc = cv.width / ARENA; PXU = sc;
+    minU = readable(0, cv, ARENA, 9);                 // plancher des textes du canvas : 9 px CSS exprimés en unités d'arène
+    if (hitStop.frozen(now) && !A.reduceFx) return;   // arrêt sur image (60 ms) à chaque élimination : on garde la dernière image (lastFrame déjà à jour : pas de saut de particules)
     // Arène qui évolue : l'après-midi dore à l'approche de la mort subite (dès 45 s de jeu, elle tombe à 65 s),
     // puis la nuit gagne à mesure que la spirale de blocs se referme. Lissé ; figé sur l'écran de fin.
     if (snap) {
@@ -1255,11 +1315,16 @@ export default (function () {
       drawDrops(now);
     }
     drawParticles(now, kdt);
+    rainK += ((FX && snap && snap.sd && snap.gs === 'play' ? 1 : 0) - rainK) * Math.min(1, dtMs / 500);
+    if (rainK > 0.02) drawRain(now);
     // étalonnage jour → crépuscule par-dessus l'arène (sol, pièces, particules), sous les écrans ; plafonné
     // loin du noir. « Réduire les effets » l'atténue sans soleil rasant (il reste une information : la manche s'achève).
     if (snap && snap.grid && dusk > 0.01) crepuscule(ctx, -12, -12, ARENA + 24, ARENA + 24, Math.min(0.86, dusk), { soleil: FX ? 'haut' : false, force: A.contrast ? 0.55 : (FX ? 1 : 0.7) });
     if (snap && snap.grid && snap.sd && snap.gs === 'play') { ctx.strokeStyle = `rgba(255,60,60,${FX ? 0.3 + 0.25 * Math.sin(now / 160) : 0.45})`; ctx.lineWidth = 6; ctx.strokeRect(3, 3, ARENA - 6, ARENA - 6); }   // mort subite : cadre qui palpite (au-dessus du crépuscule : reste vif)
     if (snap && snap.gs === 'play') drawGoBurst(now);
+    dangerSm += (dangerK - dangerSm) * Math.min(1, dtMs / 90); dangerK = 0;
+    if (dangerSm > 0.02) { ctx.save(); ctx.setTransform(sc, 0, 0, sc, 0, 0); drawDanger(ctx, ARENA, ARENA, A.reduceFx ? Math.min(0.6, dangerSm) : Math.min(1, dangerSm * (A.contrast ? 1.3 : 1)), A.reduceFx ? 0 : now); ctx.restore(); }   // je suis dans la portée d'une bombe qui saute dans < 1 s (reduceFx : vignette fixe, sans pulsation)
+    if (snap && (snap.gs === 'play' || snap.gs === 'over')) callouts.draw(ctx, ARENA, ARENA, now, A);   // « DOUBLÉ ! » / « TRIPLÉ ! » / « CARNAGE ! »
     if (snap && snap.gs === 'countdown') drawCountdown(now);
     if (snap && snap.gs === 'paused') drawPause(now);
     if (snap && snap.gs === 'lobby') { overlay(0.62); drawLobby(now); }
@@ -1271,13 +1336,14 @@ export default (function () {
   function setIn(k, v) { if (input[k] === v) return; input[k] = v; pushInput(); }
   const onKeyDown = e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+    if (e.repeat) return;                             // touche TENUE : jamais de renvoi (bombe, action, pause, « Rejouer » ; le mouvement n'a besoin que du 1er appui)
     unlockAudio();
     const playing = snap && (snap.gs === 'play' || snap.gs === 'paused');
-    if (e.key === ' ') { if (snap && snap.gs !== 'play' && snap.gs !== 'paused') { if (!e.repeat) send({ t: 'start' }); } else send({ t: 'bomb' }); return; }   // Espace TENU au moment de la fin : pas un « Rejouer »
+    if (e.key === ' ') { if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); else send({ t: 'bomb' }); return; }
     if (e.code === 'KeyB' && playing) { send({ t: 'bomb' }); return; }
     if ((e.code === 'KeyX' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && playing) { send({ t: 'action' }); return; }
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && playing) { send({ t: 'pause' }); return; }
-    const a = KEYMAP[e.code]; if (a && !e.repeat) setIn(a, true);
+    const a = KEYMAP[e.code]; if (a) setIn(a, true);
   };
   const onKeyUp = e => { const a = KEYMAP[e.code]; if (a) setIn(a, false); };
   const onBlur = () => { let ch = false; for (const k in input) if (input[k]) { input[k] = false; ch = true; } if (ch) pushInput(); };
@@ -1299,7 +1365,7 @@ export default (function () {
     const wrap = cv.parentElement;   // conteneur .canvas-wrap : accueille les bandeaux bonus/malus
     initGameMsg(wrap && wrap.classList.contains('canvas-wrap') ? wrap : null);
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
-    cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
+    cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; el._pn = el.querySelector('.pn'); el._lv = el.querySelector('.lv'); el._pnH = el._lvH = el._col = null; hud.appendChild(el); return el; });
     startBtn = $('bmStart'); pauseBtn = $('bmPause'); modeBtn = $('bmMode'); genBtn = $('bmGen'); ffBtn = $('bmFf'); revBtn = $('bmRevenge'); botsBtn = $('bmBots'); pauseFloat = $('bmPauseFloat'); lbBtn = $('bmLbBtn'); lbPanel = $('bmLbPanel'); lbBody = $('bmLbBody');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' }); pauseFloat.onclick = () => send({ t: 'pause' }); modeBtn.onclick = () => send({ t: 'mode' }); genBtn.onclick = () => send({ t: 'gen' }); ffBtn.onclick = () => send({ t: 'ff' });
@@ -1315,11 +1381,21 @@ export default (function () {
     const act = $('bmAct'); if (act && premiere) act.addEventListener('pointerdown', e => { e.preventDefault(); send({ t: 'action' }); });
     applyColors(); resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
+    try { touch = ('ontouchstart' in window) || !!(window.matchMedia && matchMedia('(pointer: coarse)').matches); } catch (e) { touch = false; }   // écran tactile : pas d'indications clavier
+    callouts = createCallouts(); streaks.reset(); hitFlashes.length = 0; stkK = {}; dangerSm = 0; rainK = 0;   // pas d'annonces / états hérités d'une visite précédente
+    music.dispose(); music = createMusic(() => actx, () => A, MUSIC_THEME);   // teardown = dispose() définitif : nouvelle instance (et nouvel écouteur visibilitychange) à chaque retour
     music.start();
     rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
-  function teardown() { destroyed = true; music.stop(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur); }
+  function teardown() {
+    destroyed = true; music.stop(); music.dispose(); cancelAnimationFrame(rafId);
+    removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
+    let held = false; for (const k in input) if (input[k]) { input[k] = false; held = true; }
+    if (held) { try { pushInput(); } catch (e) {} }   // touches tenues relâchées côté serveur aussi (un « tout relâché » est inoffensif si le hub a déjà changé de jeu)
+    if (actx) { try { const pr = actx.close(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {} actx = null; } noiseBuf = null;   // l'AudioContext est fermé ; unlockAudio() en recrée un au retour
+    hitFlashes.length = 0; streaks.reset(); dangerSm = 0; rainK = 0;
+  }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };
 })();
