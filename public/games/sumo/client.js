@@ -10,6 +10,7 @@ import { arenaSize } from '../../layout.js';   // taille du plateau : commune à
 import { lumiere, creerLumieres } from '../../lumiere.js';      // lanternes, charges, ondes et sorties éclairent l'argile
 import { crepuscule, creerDuel } from '../../crepuscule.js';               // le jour tombe à mesure que la paille se referme
 import { creerJournal, blocFin } from '../../finpartie.js';     // courbe du combat + meilleure action à l'écran de fin
+import { createStreaks, streakText, createCallouts, createHitStop, drawFlash, drawDanger, drawSeatChip, readable, hudK } from '../../exploits.js';   // aides visuelles partagées (séries, arrêt sur image, vignette, pastilles)
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -98,12 +99,20 @@ export default (function () {
   const LUM = creerLumieres(24), J = creerJournal({ pas: 500 });
   let duskV = 0, sdT0 = 0, jRound = -1, jLast = -1e9;
   let edge = {}, outChain = {}, hitAt = {};            // par siège : passage au bord, sorties en série, dernier contact subi
-  const music = createMusic(() => actx, () => A, MUSIC_THEME);
+  // musique recréée à chaque init() : dispose() (teardown) est définitif pour l'instance ; NOMUSIC évite tout accès à null entre deux jeux
+  const NOMUSIC = { start() {}, stop() {}, setIntensity() {}, sting() {}, dispose() {} };
+  let music = NOMUSIC;
   const input = { up: false, down: false, left: false, right: false };
+  let staleInput = false;                               // une touche était tenue au teardown : on renvoie « tout relâché » au retour
+  const bursts = [], flashes = [];                      // éclats de ramassage (par palier d'onigiri) / éclats blancs de sortie
+  const STREAK = createStreaks({ window: 5000 }), CALL = createCallouts(), HS = createHitStop(60);
+  let goT0 = -1e9, petK = 0;                            // départ de manche (pastilles de siège 2 s) / fondu des pétales
+  const TOUCH = typeof matchMedia === 'function' ? matchMedia('(pointer: coarse)').matches : 'ontouchstart' in window;   // indications clavier masquées sur tactile (un portable à écran tactile garde ses indices)
   let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, diffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl, dashBtn, braceBtn;
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team % TEAMCC.length] : CC[s % CC.length]; };
+  const winTeam = m => (m && typeof m.winner === 'number' && m.winner >= 0) ? m.winner : -1;   // équipe gagnante, -1 = égalité / pas de vainqueur (null >= 0 est vrai en JS !)
   const nameOf = s => { const p = snap && snap.players[s]; return p ? (p.name || ('P' + (s + 1))) : '?'; };
   function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; FX = A.reduceFx ? 0 : 1; decorKey = ''; bodyCache = {}; if (A.reduceFx) LUM.vider(); }
 
@@ -131,15 +140,17 @@ export default (function () {
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const glyph = SEAT_GLYPH[i % SEAT_GLYPH.length];   // constante : rappel du motif peint sur la mawashi
-      cards[i].querySelector('.pn').innerHTML = `${(window.__AV && window.__AV(p.name)) || ''}<span class="sg" style="opacity:.8">${glyph}</span> ${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.kills | 0} ✋</span> ${tags.join('')}`;
+      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}<span class="sg" style="opacity:.8">${glyph}</span> ${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.kills | 0} ✋</span> ${tags.join('')}`;
+      if (cards[i]._pn !== pnH) { cards[i]._pn = pnH; cards[i].querySelector('.pn').innerHTML = pnH; }   // innerHTML seulement si la chaîne change (30 Hz sinon)
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
-      if (!p.playing) { lv.textContent = 'prêt'; return; }
-      if (!p.alive) { lv.textContent = p.outBy >= 0 && p.outBy !== i ? '✖ sorti par ' + nameOf(p.outBy) : '✖ sorti'; return; }
+      const setLv = t => { if (cards[i]._lv !== t) { cards[i]._lv = t; lv.textContent = t; } };
+      if (!p.playing) { setLv('prêt'); return; }
+      if (!p.alive) { setLv(p.outBy >= 0 && p.outBy !== i ? '✖ sorti par ' + nameOf(p.outBy) : '✖ sorti'); return; }
       // état des deux techniques + bonus actifs : c'est ce qu'on regarde d'un coin d'œil en pleine poussée
       const st = [p.dashing ? '💨 CHARGE !' : cdTxt(p.dcd, '💨'), p.brace ? '⚓ ANCRÉ' : cdTxt(p.bcd, '⚓')];
       if (p.heavy) st.push('🍙×' + (p.lvl | 0)); if (p.boost) st.push('⚡'); if (p.grip) st.push('👣');
       if (p.stun) st.push('💫'); if (p.tired) st.push('💦'); if (p.slip) st.push('❄');
-      lv.textContent = '● ' + st.join(' · ');
+      setLv('● ' + st.join(' · '));
     });
   }
   function renderLB() {
@@ -155,7 +166,7 @@ export default (function () {
     if (m.gs !== 'over' || !m.stats) { endEl.classList.add('hidden'); return; }
     endEl.classList.remove('hidden');
     const parts = m.players.filter(p => p.playing && p.place > 0).slice().sort((a, b) => a.place - b.place);
-    const champ = m.winner >= 0 ? parts.find(p => p.team === m.winner) : null;
+    const champ = winTeam(m) >= 0 ? parts.find(p => p.team === m.winner) : null;
     const who = champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[m.winner] : esc(champ.name || ('P' + (champ.seat + 1)))) : null;
     const title = champ ? who + ' reste sur le dohyō !' : 'Égalité — torinaoshi';
     const medals = ['🥇', '🥈', '🥉'];
@@ -171,7 +182,7 @@ export default (function () {
     }).join('');
     const mvpLine = mvp ? `<div class="emeta">⭐ MVP : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.kills} sortie${mvp.kills > 1 ? 's' : ''}</div>` : '';
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : K.washi}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} lutteurs</div>${mvpLine}<div class="elist">${rows}</div>${jRound === m.round ? blocFin(J, { titre: 'Marge sur la paille au fil du combat', couleur: s => colSeat(s), nom: s => nameOf(s) }) : ''}<div class="ehint">Espace / clic pour rejouer</div>`;
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} lutteurs</div>${mvpLine}<div class="elist">${rows}</div>${jRound === m.round ? blocFin(J, { titre: 'Marge sur la paille au fil du combat', couleur: s => colSeat(s), nom: s => nameOf(s) }) : ''}<div class="ehint">${TOUCH ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
   }
 
   // ───────────────────────── état réseau ─────────────────────────
@@ -185,7 +196,7 @@ export default (function () {
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
-    if (m.round !== prevRound) { prevRound = m.round; buf = []; puffs.length = 0; salt.length = 0; waves.length = 0; flyers.length = 0; outTxt.length = 0; sparks.length = 0; LUM.vider(); }
+    if (m.round !== prevRound) { prevRound = m.round; buf = []; puffs.length = 0; salt.length = 0; waves.length = 0; flyers.length = 0; outTxt.length = 0; sparks.length = 0; bursts.length = 0; flashes.length = 0; STREAK.reset(); LUM.vider(); }
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     if (m.gs === 'play' && (prevGs === 'countdown' || !J.actif() || jRound !== m.round)) {   // journal : départ de manche (ou arrivée en cours de manche)
       J.debut(performance.now()); jRound = m.round; jLast = -1e9; edge = {}; outChain = {}; hitAt = {};
@@ -194,7 +205,7 @@ export default (function () {
     suivreJournal(m, performance.now(), m.gs === 'over' && prevGs !== 'over');
     if (prevGs !== 'over' && m.gs === 'over') { finJournal(m); sound('win'); music.sting('win'); }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte 3·2·1 au taiko
-    if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); }
+    if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); goT0 = performance.now(); }   // goT0 : pastilles de siège visibles 2 s après le coup d'envoi
     lastCount = m.count;
     if (m.sd && !prevSd) { announceShrink(); sdT0 = performance.now(); }   // filet si l'événement 'shrink' s'est perdu (arrivée en cours de manche) ; départ du crépuscule
     prevSd = !!m.sd;
@@ -264,7 +275,7 @@ export default (function () {
   }
   function finJournal(m) {
     if (!J.actif()) return;
-    const w = m.winner >= 0 ? m.players.find(p => p.playing && p.alive && p.team === m.winner) : null;
+    const w = winTeam(m) >= 0 ? m.players.find(p => p.playing && p.alive && p.team === m.winner) : null;
     if (w) J.moment(performance.now(), w.seat, teamMode ? "a tenu le dohyō pour l'équipe " + TEAM_LETTER[m.winner] : 'reste seul sur le dohyō', 1);
     J.fin();
   }
@@ -298,7 +309,11 @@ export default (function () {
     if (k === 'hit') taiko(arg == null ? 0.5 : arg);
     else if (k === 'dash') { noise(0.035, 'highpass', 1500, 0.2); noise(0.03, 'highpass', 1800, 0.14, 0.022); noise(0.22, 'bandpass', 900, 0.07, 0.01, 0.7); }   // claquement de mains + souffle
     else if (k === 'brace') { tone(68, 0.22, 'sine', 0.14); tone(230, 0.05, 'triangle', 0.05); }   // pied qui frappe le sol (shiko)
-    else if (k === 'pickup') { tone(587.33, 0.16, 'triangle', 0.05); tone(880, 0.22, 'triangle', 0.045, 0.07); }   // koto pincé (in-sen)
+    else if (k === 'pickup') {                                                                                 // koto pincé (in-sen) ; onigiri : une note de plus par palier (arg = palier 1..5)
+      tone(587.33, 0.16, 'triangle', 0.05); tone(880, 0.22, 'triangle', 0.045, 0.07);
+      if (arg >= 2) tone(1046.5, 0.2, 'triangle', 0.04, 0.14); if (arg >= 3) tone(1174.66, 0.22, 'triangle', 0.04, 0.2);
+      if (arg >= 4) tone(1396.91, 0.26, 'triangle', 0.04, 0.26); if (arg >= 5) { tone(1760, 0.5, 'triangle', 0.045, 0.32); taiko(0.5, 0.05); }
+    }
     else if (k === 'shock') { taiko(1); noise(0.45, 'lowpass', 500, 0.14); }
     else if (k === 'out') { taiko(0.9); noise(1.3, 'bandpass', 520, 0.09, 0.05, 0.8); }                        // chute + « ooh » du public
     else if (k === 'salt') { noise(0.3, 'highpass', 5200, 0.05); noise(0.25, 'highpass', 6000, 0.04, 0.12); }
@@ -341,20 +356,40 @@ export default (function () {
     if (f.type === 'out') {
       psound('out', f.x); music.sting('kill'); momentSortie(f, now);
       const p = snap && snap.players[f.seat];
+      if (f.by != null && f.by >= 0 && f.by !== f.seat) {   // séries : plusieurs sorties du même lutteur en 5 s (pas de « série » sur un coéquipier)
+        const pb = snap && snap.players[f.by];
+        if (!(teamMode && p && pb && pb.team === p.team)) {
+          const tx = streakText(STREAK.kill(f.by, now));
+          if (tx) { CALL.push(tx, colSeat(f.by), now); msgGlobal('✋', nameOf(f.by) + ' — ' + tx, { color: colSeat(f.by) }); }
+        }
+      }
       flyers.push({ seat: f.seat, x: f.x, y: f.y, dir: Math.atan2(f.y - AR / 2, f.x - AR / 2), a: p ? p.a : 0, r: p ? (p.r || PR) : PR, born: now, name: p && !p.bot ? p.name : null });
       outTxt.push({ x: f.x, y: f.y, born: now, seat: f.seat });
       if (f.seat === mySeat) msgPerso('✖', f.by >= 0 && f.by !== f.seat ? 'Sorti du dohyō !' : 'Tu as franchi la paille !', { bad: true });
       if (A.reduceFx) return;
       shakeMag = Math.max(shakeMag, f.seat === mySeat ? 12 : 7);
+      HS.trigger(now); flashes.push({ x: f.x, y: f.y, r: (p ? (p.r || PR) : PR) * 1.7, born: now });   // arrêt sur image 60 ms + éclat blanc sur la victime
       dust(f.x, f.y, 22, 3);
       LUM.ajouter(f.x, f.y, 120, '#ff6a3d', 750, 0.7); LUM.ajouter(f.x, f.y, 46, '#fff1d6', 320, 0.6);   // éclair de sortie
       return;
     }
     if (f.type === 'pickup') {
-      psound('pickup', f.x);
+      const tier = f.t === 'heavy' ? Math.max(1, Math.min(5, f.lvl | 0)) : 0;   // palier d'onigiri 1..5 (les 3 autres bonus : 0)
+      psound('pickup', f.x, tier);
       const d = PU[f.t], m = PU_MSG[f.t];
       if (f.seat === mySeat && d && m && m.t) msgPerso(d.i, f.t === 'heavy' ? 'Onigiri ' + Math.min(5, f.lvl | 0) + '/5 : ' + m.t : m.t, { color: d.c });   // `m.t` : garde-fou si `t` tombe sur une clé du prototype
-      if (!A.reduceFx && d) { const c = hexRgb(d.c); waves.push({ x: f.x, y: f.y, r0: 8, r1: 34, born: now, life: 380, col: c.join(','), lw: 3 }); LUM.ajouter(f.x, f.y, 70, puLum(f.t), 420, 0.45); }
+      if (!A.reduceFx && d) {
+        const c = hexRgb(d.c);
+        if (!tier) { waves.push({ x: f.x, y: f.y, r0: 8, r1: 34, born: now, life: 380, col: c.join(','), lw: 3 }); LUM.ajouter(f.x, f.y, 70, puLum(f.t), 420, 0.45); }
+        else {                                             // onigiri : l'éclat grossit à chaque palier — anneaux (= palier), rayons d'or, poussière, lueur, secousse dès le 4e
+          for (let k = 0; k < tier; k++) waves.push({ x: f.x, y: f.y, r0: 8, r1: 30 + 16 * tier + 10 * k, born: now + k * 70, life: 360 + 60 * tier, col: k % 2 ? '242,207,106' : c.join(','), lw: 2.5 + 0.5 * tier });
+          bursts.push({ x: f.x, y: f.y, tier: tier, born: now });
+          if (bursts.length > 12) bursts.shift();
+          dust(f.x, f.y, 4 + 5 * tier, 1 + 0.5 * tier, '236,208,150');
+          LUM.ajouter(f.x, f.y, 60 + 28 * tier, '#ffd9a0', 380 + 90 * tier, 0.4 + 0.08 * tier);
+          if (tier >= 4) shakeMag = Math.max(shakeMag, tier === 5 ? 6 : 3);
+        }
+      }
       return;
     }
     if (f.type === 'malus') {                              // un adversaire a ramassé un bonus : seule la victime est prévenue
@@ -488,9 +523,16 @@ export default (function () {
     if (age < 1400) pulse = (1 - age / 1400) * (0.6 + 0.4 * Math.sin(age / 60));
     if (snap && snap.sd) pulse = Math.max(pulse, A.reduceFx ? 0.35 : 0.3 + 0.25 * Math.sin(now / 150));
     if (pulse > 0) { ctx.strokeStyle = `rgba(224,69,47,${0.5 * pulse})`; ctx.lineWidth = w + 6 + 12 * pulse; ctx.beginPath(); ctx.arc(c, c, R, 0, Math.PI * 2); ctx.stroke(); }
+    // mort subite : le bord rougeoie de plus en plus à mesure que la paille se referme (0 → 1 jusqu'au plancher) ; statique sous « réduire les effets »
+    const heat = snap && (snap.sd || R < RING_0 - 0.5) ? Math.max(snap.sd ? 0.12 : 0, Math.min(1, (1 - R / RING_0) / (1 - DUSK_FLOOR))) : 0;
+    if (heat > 0) {
+      const gl = heat * (A.contrast ? 1 : 0.85), br = A.reduceFx ? 1 : 0.85 + 0.15 * Math.sin(now / 260);
+      ctx.strokeStyle = `rgba(224,40,30,${0.12 + 0.3 * gl * br})`; ctx.lineWidth = w + 10 + 26 * heat; ctx.beginPath(); ctx.arc(c, c, R, 0, Math.PI * 2); ctx.stroke();   // halo large
+      ctx.strokeStyle = `rgba(255,70,45,${0.2 + 0.55 * gl * br})`; ctx.lineWidth = w + 3 + 6 * heat; ctx.beginPath(); ctx.arc(c, c, R, 0, Math.PI * 2); ctx.stroke();       // filet vif
+    }
     ctx.strokeStyle = 'rgba(30,16,6,0.32)'; ctx.lineWidth = w + 1; ctx.save(); ctx.translate(2.5, 3.5); arcs(0, gap / 2); ctx.stroke(); ctx.restore();   // ombre au sol
     ctx.strokeStyle = '#5b4424'; ctx.lineWidth = w + 2; arcs(0, 0); ctx.stroke();                                   // lit sombre = interstices
-    const hot = pulse > 0 ? mix(hexRgb(K.straw), [240, 120, 90], pulse * 0.45) : hexRgb(K.straw);
+    const hh = Math.max(pulse * 0.45, heat * 0.55), hot = hh > 0 ? mix(hexRgb(K.straw), [240, 120, 90], hh) : hexRgb(K.straw);   // la paille elle-même vire au rouge avec la chaleur
     ctx.strokeStyle = rgbStr(hot); ctx.lineWidth = w; arcs(0, gap / 2); ctx.stroke();                              // bottes
     ctx.strokeStyle = 'rgba(248,232,170,0.85)'; ctx.lineWidth = w * 0.26; arcs(-w * 0.22, gap / 2 + 0.01); ctx.stroke();   // reflet
     ctx.strokeStyle = 'rgba(140,112,56,0.9)'; ctx.lineWidth = w * 0.22; arcs(w * 0.3, gap / 2 + 0.01); ctx.stroke();      // ombre propre
@@ -545,7 +587,7 @@ export default (function () {
     ctx.rotate(a + (o.spin || 0));
     // mawashi : large ceinture à la couleur du siège, motif du siège par-dessus
     ctx.lineWidth = r * 0.32; ctx.strokeStyle = B.belt; ctx.beginPath(); ctx.arc(0, 0, r * 0.84, 0, Math.PI * 2); ctx.stroke();
-    const pat = seatPattern(ctx, seat, { size: Math.max(6, r * 0.5), ink: 'rgba(255,255,255,0.4)' });
+    const pat = seatPattern(ctx, seat, { size: Math.max(6, r * 0.5), ink: 'rgba(255,255,255,0.4)', res: Math.round(cv.width / AR * 100) / 100 });   // res = px appareil par unité monde : motif net sur Retina (stable tant que la taille ne change pas)
     if (pat) { ctx.strokeStyle = pat; ctx.stroke(); }
     ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.arc(0, 0, r * 0.68, 0, Math.PI * 2); ctx.stroke();
     ctx.fillStyle = B.beltDk; ctx.fillRect(-r * 1.02, -r * 0.2, r * 0.3, r * 0.4);                                // nœud dans le dos
@@ -708,13 +750,32 @@ export default (function () {
     LUM.dessiner(ctx, now);
   }
 
+  // ───────────────────────── pétales de cerisier (sakura) ─────────────────────────
+  // 14 pétales qui dérivent lentement pendant la manche, sous les lutteurs. Positions tirées de l'horloge
+  // (rien à stocker ni à allouer par image) ; coupés par « réduire les effets » et par le contraste élevé.
+  const PETALS = (() => { const r = rng(0x5a4c12); return Array.from({ length: 14 }, () => ({ x: r(), y: r(), s: 0.7 + r() * 0.6, ph: r() * 6.28, rot: r() * 6.28, sz: 2.6 + r() * 1.8 })); })();
+  function drawPetals(now, k) {
+    const W = AR + 60, t = now / 1000;
+    ctx.save(); ctx.fillStyle = '#f4b8c8';
+    for (let i = 0; i < PETALS.length; i++) {
+      const q = PETALS[i];
+      const x = ((q.x * W + t * 9 * q.s + Math.sin(t * 0.7 * q.s + q.ph) * 22) % W + W) % W - 30, y = ((q.y * W + t * 14 * q.s) % W + W) % W - 30;
+      ctx.globalAlpha = 0.6 * k;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(q.rot + t * 0.9 * q.s); ctx.scale(1.35, 0.15 + 0.6 * Math.abs(Math.sin(t * 1.3 * q.s + q.ph)));   // le pétale se retourne en tombant
+      ctx.beginPath(); ctx.arc(0, 0, q.sz, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    }
+    ctx.restore();
+  }
+
   // ───────────────────────── rendu d'une image ─────────────────────────
   function draw() {
     if (destroyed) return;
     const now = performance.now(), kdt = Math.min(3, Math.max(0.25, (now - (lastFrame || now - 16.7)) / 16.7)); lastFrame = now;
+    if (!A.reduceFx && HS.frozen(now)) return;              // arrêt sur image (60 ms) à chaque sortie : on garde l'image précédente
     const sc = cv.width / AR, c = AR / 2;
     let ox = 0, oy = 0;
     if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.86; } else shakeMag = 0;
+    if (ox || oy) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = K.wood; ctx.fillRect(0, 0, cv.width, cv.height); }   // marge peinte avant le décor : la secousse ne laisse plus de liseré de l'image d'avant
     ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
     ensureDecor(); ctx.drawImage(decorCv, 0, 0, AR, AR);
     const R = snap && snap.ring ? snap.ring : RING_0;
@@ -726,6 +787,8 @@ export default (function () {
       ctx.restore();
     }
     drawTawara(R, now);
+    petK += (((snap && snap.gs === 'play' && !A.reduceFx && !A.contrast) ? 1 : 0) - petK) * Math.min(1, 0.05 * kdt); if (petK < 0.01) petK = 0;   // pétales : fondu à l'entrée / la sortie de manche
+    if (petK > 0) drawPetals(now, petK);
     const pv = snap ? viewPlayers(now) : null;
     if (!A.reduceFx) eclairer(now, pv);
     // crépuscule : 0 tant que la paille est entière, 1 au plancher ; la mort subite l'amorce aussitôt
@@ -738,6 +801,7 @@ export default (function () {
     duskV += (duskT - duskV) * Math.min(1, 0.04 * kdt);
     if (duskV < 0.002) duskV = 0;
 
+    let dangerK = 0;                                        // 0..1 : mon lutteur frôle la paille (posé plus bas) → vignette rouge
     if (snap) {
       // bonus au sol
       (snap.pickups || []).forEach(pk => {
@@ -750,7 +814,8 @@ export default (function () {
       });
       // lutteurs
       const me = mySeat >= 0 ? snap.players[mySeat] : null;
-      const over = snap.gs === 'over';
+      const over = snap.gs === 'over', wt = winTeam(snap);
+      let nPlay = 0; snap.players.forEach(p => { if (p.playing) nPlay++; });
       snap.players.forEach(p => {
         if (!p.playing || !p.alive) return;
         const v = (pv && pv[p.seat]) || p, r = p.r || PR, col = colSeat(p.seat);
@@ -762,11 +827,21 @@ export default (function () {
           puffs.push({ x: v.x - Math.cos(v.a) * r * 0.8, y: v.y - Math.sin(v.a) * r * 0.8, vx: (Math.random() * 2 - 1) * 0.3, vy: (Math.random() * 2 - 1) * 0.3, born: now, life: 320, r0: 2 + Math.random() * 2, col: '222,196,150' });
         }
         drawRikishi(p.seat, v.x, v.y, v.a, r, { dashing: p.dashing, brace: p.brace, heavy: p.heavy, lvl: p.lvl, grip: p.grip, boost: p.boost, tired: p.tired, slip: p.slip, stun: p.stun, me: p.seat === mySeat && !over, name: p.bot ? null : p.name }, now);
-        if (over && !A.reduceFx) { ctx.save(); ctx.strokeStyle = K.gold; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.5 + 0.4 * Math.sin(now / 180); ctx.beginPath(); ctx.arc(v.x, v.y, r + 8, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }   // vainqueur(s) auréolé(s)
+        if (over && wt >= 0 && p.team === wt) { ctx.save(); ctx.strokeStyle = K.gold; ctx.lineWidth = A.contrast ? 3.5 : 2.5; ctx.globalAlpha = A.reduceFx ? 0.9 : 0.5 + 0.4 * Math.sin(now / 180); ctx.beginPath(); ctx.arc(v.x, v.y, r + 8, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }   // vainqueur(s) auréolé(s) : jamais sur une égalité (winner = -1), fixe sous « réduire les effets »
       });
+      // pastilles numérotées de siège : toujours à partir de 7 lutteurs (les teintes ne suffisent plus), sinon au décompte et 2 s après le coup d'envoi
+      if (snap.gs === 'countdown' || ((snap.gs === 'play' || snap.gs === 'paused') && (nPlay >= 7 || now - goT0 < 2000))) {
+        const cs = readable(18, cv, AR, 20);                // 20 px CSS mini : le chiffre (0,44 × taille) reste ≥ 9 px
+        snap.players.forEach(p => {
+          if (!p.playing || !p.alive) return;
+          const v = (pv && pv[p.seat]) || p, r = p.r || PR, cy = v.y - r - (p.seat === mySeat ? 20 + cs * 0.5 : 8 + cs * 0.5);   // au-dessus de la pointe « c'est moi »
+          drawSeatChip(ctx, Math.max(cs / 2 + 2, Math.min(AR - cs / 2 - 2, v.x)), Math.max(cs / 2 + 2, cy), p.seat, colSeat(p.seat), cs);
+        });
+      }
       // danger : mon lutteur approche la paille -> l'arc du cordon le plus proche rougeoie
       if (me && me.playing && me.alive && snap.gs === 'play') {
         const v = (pv && pv[mySeat]) || me, d = Math.hypot(v.x - c, v.y - c), u = (d / R - 0.78) / 0.22;
+        if (u > 0) dangerK = Math.min(1, u);
         if (u > 0) { const th = Math.atan2(v.y - c, v.x - c); ctx.save(); ctx.strokeStyle = K.verm; ctx.lineCap = 'round'; ctx.globalAlpha = Math.min(1, u) * (A.reduceFx ? 0.7 : 0.45 + 0.35 * Math.sin(now / 90)); ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(c, c, R - 9, th - 0.38, th + 0.38); ctx.stroke(); ctx.restore(); }
       }
     }
@@ -794,11 +869,24 @@ export default (function () {
       ctx.strokeStyle = K.washi; ctx.lineCap = 'round';
       for (let i = sparks.length - 1; i >= 0; i--) { const q = sparks[i], tt = (now - q.born) / q.life; if (tt >= 1) { sparks.splice(i, 1); continue; } q.x += q.vx * kdt; q.y += q.vy * kdt; q.vx *= 0.9; q.vy *= 0.9; ctx.globalAlpha = 1 - tt; ctx.lineWidth = 2 * (1 - tt) + 0.5; ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(q.x - q.vx * 1.6, q.y - q.vy * 1.6); ctx.stroke(); }
       for (let i = waves.length - 1; i >= 0; i--) { const q = waves[i], tt = (now - q.born) / q.life; if (tt >= 1) { waves.splice(i, 1); continue; } if (tt < 0) continue; const e = 1 - (1 - tt) * (1 - tt); ctx.globalAlpha = 0.7 * (1 - tt); ctx.strokeStyle = 'rgb(' + q.col + ')'; ctx.lineWidth = q.lw * (1 - tt * 0.6); ctx.beginPath(); ctx.arc(q.x, q.y, q.r0 + (q.r1 - q.r0) * e, 0, Math.PI * 2); ctx.stroke(); }
+      // ramassage d'onigiri : gerbe de rayons d'or dont le nombre, la portée et l'épaisseur croissent avec le palier (le 5e ajoute un éclat blanc)
+      ctx.strokeStyle = '#f2cf6a'; ctx.lineCap = 'round';
+      for (let i = bursts.length - 1; i >= 0; i--) {
+        const q = bursts[i], life = 520 + 90 * q.tier, tt = (now - q.born) / life; if (tt >= 1) { bursts.splice(i, 1); continue; }
+        const e = 1 - (1 - tt) * (1 - tt), n = 6 + 2 * q.tier, a0 = q.tier * 0.35, rin = 12 + (10 + 9 * q.tier) * e, rout = rin + 6 + 5 * q.tier * (1 - tt);
+        ctx.globalAlpha = 1 - tt; ctx.lineWidth = 1.8 + 0.5 * q.tier * (1 - tt); ctx.beginPath();
+        for (let k = 0; k < n; k++) { const a = a0 + k * Math.PI * 2 / n; ctx.moveTo(q.x + Math.cos(a) * rin, q.y + Math.sin(a) * rin); ctx.lineTo(q.x + Math.cos(a) * rout, q.y + Math.sin(a) * rout); }
+        ctx.stroke();
+        if (q.tier >= 5) drawFlash(ctx, q.x, q.y, 30, tt * 1.8);
+      }
+      // éclats blancs de sortie (victime) : 260 ms, sans le moindre coût hors élimination
+      for (let i = flashes.length - 1; i >= 0; i--) { const q = flashes[i], tt = (now - q.born) / 260; if (tt >= 1) { flashes.splice(i, 1); continue; } drawFlash(ctx, q.x, q.y, q.r, tt); }
       ctx.restore();
-    } else { puffs.length = 0; salt.length = 0; sparks.length = 0; waves.length = 0; }
+    } else { puffs.length = 0; salt.length = 0; sparks.length = 0; waves.length = 0; bursts.length = 0; flashes.length = 0; }
     drawTassels(now);
     // étalonnage jour → crépuscule par-dessus l'arène (débord de 24 u : la secousse ne découvre pas de bord clair)
     crepuscule(ctx, -24, -24, AR + 48, AR + 48, duskV, { soleil: 'haut', force: A.contrast ? 0.45 : A.reduceFx ? 0.55 : 1 });
+    if (dangerK > 0) drawDanger(ctx, AR, AR, dangerK * (A.contrast ? 0.9 : 0.6), A.reduceFx ? 0 : now);   // vignette de danger (fixe sous « réduire les effets » : le pouls dépend de `now`)
     // « OUT » : gros texte vermillon cerné d'encre, qui claque puis s'efface (ramené vers l'intérieur pour rester lisible)
     for (let i = outTxt.length - 1; i >= 0; i--) {
       const o = outTxt[i], t = (now - o.born) / 1300; if (t >= 1) { outTxt.splice(i, 1); continue; }
@@ -812,27 +900,37 @@ export default (function () {
       ctx.restore();
     }
 
-    // jauges du joueur local : charge et ancrage, + bonus actifs
+    // jauges du joueur local : charge et ancrage, + bonus actifs. Bloc HUD mis à l'échelle autour de son ancrage (bas-centre) pour rester
+    // lisible sur téléphone (hudK) ; textes ≥ 9 px CSS (readable) ; les indications clavier n'apparaissent pas sur écran tactile.
     const me = (snap && mySeat >= 0) ? snap.players[mySeat] : null;
     if (me && me.playing && me.alive && snap.gs === 'play') {
-      const bw = 112, bh = 10, gapx = 18, y = AR - 24, x1 = c - bw - gapx / 2, x2 = c + gapx / 2;
+      const bw = 112, bh = 10, gapx = 18, y = -12, x1 = -bw - gapx / 2, x2 = gapx / 2;
+      const k = Math.min(hudK(cv, AR), AR * 0.94 / (2 * bw + gapx)), fs = readable(10, cv, AR / k, 9), fnt = 'bold ' + fs.toFixed(1) + 'px system-ui, sans-serif';
+      ctx.save(); ctx.translate(c, AR - 12); ctx.scale(k, k);
       const gauge = (x, v, col, lab, active) => {
         ctx.fillStyle = 'rgba(28,26,23,0.72)'; ctx.fillRect(x - 2, y - 2, bw + 4, bh + 4);
         ctx.fillStyle = v >= 1 ? col : 'rgba(241,230,208,0.35)'; ctx.fillRect(x, y, bw * Math.max(0, Math.min(1, v || 0)), bh);
         if (active && !A.reduceFx) { ctx.save(); ctx.globalAlpha = 0.35 + 0.3 * Math.sin(now / 60); ctx.fillStyle = '#fff'; ctx.fillRect(x, y, bw, bh); ctx.restore(); }
-        ctx.strokeStyle = 'rgba(241,230,208,0.6)'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, bw - 1, bh - 1);
-        ctx.fillStyle = v >= 1 ? col : 'rgba(241,230,208,0.7)'; ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.fillText(lab + (v >= 1 ? ' · PRÊTE' : ''), x + bw / 2, y - 3);
+        ctx.strokeStyle = A.contrast ? '#fff' : 'rgba(241,230,208,0.6)'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, bw - 1, bh - 1);
+        ctx.fillStyle = v >= 1 ? col : 'rgba(241,230,208,0.7)'; ctx.font = fnt; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        let txt = lab + (v >= 1 ? ' · PRÊTE' : ''); if (ctx.measureText(txt).width > bw + gapx - 6) txt = lab + (v >= 1 ? ' ✓' : '');   // deux libellés voisins ne se chevauchent jamais
+        const tw = ctx.measureText(txt).width, tx = Math.max(tw / 2 - c / k + 2, Math.min(c / k - tw / 2 - 2, x + bw / 2));           // reste dans le canvas
+        ctx.fillText(txt, tx, y - 3);
       };
-      gauge(x1, me.dcd, K.verm, 'CHARGE (Espace)', me.dashing);
-      gauge(x2, me.bcd, K.straw, 'ANCRAGE (Maj)', me.brace);
+      gauge(x1, me.dcd, K.verm, TOUCH ? 'CHARGE' : 'CHARGE (Espace)', me.dashing);
+      gauge(x2, me.bcd, K.straw, TOUCH ? 'ANCRAGE' : 'ANCRAGE (Maj)', me.brace);
       const tags = []; if (me.heavy) tags.push(['ONIGIRI ×' + (me.lvl | 0), PU.heavy.c]); if (me.boost) tags.push(['ÉLAN', PU.dash.c]); if (me.grip) tags.push(['PIEDS COLLÉS', PU.grip.c]);
       if (me.stun) tags.push(['SONNÉ', MALUS_MSG.stun.c]); if (me.tired) tags.push(['ESSOUFFLÉ', MALUS_MSG.tired.c]); if (me.slip) tags.push(['SOL GLISSANT', MALUS_MSG.slip.c]);
       if (tags.length) {
-        ctx.font = 'bold 10px system-ui, sans-serif'; const ws = tags.map(t => ctx.measureText(t[0]).width + 14), tot = ws.reduce((s, w) => s + w + 6, -6);
-        let x = c - tot / 2; const ty = y - 30;
-        tags.forEach((t, i) => { ctx.fillStyle = K.washi; ctx.fillRect(x, ty, ws[i], 15); ctx.fillStyle = t[1]; ctx.fillRect(x, ty, 3, 15); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t[0], x + ws[i] / 2 + 1, ty + 8); x += ws[i] + 6; });
+        ctx.font = fnt; const th = fs + 5, ws = tags.map(t => ctx.measureText(t[0]).width + 14), maxW = AR * 0.96 / k;
+        const rows = [[]]; let rw = 0;                       // retour à la ligne : le bloc agrandi ne déborde jamais du canvas
+        tags.forEach((t, i) => { if (rows[rows.length - 1].length && rw + ws[i] + 6 > maxW) { rows.push([]); rw = 0; } rows[rows.length - 1].push(i); rw += ws[i] + 6; });
+        rows.forEach((row, ri) => {
+          const tot = row.reduce((s, i) => s + ws[i] + 6, -6), ty = y - 18 - th - ri * (th + 4); let x = -tot / 2;
+          row.forEach(i => { const t = tags[i]; ctx.fillStyle = K.washi; ctx.fillRect(x, ty, ws[i], th); ctx.fillStyle = t[1]; ctx.fillRect(x, ty, 3, th); ctx.fillStyle = K.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t[0], x + ws[i] / 2 + 1, ty + th / 2 + 0.5); x += ws[i] + 6; });
+        });
       }
+      ctx.restore();
     }
 
     if (snap && snap.gs === 'countdown') {
@@ -843,23 +941,26 @@ export default (function () {
       ctx.strokeStyle = K.verm; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(0, 0, 62, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (n > 0 ? n / 3 : 1)); ctx.stroke();
       ctx.fillStyle = K.ink; ctx.font = (n > 0 ? 76 : 30) + 'px ' + DISP; ctx.fillText(n > 0 ? n : 'HAKKEYOI', 0, 4);
       ctx.restore();
-      ctx.lineJoin = 'round'; ctx.font = 'bold 14px system-ui, sans-serif'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(28,26,23,0.8)';
-      const sub = n > 0 ? 'Shikiri — en position…' : 'Nokotta !'; ctx.strokeText(sub, c, c + 78); ctx.fillStyle = K.washi; ctx.fillText(sub, c, c + 78);
+      const fsub = readable(14, cv, AR, 10);
+      ctx.lineJoin = 'round'; ctx.font = 'bold ' + fsub.toFixed(1) + 'px system-ui, sans-serif'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(28,26,23,0.8)';
+      const sub = n > 0 ? 'Shikiri — en position…' : 'Nokotta !', sy = c + 72 + fsub * 0.45; ctx.strokeText(sub, c, sy); ctx.fillStyle = K.washi; ctx.fillText(sub, c, sy);
     }
     if (snap && (snap.gs === 'lobby' || snap.gs === 'paused')) {
       ctx.fillStyle = 'rgba(18,12,9,0.64)'; ctx.fillRect(0, 0, AR, AR); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if (snap.gs === 'paused') {
+        const fp = readable(14, cv, AR, 10);
         ctx.fillStyle = K.washi; ctx.font = '38px ' + DISP; ctx.fillText('PAUSE', c, c - 8);
-        ctx.fillStyle = 'rgba(241,230,208,.6)'; ctx.font = '14px system-ui, sans-serif'; ctx.fillText('Matta ! — P / Échap pour reprendre', c, c + 28);
+        ctx.fillStyle = A.contrast ? K.washi : 'rgba(241,230,208,.75)'; ctx.font = fp.toFixed(1) + 'px system-ui, sans-serif'; ctx.fillText(TOUCH ? 'Matta ! — touche ▶ pour reprendre' : 'Matta ! — P / Échap pour reprendre', c, c + 22 + fp * 0.45);
       } else {
         drawTitle(c, c - 58, now);
-        const n = snap.connected || 0, nb = snap.botCount || 0, tot = n + nb, y0 = c + 48 + 12;
-        ctx.fillStyle = teamMode ? '#f0c9a0' : 'rgba(241,230,208,.78)'; ctx.font = '15px system-ui, sans-serif';
+        const n = snap.connected || 0, nb = snap.botCount || 0, tot = n + nb, y0 = c + 48 + 12, f1 = readable(15, cv, AR, 10), f2 = readable(13, cv, AR, 10);
+        ctx.fillStyle = teamMode ? '#f0c9a0' : (A.contrast ? K.washi : 'rgba(241,230,208,.78)'); ctx.font = f1.toFixed(1) + 'px system-ui, sans-serif';
         ctx.fillText(`${n} lutteur${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''}`, c, y0);
-        ctx.fillStyle = 'rgba(241,230,208,.62)'; ctx.font = 'bold 13px system-ui, sans-serif';
-        ctx.fillText(tot >= 2 ? '▶ Espace / clic pour monter sur le dohyō' : 'En attente d\'un 2ᵉ lutteur… (ou ajoute un bot 🤖)', c, y0 + 26);
+        ctx.fillStyle = A.contrast ? K.washi : 'rgba(241,230,208,.7)'; ctx.font = 'bold ' + f2.toFixed(1) + 'px system-ui, sans-serif';
+        ctx.fillText(tot >= 2 ? (TOUCH ? '▶ Touche l\'écran pour monter sur le dohyō' : '▶ Espace / clic pour monter sur le dohyō') : 'En attente d\'un 2ᵉ lutteur… (ou ajoute un bot 🤖)', c, y0 + Math.max(26, (f1 + f2) * 0.8));
       }
     }
+    CALL.draw(ctx, AR, AR, now, A);                          // « DOUBLÉ ! / TRIPLÉ ! / CARNAGE ! » (fondu conservé sous « réduire les effets », sans l'animation d'échelle)
   }
   function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }   // filet : une erreur de rendu ne fige plus le jeu
 
@@ -915,14 +1016,22 @@ export default (function () {
     applyColors();
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
+    music.dispose(); music = createMusic(() => actx, () => A, MUSIC_THEME);   // instance neuve à chaque entrée (la précédente a été « disposée » au teardown)
     music.start();
+    if (staleInput) { staleInput = false; pushInput(); }   // une touche était tenue quand on a quitté le jeu : le siège reçoit « tout relâché » (on est bien dans le Sumo ici)
+    STREAK.reset(); bursts.length = 0; flashes.length = 0; goT0 = -1e9; petK = 0;
     rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
   function teardown() {
-    destroyed = true; music.stop(); cancelAnimationFrame(rafId); J.fin(); LUM.vider();   // retour au jeu : journal repris à neuf
+    destroyed = true; music.dispose(); music = NOMUSIC; cancelAnimationFrame(rafId); J.fin(); LUM.vider();   // retour au jeu : journal repris à neuf
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
-    for (const k in input) input[k] = false;              // touches relâchées côté client SANS rien envoyer : le hub a peut-être déjà changé de jeu
+    // touches relâchées côté client SANS rien envoyer maintenant (le hub a peut-être déjà changé de jeu : un « input » partirait vers un autre jeu) ;
+    // si l'une était tenue, staleInput fait renvoyer l'état « tout relâché » au prochain init() du Sumo
+    for (const k in input) if (input[k]) { input[k] = false; staleInput = true; }
+    // audio : le contexte est fermé (il ne reste pas actif en arrière-plan, et iOS limite le nombre de contextes) ; unlockAudio() en recrée un au prochain geste
+    if (actx) { const c0 = actx; actx = null; noiseBuf = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }
+    puffs.length = 0; salt.length = 0; waves.length = 0; flyers.length = 0; outTxt.length = 0; sparks.length = 0; bursts.length = 0; flashes.length = 0; STREAK.reset();
   }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };
