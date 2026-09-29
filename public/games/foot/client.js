@@ -11,6 +11,9 @@ import { lumiere, creerLumieres } from '../../lumiere.js';      // projecteurs, 
 import { crepuscule, creerDuel } from '../../crepuscule.js';
 import { creerJournal, blocFin } from '../../finpartie.js';     // courbe des vies + meilleure action
 import { createCallouts, createHitStop, drawFlash, drawDanger, drawSeatChip, streakText, readable, hudK } from '../../exploits.js';   // aides visuelles partagées
+import { createRalenti } from '../../ralenti.js';                 // ralenti du dernier but à la fin de manche
+import { drawPodium, podiumEntries } from '../../podium.js';       // podium canvas (footballeurs) après le ralenti
+import { createDuelCam } from '../../camera-duel.js';              // caméra de duel : 2 joueurs restants + ballon
 
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
 
@@ -92,6 +95,10 @@ export default (function () {
   const input ={ up: false, down: false, left: false, right: false };
   let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, diffBtn, livesBtn, optBtn, optPanel, pauseFloat, lbBtn, lbPanel, lbBody, endEl, shootBtn, tackleBtn, sprintBtn;
   const runPhase = {};                                  // par siège : phase de course (animation des jambes)
+  // ralenti : fenêtre 1,7 s de jeu à 0,5× (≈ 3,4 s réelles) ; carte de fin et journal différés jusqu'à sa fin (pendEnd) ; skipT : dernier saut (le clic/tap qui suit ne relance rien)
+  const RL = createRalenti({ keepMs: 3000, windowMs: 1700, slow: 0.5 }), CAM = createDuelCam({ maxZoom: 1.25, ease: 0.05, margin: 150 });
+  let pendEnd = false, skipT = -1e9, podT0 = 0, podSnap = null, podEnt = null, frzT0 = 0, liveSnap = null;
+  const DP = [{ x: 0, y: 0 }, { x: 0, y: 0 }];         // coins du cadre (2 joueurs + ballon) passés à la caméra de duel
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team % TEAMCC.length] : CC[s % CC.length]; };
@@ -226,12 +233,21 @@ export default (function () {
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
-    if (m.round !== prevRound) { prevRound = m.round; buf = []; puffs.length = 0; waves.length = 0; sparks.length = 0; confs.length = 0; texts.length = 0; trail = []; LUM.vider(); gCount = {}; flashes.length = 0; bulbT0 = 0; sdCue = 0; chipUntil = 0; dangerK = 0; bvx = 0; bvy = 0; prevFrz = 0; }
+    if (m.round !== prevRound) { prevRound = m.round; buf = []; puffs.length = 0; waves.length = 0; sparks.length = 0; confs.length = 0; texts.length = 0; trail = []; LUM.vider(); gCount = {}; flashes.length = 0; bulbT0 = 0; sdCue = 0; chipUntil = 0; dangerK = 0; bvx = 0; bvy = 0; prevFrz = 0; RL.clear(); pendEnd = false; frzT0 = 0; podSnap = null; CAM.reset(); }
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
+    { const tn = performance.now();                      // tampon du ralenti : tous les snapshots, sauf la célébration figée après 0,6 s (sinon le rejeu finirait sur une image immobile)
+      if (m.frz && !frzT0) frzT0 = tn;
+      const queue = m.frz ? tn - frzT0 > 600 : (m.gs === 'over' && frzT0 > 0);
+      if (!m.frz && m.gs !== 'over') frzT0 = 0;
+      if (!queue) RL.push(m, tn);
+      if (m.gs !== 'over') { RL.skip(); pendEnd = false; } }   // manche relancée / retour au lobby : plus de rejeu
     if (m.gs === 'play' && (prevGs === 'countdown' || !J.actif() || jRound !== m.round)) { J.debut(performance.now()); jRound = m.round; jLast = -1e9; serie = {}; }
     (m.fx || []).forEach(playFx);
     suivreJournal(m, performance.now(), m.gs === 'over' && prevGs !== 'over');
-    if (prevGs !== 'over' && m.gs === 'over') { finJournal(m); sound('win'); music.sting('win'); }
+    if (prevGs !== 'over' && m.gs === 'over') {
+      if (!A.reduceFx && RL.start(performance.now())) pendEnd = true;   // ralenti du dernier but : journal, fanfare et carte de fin attendent sa fin
+      else finManche(m, false);
+    }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }
     if (prevGs === 'countdown' && m.gs === 'play') music.sting('go');
     { const frz = m.frz ? 1 : 0, tk = performance.now();          // engagement (début de manche ou reprise après un but) : pastilles 2 s ; en prolongations, rappel des cages élargies
@@ -249,8 +265,8 @@ export default (function () {
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const camps = {}; let nc = 0; m.players.forEach(p => { if (p.playing && p.alive && !camps[p.team]) { camps[p.team] = 1; nc++; } }); if (m.sd || ((m.nteams || 0) >= 3 && nc <= 2)) inten = 2; }
       music.setIntensity(inten); }
     refreshHUD(); syncOptPanel(m);
-    if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } }
-    else { endShown = false; endEl.classList.add('hidden'); }
+    if (m.gs === 'over') { if (!endShown && !pendEnd) { showEndscreen(m); endShown = true; podT0 = performance.now(); } }
+    else { endShown = false; endEl.classList.add('hidden'); endEl.style.top = ''; endEl.style.justifyContent = ''; }
     const idle = m.gs === 'lobby' || m.gs === 'over', total = (m.connected || 0) + (m.botCount || 0);
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1 && total >= 2);
     startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Coup d\'envoi';
@@ -285,6 +301,11 @@ export default (function () {
     if (s === 3) J.moment(now, f.by, 'coup du chapeau (3e but, sur ' + victim + ')', 9);
     else if (f.lives === 0) J.moment(now, f.by, 'a éliminé ' + victim + ' d\'un but', teamMode ? 7 : 6);
     else J.moment(now, f.by, 'a marqué contre ' + victim, 3 + Math.min(3, s));
+  }
+  // fin de manche : journal, fanfare (et, après le ralenti, la carte de fin + le podium) ; carte = true quand on l'appelle en fin de ralenti
+  function finManche(m, carte) {
+    finJournal(m); sound('win'); music.sting('win');
+    if (carte) { showEndscreen(m); endShown = true; podT0 = performance.now(); }
   }
   function finJournal(m) {
     if (!J.actif()) return;
@@ -425,15 +446,19 @@ export default (function () {
     for (let i = 0; i < buf.length; i++) if (buf[i].t <= target) a = buf[i];
     for (let i = buf.length - 1; i >= 0; i--) if (buf[i].t >= target) b = buf[i];
     const span = b.t - a.t; let al = span > 0 ? (target - a.t) / span : 0; al = al < 0 ? 0 : al > 1 ? 1 : al;
+    return lerpView(a.s, b.s, al);
+  }
+  // interpolation entre deux snapshots sa → sb (lecture seule : sert aussi au ralenti, dont les snapshots sont partagés)
+  function lerpView(sa, sb, al) {
     const pl = {};
-    b.s.players.forEach(pb => {
+    sb.players.forEach(pb => {
       if (!pb.playing || !pb.alive) return;
-      const pa = a.s.players[pb.seat]; let x = pb.x, y = pb.y, ang = pb.a || 0;
+      const pa = sa.players[pb.seat]; let x = pb.x, y = pb.y, ang = pb.a || 0;
       if (pa && pa.playing && pa.alive && Math.hypot(pb.x - pa.x, pb.y - pa.y) < 60) { x = pa.x + (pb.x - pa.x) * al; y = pa.y + (pb.y - pa.y) * al; const da = Math.atan2(Math.sin(ang - (pa.a || 0)), Math.cos(ang - (pa.a || 0))); ang = (pa.a || 0) + da * al; }
       pl[pb.seat] = { x, y, a: ang };
     });
     let ball = null;
-    const bb = b.s.ball, ba = a.s.ball;
+    const bb = sb.ball, ba = sa.ball;
     if (bb) { ball = { x: bb.x, y: bb.y, o: bb.o }; if (ba && Math.hypot(bb.x - ba.x, bb.y - ba.y) < 80) { ball.x = ba.x + (bb.x - ba.x) * al; ball.y = ba.y + (bb.y - ba.y) * al; } }
     // ballon au pied : on le recolle au joueur INTERPOLÉ (sinon il flotte d'une image à côté des pieds)
     if (ball && ball.o >= 0 && pl[ball.o]) { const o = pl[ball.o]; ball.x = o.x + Math.cos(o.a) * (PR + BR + 1); ball.y = o.y + Math.sin(o.a) * (PR + BR + 1); }
@@ -689,17 +714,57 @@ export default (function () {
     ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.arc(x - r * 0.35, y - r * 0.4, r * 0.28, 0, Math.PI * 2); ctx.fill();
   }
 
+  // corps du footballeur vu de dessus, dans le repère courant (origine = centre, +x = devant) : maillot (couleur + motif du siège), bras, tête
+  function corps(seat, col, r, step, slide) {
+    const rc = hexRgb(col);
+    ctx.fillStyle = '#141414';
+    if (slide) { ctx.beginPath(); oval(ctx, r * 1.25, r * 0.3, r * 0.42, r * 0.22); ctx.fill(); ctx.beginPath(); oval(ctx, r * 0.2, -r * 0.55, r * 0.34, r * 0.2); ctx.fill(); }
+    else { ctx.beginPath(); oval(ctx, step, r * 0.42, r * 0.36, r * 0.2); ctx.fill(); ctx.beginPath(); oval(ctx, -step, -r * 0.42, r * 0.36, r * 0.2); ctx.fill(); }
+    const sh = slide ? 1.15 : 1;
+    const gr = ctx.createLinearGradient(-r, -r, r, r); gr.addColorStop(0, rgbStr(mix(rc, [255, 255, 255], 0.25))); gr.addColorStop(1, rgbStr(mix(rc, [0, 0, 0], 0.25)));
+    ctx.fillStyle = gr; ctx.beginPath(); oval(ctx, 0, 0, r * 0.62 * sh, r * 0.98); ctx.fill();
+    const pat = seatPattern(ctx, seat, { size: Math.max(6, r * 0.6), ink: 'rgba(255,255,255,0.35)', res: Math.round(cv.width / AR * 100) / 100 });
+    if (pat) { ctx.fillStyle = pat; ctx.beginPath(); oval(ctx, 0, 0, r * 0.62 * sh, r * 0.98); ctx.fill(); }
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 1.2; ctx.beginPath(); oval(ctx, 0, 0, r * 0.62 * sh, r * 0.98); ctx.stroke();
+    const skin = SKIN[seat % SKIN.length], sk = rgbStr(skin);
+    ctx.fillStyle = sk;
+    ctx.beginPath(); ctx.arc(-step * 0.5, r * 0.98, r * 0.22, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(step * 0.5, -r * 0.98, r * 0.22, 0, Math.PI * 2); ctx.fill();
+    // tête + cheveux + NEZ vers l'avant (on voit de quel côté il regarde)
+    ctx.fillStyle = sk; ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.42, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(r * 0.52, 0, r * 0.1, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = HAIR[seat % HAIR.length]; ctx.beginPath(); ctx.arc(-r * 0.02, 0, r * 0.36, Math.PI * 0.5, Math.PI * 1.5); ctx.arc(r * 0.06, 0, r * 0.3, Math.PI * 1.5, Math.PI * 0.5); ctx.fill();
+  }
+
   // ───────────────────────── joueurs vus de dessus ─────────────────────────
+  // TIR CHARGÉ lisible par tous (la ligne de visée, elle, n'est vue que du tireur) : disque + anneau qui GRANDISSENT avec la charge
+  // ch (0..1, ambre → rouge), poussière qui tourne autour du tireur, second anneau rouge clignotant à pleine charge (boulet).
+  // Liseré sombre sous chaque trait (lisible sur glace et sable). reduceFx : mêmes formes, immobiles. Trois traits + 10 tirets : bon marché.
+  function drawCharge(x, y, ch, now) {
+    const R = PR + 11 + 30 * ch, st = A.contrast ? 1.5 : 1, mv = !A.reduceFx, full = ch >= 1, col = mix([255, 194, 74], [232, 65, 58], ch);
+    ctx.save();
+    ctx.fillStyle = rgbStr(col, 0.07 + 0.13 * ch); ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(11,21,16,0.7)'; ctx.lineWidth = (5.5 + 3.5 * ch) * st; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = rgbStr(col, mv ? 0.65 + 0.3 * Math.sin(now / (full ? 55 : 130)) : 0.95); ctx.lineWidth = (2.5 + 3 * ch) * st; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.stroke();
+    const rot = mv ? now / 480 * (1 + ch) : 0, len = 5 + 10 * ch;      // poussière : dix traits radiaux qui tournent
+    ctx.lineCap = 'round'; ctx.beginPath();
+    for (let i = 0; i < 10; i++) { const u = rot + i * Math.PI / 5, c = Math.cos(u), s = Math.sin(u); ctx.moveTo(x + c * (R + 3), y + s * (R + 3)); ctx.lineTo(x + c * (R + 3 + len), y + s * (R + 3 + len)); }
+    ctx.strokeStyle = 'rgba(11,21,16,0.7)'; ctx.lineWidth = 5 * st; ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,240,200,0.95)'; ctx.lineWidth = 2.4 * st; ctx.stroke();
+    if (full) { ctx.strokeStyle = (mv && Math.sin(now / 55) < 0) ? '#ffffff' : '#ff3b30'; ctx.lineWidth = 3 * st; ctx.beginPath(); ctx.arc(x, y, R + 9, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.restore();
+  }
   // Épaules en maillot (couleur + motif du siège), bras, tête, crampons qui alternent à la course. ORIENTATION :
   // un chevron au sol devant chaque joueur (grand et ambre pour soi) + ligne de visée quand on a le ballon.
   function drawPlayer(p, v, now, over) {
-    const col = colSeat(p.seat), rc = hexRgb(col), r = PR, x = v.x, y = v.y, a = v.a, mine = p.seat === mySeat && !over;
+    const col = colSeat(p.seat), r = PR, x = v.x, y = v.y, a = v.a, mine = p.seat === mySeat && !over;
     const ph = runPhase[p.seat] || 0, step = Math.sin(ph) * r * 0.45;
     ctx.fillStyle = 'rgba(0,0,0,0.16)';                    // ombres des projecteurs : l'effet « match de nuit »
     const sx = x < AR / 2 ? 1 : -1, sy = y < AR / 2 ? 1 : -1;
     ctx.beginPath(); oval(ctx, x + sx * r * 0.7, y + sy * r * 0.3, r * 1.15, r * 0.7); ctx.fill();
     ctx.beginPath(); oval(ctx, x + sx * r * 0.2, y + sy * r * 0.75, r * 0.7, r * 1.1); ctx.fill();
     if (p.gl) { ctx.fillStyle = 'rgba(123,209,74,0.45)'; ctx.beginPath(); oval(ctx, x, y + 2, r * 1.35, r * 1.1); ctx.fill(); }   // englué : flaque de glu verte
+    if (p.ch > 0 && !over) drawCharge(x, y, p.ch, now);   // tir chargé : visible de TOUS (les défenseurs voient venir le boulet)
     if (snap.ball && snap.ball.o === p.seat) {           // porteur : anneau doré au sol ; en charge, un arc qui se remplit (ambre → rouge)
       ctx.strokeStyle = 'rgba(255,210,74,0.8)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2); ctx.stroke();
       if (p.ch > 0) { ctx.strokeStyle = rgbStr(mix([255, 194, 74], [232, 65, 58], p.ch)); ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.arc(x, y, r + 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p.ch); ctx.stroke(); ctx.lineCap = 'butt'; }
@@ -714,24 +779,7 @@ export default (function () {
       ctx.stroke();
     }
     ctx.save(); ctx.translate(x, y); ctx.rotate(a);
-    const slide = p.tk || p.dn;                        // glissade, ou encore à terre après un tacle raté
-    ctx.fillStyle = '#141414';
-    if (slide) { ctx.beginPath(); oval(ctx, r * 1.25, r * 0.3, r * 0.42, r * 0.22); ctx.fill(); ctx.beginPath(); oval(ctx, r * 0.2, -r * 0.55, r * 0.34, r * 0.2); ctx.fill(); }
-    else { ctx.beginPath(); oval(ctx, step, r * 0.42, r * 0.36, r * 0.2); ctx.fill(); ctx.beginPath(); oval(ctx, -step, -r * 0.42, r * 0.36, r * 0.2); ctx.fill(); }
-    const sh = slide ? 1.15 : 1;
-    const gr = ctx.createLinearGradient(-r, -r, r, r); gr.addColorStop(0, rgbStr(mix(rc, [255, 255, 255], 0.25))); gr.addColorStop(1, rgbStr(mix(rc, [0, 0, 0], 0.25)));
-    ctx.fillStyle = gr; ctx.beginPath(); oval(ctx, 0, 0, r * 0.62 * sh, r * 0.98); ctx.fill();
-    const pat = seatPattern(ctx, p.seat, { size: Math.max(6, r * 0.6), ink: 'rgba(255,255,255,0.35)', res: Math.round(cv.width / AR * 100) / 100 });
-    if (pat) { ctx.fillStyle = pat; ctx.beginPath(); oval(ctx, 0, 0, r * 0.62 * sh, r * 0.98); ctx.fill(); }
-    ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 1.2; ctx.beginPath(); oval(ctx, 0, 0, r * 0.62 * sh, r * 0.98); ctx.stroke();
-    const skin = SKIN[p.seat % SKIN.length], sk = rgbStr(skin);
-    ctx.fillStyle = sk;
-    ctx.beginPath(); ctx.arc(-step * 0.5, r * 0.98, r * 0.22, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(step * 0.5, -r * 0.98, r * 0.22, 0, Math.PI * 2); ctx.fill();
-    // tête + cheveux + NEZ vers l'avant (on voit de quel côté il regarde)
-    ctx.fillStyle = sk; ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.42, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(r * 0.52, 0, r * 0.1, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = HAIR[p.seat % HAIR.length]; ctx.beginPath(); ctx.arc(-r * 0.02, 0, r * 0.36, Math.PI * 0.5, Math.PI * 1.5); ctx.arc(r * 0.06, 0, r * 0.3, Math.PI * 1.5, Math.PI * 0.5); ctx.fill();
+    corps(p.seat, col, r, step, p.tk || p.dn);        // p.tk : glissade ; p.dn : encore à terre après un tacle raté
     ctx.restore();
     if (A.contrast) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(x, y, r + 1.5, 0, Math.PI * 2); ctx.stroke(); }
     if (!A.reduceFx) {
@@ -849,25 +897,46 @@ export default (function () {
   }
 
   // ───────────────────────── rendu d'une image ─────────────────────────
+  // Image : pendant le ralenti (rf = { a, b, u }), on dessine les snapshots REJOUÉS (lecture seule) à la place du snapshot vivant :
+  // `snap` est échangé le temps de l'image, sans son, sans fx rejoués, sans HUD de jeu ; puis on rend le vrai snapshot.
   function draw() {
     if (destroyed) return;
+    const t = performance.now(), rf = RL.frame(t);
+    if (!rf && pendEnd) { pendEnd = false; if (snap && snap.gs === 'over' && !endShown) finManche(snap, true); }   // fin du ralenti : journal, fanfare, carte de fin
+    if (!rf) { drawFrame(null); return; }
+    liveSnap = snap; snap = rf.u < 0.5 ? rf.a : rf.b;
+    try { drawFrame(rf); } finally { snap = liveSnap; liveSnap = null; }
+  }
+  function drawFrame(rf) {
     const now = performance.now(), kdt = Math.min(3, Math.max(0.25, (now - (lastFrame || now - 16.7)) / 16.7)); lastFrame = now;
     if (!A.reduceFx && HS.frozen(now)) return;                // arrêt sur image (but) : on garde la dernière image affichée
     CVW.clientWidth = cv.clientWidth; KH = hudK(CVW, AR, 2.2);   // zoom monde → CSS, lu une fois par image
     const sc = cv.width / AR, c = AR / 2;
     let ox = 0, oy = 0;
-    if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.86; } else shakeMag = 0;
+    if (shakeMag > 0.3 && !A.reduceFx && !rf) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.86; } else shakeMag = 0;
     ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
     if (ox || oy) { const mg = Math.ceil(Math.max(Math.abs(ox), Math.abs(oy))) + 2; ctx.fillStyle = NUIT_BG[terId] || '#050b08'; ctx.fillRect(-mg, -mg, AR + 2 * mg, AR + 2 * mg); }   // secousse : fond peint sur la marge, aucune bande périmée
     if (!G) { ctx.fillStyle = K.night; ctx.fillRect(-8, -8, AR + 16, AR + 16); return; }
+    const V = snap ? (rf ? lerpView(rf.a, rf.b, rf.u) : view(now)) : null;
+    { let n = 0, nT = 0, x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, t0 = -1;   // caméra de duel : exactement 2 joueurs (de 2 camps) en lice sur 3 ou plus au départ → cadre = les 2 joueurs + le ballon
+      if (snap && V && (snap.gs === 'play' || snap.gs === 'paused')) snap.players.forEach(p => {
+        if (p.playing) nT++;
+        if (!p.playing || !p.alive) return;
+        const v = V.pl[p.seat]; n++; if (!v || t0 === p.team) { n = 9; return; }
+        t0 = p.team; if (v.x < x0) x0 = v.x; if (v.x > x1) x1 = v.x; if (v.y < y0) y0 = v.y; if (v.y > y1) y1 = v.y;
+      });
+      const duel = n === 2 && nT >= 3;               // un 1 contre 1 d'emblée n'est pas un « duel final » : vue entière
+      if (duel && V.ball) { const b = V.ball; if (b.x < x0) x0 = b.x; if (b.x > x1) x1 = b.x; if (b.y < y0) y0 = b.y; if (b.y > y1) y1 = b.y; }
+      if (duel) { DP[0].x = x0; DP[0].y = y0; DP[1].x = x1; DP[1].y = y1; }
+      CAM.update(duel ? DP : null, AR, AR, duel, A, now); }
+    ctx.save(); CAM.apply(ctx);                              // le décor et les pièces bougent ensemble ; le HUD (plus bas) est hors caméra
     ensureDecor(); ctx.drawImage(decorCv, 0, 0, AR, AR);
     drawBulbs(now);
-    const V = snap ? view(now) : null;
     if (!A.reduceFx) eclairer(now, V);
     let duskT = 0;
     if (snap && (snap.gs === 'play' || snap.gs === 'paused' || snap.gs === 'over')) {
       if (snap.sd) duskT = Math.min(0.5, (now - sdT0) / 60000 * 0.5);
-      duskT = Math.max(duskT, DUEL.t(snap, now, duelAnnonce));
+      duskT = Math.max(duskT, DUEL.t(rf ? liveSnap : snap, now, duelAnnonce));   // ralenti : l'état vivant décide du crépuscule (pas de « Duel final » rejoué)
     }
     duskV += (duskT - duskV) * Math.min(1, 0.04 * kdt); if (duskV < 0.002) duskV = 0;
     drawGoals(now);
@@ -882,7 +951,7 @@ export default (function () {
         const pr = runPhase['p' + p.seat], d = pr ? Math.hypot(v.x - pr.x, v.y - pr.y) : 0;
         runPhase['p' + p.seat] = { x: v.x, y: v.y };
         runPhase[p.seat] = ((runPhase[p.seat] || 0) + (A.reduceFx ? 0 : Math.min(1.2, d * 0.32))) % (Math.PI * 2);
-        if ((p.tk || (p.spr && Math.random() < 0.35)) && !A.reduceFx && Math.random() < 0.6 * kdt) grass(v.x - Math.cos(v.a) * PR, v.y - Math.sin(v.a) * PR, 1, 0.8, v.a + Math.PI);
+        if ((p.tk || (p.spr && Math.random() < 0.35)) && !A.reduceFx && !rf && Math.random() < 0.6 * kdt) grass(v.x - Math.cos(v.a) * PR, v.y - Math.sin(v.a) * PR, 1, 0.8, v.a + Math.PI);
       });
       const b = V.ball;
       if (b) {
@@ -894,8 +963,8 @@ export default (function () {
         for (let i = 0; i < trail.length; i++) { const q = trail[i], al = (i + 1) / trail.length * 0.28; ctx.fillStyle = 'rgba(255,255,240,' + al + ')'; ctx.beginPath(); ctx.arc(q.x, q.y, BR * (0.4 + 0.6 * (i + 1) / trail.length), 0, Math.PI * 2); ctx.fill(); }
       }
       const me = mySeat >= 0 ? snap.players[mySeat] : null;
-      { const dz = dangerTarget(b, me); dangerK += (dz - dangerK) * Math.min(1, (dz > dangerK ? 0.45 : 0.12) * kdt); if (dangerK < 0.02) dangerK = 0; }
-      if (me && me.playing && me.alive && b && b.o === mySeat && snap.gs === 'play' && V.pl[mySeat]) drawAim(me, V.pl[mySeat], b, now);
+      { const dz = rf ? 0 : dangerTarget(b, me); dangerK += (dz - dangerK) * Math.min(1, (dz > dangerK ? 0.45 : 0.12) * kdt); if (dangerK < 0.02) dangerK = 0; }
+      if (!rf && me && me.playing && me.alive && b && b.o === mySeat && snap.gs === 'play' && V.pl[mySeat]) drawAim(me, V.pl[mySeat], b, now);
       const ordre = snap.players.filter(p => p.playing && p.alive && V.pl[p.seat]).sort((p, q) => (p.seat === (b && b.o) ? 1 : 0) - (q.seat === (b && b.o) ? 1 : 0));
       ordre.forEach(p => drawPlayer(p, V.pl[p.seat], now, over));
       if (b) drawBall(b.x, b.y, BR, ballSpin);
@@ -911,7 +980,7 @@ export default (function () {
       });
     }
     drawWeather(now, kdt);
-    if (!A.reduceFx) {
+    if (!A.reduceFx && !rf) {                              // ralenti : ni particules ni fx rejoués
       ctx.save();
       for (let i = puffs.length - 1; i >= 0; i--) { const q = puffs[i], tt = (now - q.born) / q.life; if (tt >= 1) { puffs.splice(i, 1); continue; } q.x += q.vx * kdt; q.y += q.vy * kdt; q.vx *= 0.92; q.vy *= 0.92; ctx.globalAlpha = 1 - tt; ctx.fillStyle = q.col; ctx.fillRect(q.x, q.y, q.r, q.r * 2.2); }
       for (let i = confs.length - 1; i >= 0; i--) { const q = confs[i], tt = (now - q.born) / q.life; if (tt >= 1) { confs.splice(i, 1); continue; } q.x += q.vx * kdt; q.y += q.vy * kdt; q.vx *= 0.97; q.vy = q.vy * 0.97 + 0.06 * kdt; q.rot += q.vr * kdt; ctx.globalAlpha = tt > 0.7 ? (1 - tt) / 0.3 : 1; ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.rot); ctx.fillStyle = q.col; ctx.fillRect(-3, -1.5, 6, 3); ctx.restore(); }
@@ -919,11 +988,12 @@ export default (function () {
       for (let i = sparks.length - 1; i >= 0; i--) { const q = sparks[i], tt = (now - q.born) / q.life; if (tt >= 1) { sparks.splice(i, 1); continue; } ctx.globalAlpha = 1 - tt; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.beginPath(); for (let k = 0; k < 6; k++) { const u = k * 1.047, r0 = 3 + tt * 4, r1 = 6 + tt * 12; ctx.moveTo(q.x + Math.cos(u) * r0, q.y + Math.sin(u) * r0); ctx.lineTo(q.x + Math.cos(u) * r1, q.y + Math.sin(u) * r1); } ctx.stroke(); }
       for (let i = flashes.length - 1; i >= 0; i--) { const q = flashes[i], tt = (now - q.t0) / 320; if (tt >= 1) { flashes.splice(i, 1); continue; } ctx.globalAlpha = 0.6 * (1 - tt); ctx.strokeStyle = K.ink; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, q.y, 52 * (0.6 + 0.4 * tt), 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; drawFlash(ctx, q.x, q.y, 52, tt); }   // liseré sombre : l'éclat blanc reste visible sur la glace et le sable
       ctx.restore();
-    } else { puffs.length = 0; confs.length = 0; waves.length = 0; sparks.length = 0; flashes.length = 0; }
+    } else if (A.reduceFx) { puffs.length = 0; confs.length = 0; waves.length = 0; sparks.length = 0; flashes.length = 0; }
     crepuscule(ctx, -24, -24, AR + 48, AR + 48, duskV, { soleil: false, force: A.contrast ? 0.45 : A.reduceFx ? 0.55 : 1 });
+    ctx.restore();                                         // fin de la caméra de duel
     if (dangerK > 0.03) { if (!A.reduceFx) drawDanger(ctx, AR, AR, dangerK * 0.9, now); if ((A.reduceFx || A.contrast) && dangerK > 0.3 && dangerE) markMouth(dangerE); }
     drawWindGauge(now);
-    for (let i = texts.length - 1; i >= 0; i--) {         // bandeaux « BUT ! », « POTEAU ! »
+    for (let i = texts.length - 1; i >= 0 && !rf; i--) {  // bandeaux « BUT ! », « POTEAU ! »
       const o = texts[i], t = (now - o.born) / 1500; if (t >= 1) { texts.splice(i, 1); continue; }
       const s = A.reduceFx ? 1 : (t < 0.1 ? 0.4 + 0.8 * t / 0.1 : t < 0.2 ? 1.2 - 0.2 * (t - 0.1) / 0.1 : 1);
       ctx.save(); ctx.translate(c, c - 30); ctx.scale(s, s); ctx.globalAlpha = t > 0.75 ? (1 - t) / 0.25 : 1;
@@ -933,12 +1003,12 @@ export default (function () {
       if (o.sub) { const fb = readable(15, CVW, AR, 9), yo = big * 0.5 + fb * 0.6 + 2; ctx.font = 'bold ' + fb + 'px system-ui, sans-serif'; ctx.lineWidth = 4; ctx.strokeText(o.sub, 0, yo); ctx.fillStyle = K.chalk; ctx.fillText(o.sub, 0, yo); }
       ctx.restore();
     }
-    CALL.draw(ctx, AR, AR, now, A);                        // « DOUBLÉ ! » / « TRIPLÉ ! »
+    if (!rf) CALL.draw(ctx, AR, AR, now, A);                        // « DOUBLÉ ! » / « TRIPLÉ ! »
     // jauges du joueur local : tir (charge), sprint (endurance), tacle (recharge) + effets actifs
     // bloc mis à l'échelle KH (lisible sur téléphone) ; hudTop = bord haut du bloc, pour ranger les messages au-dessus
     const me = (snap && mySeat >= 0) ? snap.players[mySeat] : null;
     hudTop = AR;
-    if (me && me.playing && me.alive && snap.gs === 'play') {
+    if (!rf && me && me.playing && me.alive && snap.gs === 'play') {
       const aLui = snap.ball && snap.ball.o === mySeat, k = KH;
       // une cage en bas du cadre : jauges empilées dans le coin bas gauche (sinon elles masquaient filet et vies)
       const basOccupe = G.some(e => e.owner !== -1 && e.ny < -0.9 && e.my > AR - MARGE - 2);
@@ -985,7 +1055,7 @@ export default (function () {
       ctx.save(); const fc = readable(14, CVW, AR, 9); ctx.font = 'bold ' + fc + 'px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.75)';
       const sub = LOOK().i + ' ' + LOOK().nom, ys = c + 22 + fc * 0.9; ctx.strokeText(sub, c, ys); ctx.fillStyle = K.chalk; ctx.fillText(sub, c, ys); ctx.restore();
     }
-    if (snap && snap.frz && snap.gs === 'play') {
+    if (!rf && snap && snap.frz && snap.gs === 'play') {
       const fe = readable(13, CVW, AR, 9), ye = Math.min(AR - 56, hudTop - 10 - fe * 0.5);   // au-dessus du bloc de jauges quand il est agrandi
       ctx.save(); ctx.font = 'bold ' + fe + 'px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.7)';
       ctx.strokeText('Engagement au centre…', c, ye); ctx.fillStyle = K.chalk; ctx.fillText('Engagement au centre…', c, ye); ctx.restore();
@@ -1008,18 +1078,47 @@ export default (function () {
         say(tot >= 2 ? (TOUCH ? '▶ Touche l\'écran pour le coup d\'envoi' : '▶ Espace / clic pour le coup d\'envoi') : 'En attente d\'un 2ᵉ joueur… (ou ajoute un bot 🤖)', y0 + f1 * 1.85 + f2 * 0.6 + 6, f2, 'bold ', 'rgba(242,246,238,.65)');
       }
     }
+    if (rf) RL.drawOverlay(ctx, AR, AR, now, A);           // bandes cinéma, « RALENTI », barre de progression : en tout dernier
+    else if (snap && snap.gs === 'over' && endShown) drawFootPodium(now);
+  }
+
+  // ───────────────────────── podium de fin ─────────────────────────
+  // Bande haute du terrain (0 → 38 % de la hauteur) : la carte DOM de fin (plein cadre, centrée) est descendue en dessous par
+  // endEl.style.top, sinon elle recouvrirait le podium (et sur téléphone il n'y aurait aucune place libre). Les pièces = les
+  // footballeurs du jeu (corps() : maillot + motif du siège), jamais un avatar. Match nul : estrade commune aux ex æquo de tête.
+  const POD_H = 0.38;
+  function pieceFoot(c, e, x, y, size, rank) {
+    const r = size * 0.42;
+    c.translate(x, y); c.rotate(Math.PI / 2); corps(e.seat, colSeat(e.seat), r, 0, false);        // face au public
+    c.rotate(-Math.PI / 2); if (rank === 1) drawBall(r * 0.95, r * 0.95, r * 0.34, 0.5, false);      // le vainqueur garde le ballon au pied
+  }
+  function drawFootPodium(now) {
+    if (podSnap !== snap) { podSnap = snap; podEnt = podiumEntries(snap.players, colSeat); }
+    if (!podEnt || !podEnt.length) { endEl.style.top = ''; endEl.style.justifyContent = ''; return; }
+    const hp = AR * POD_H;
+    ctx.save(); ctx.fillStyle = A.contrast ? '#000' : 'rgba(6,12,9,0.8)'; ctx.fillRect(0, 0, AR, hp);
+    ctx.fillStyle = A.contrast ? '#fff' : K.amber; ctx.fillRect(0, hp - 2, AR, 2); ctx.restore();
+    drawPodium(ctx, { x: AR * 0.03, y: AR * 0.012, w: AR * 0.94, h: hp - AR * 0.02 }, now, {
+      entries: podEnt, A, W: AR, t0: podT0, nul: snap.winner < 0,
+      theme: { step: '#17402a', edge: A.contrast ? '#ffffff' : K.amber, text: K.chalk, glow: K.gold },
+      drawPiece: pieceFoot,
+    });
+    const ch = cv.clientHeight;
+    if (ch > 0) { const tp = (cv.offsetTop + Math.round(ch * POD_H)) + 'px'; if (endEl.style.top !== tp) { endEl.style.top = tp; endEl.style.justifyContent = 'flex-start'; } }   // lue depuis le haut (centrée, son titre débordait hors de vue sur téléphone)   // la carte commence sous le podium
   }
   function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }
 
   // ───────────────────────── entrées ─────────────────────────
   function pushInput() { send({ t: 'input', up: input.up, down: input.down, left: input.left, right: input.right }); }
   function setIn(k, v) { if (input[k] === v) return; input[k] = v; pushInput(); }
+  // 1er appui (Espace / clic / tap) pendant le ralenti : il le passe, et RIEN d'autre (ni « Rejouer » ni le clic qui suit)
+  function skipRep() { const t = performance.now(); if (RL.active(t)) { RL.skip(); skipT = t; return true; } return t - skipT < 600; }
   const isPlay = () => snap && (snap.gs === 'play' || snap.gs === 'paused');
   const onKeyDown = e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
     if (e.repeat) return;
-    if (e.key === ' ') { if (snap && (snap.gs === 'lobby' || snap.gs === 'over')) send({ t: 'start' }); else if (snap && (snap.gs === 'play' || snap.gs === 'countdown')) charge(true); return; }
+    if (e.key === ' ') { if (skipRep()) return; if (snap && (snap.gs === 'lobby' || snap.gs === 'over')) send({ t: 'start' }); else if (snap && (snap.gs === 'play' || snap.gs === 'countdown')) charge(true); return; }
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.key === 'Shift') { sprint(true); return; }
     if (e.code === 'KeyE' && isPlay()) { send({ t: 'tackle' }); return; }
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && isPlay()) { send({ t: 'pause' }); return; }
@@ -1055,7 +1154,7 @@ export default (function () {
     startBtn = $('ftStart'); pauseBtn = $('ftPause'); modeBtn = $('ftMode'); botsBtn = $('ftBots'); diffBtn = $('ftDiff'); livesBtn = $('ftLives'); pauseFloat = $('ftPauseFloat');
     lbBtn = $('ftLbBtn'); lbPanel = $('ftLbPanel'); lbBody = $('ftLbBody'); shootBtn = $('ftShoot'); tackleBtn = $('ftTackle'); sprintBtn = $('ftSprint');
     optBtn = $('ftOpt'); optPanel = $('ftOptPanel'); buildOptPanel();
-    startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
+    startBtn.onclick = () => { if (skipRep()) return; unlockAudio(); send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' });
     pauseFloat.onclick = () => send({ t: 'pause' });
     modeBtn.onclick = () => send({ t: 'mode' });
@@ -1065,8 +1164,9 @@ export default (function () {
     if (optBtn && optPanel) optBtn.onclick = () => togglePanel(optPanel);
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('ftHelp'), helpPanel = $('ftHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
-    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && !isPlay() && snap.gs !== 'countdown') send({ t: 'start' }); });
-    if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
+    if (premiere) cv.addEventListener('pointerdown', () => { if (RL.active(performance.now())) skipRep(); });
+    if (premiere) cv.addEventListener('click', () => { if (skipRep()) return; unlockAudio(); if (snap && !isPlay() && snap.gs !== 'countdown') send({ t: 'start' }); });
+    if (premiere) endEl.addEventListener('click', () => { if (skipRep()) return; unlockAudio(); send({ t: 'start' }); });
     if (premiere) { hold('ftUp', 'up'); hold('ftDown', 'down'); hold('ftLeft', 'left'); hold('ftRight', 'right'); tap('ftTackle', 'tackle'); holdFn('ftShoot', charge); holdFn('ftSprint', sprint); }
     applyColors();
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
@@ -1074,6 +1174,7 @@ export default (function () {
     music.dispose(); music = createMusic(() => actx, () => A, MUSIC_THEME);   // (init rappelé sans teardown : on ne laisse pas l'ancien écouteur)
     music.start();
     prevFrz = 0; chipUntil = 0; sdCue = 0; dangerK = 0; dangerE = null; bvx = 0; bvy = 0; bulbT0 = 0; flashes.length = 0; gCount = {};
+    RL.clear(); CAM.reset(); pendEnd = false; frzT0 = 0; podSnap = null; endEl.style.top = ''; endEl.style.justifyContent = '';
     rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
@@ -1088,6 +1189,7 @@ export default (function () {
     music.stop(); music.dispose(); music = NOMUSIC;      // ordonnanceur + écouteur visibilitychange
     if (actx) { try { actx.close(); } catch { try { actx.suspend(); } catch {} } actx = null; noiseBuf = null; }   // recréé au prochain geste (unlockAudio)
     flashes.length = 0; bulbT0 = 0; sdCue = 0; dangerK = 0; dangerE = null;
+    RL.clear(); CAM.reset(); pendEnd = false; frzT0 = 0; podSnap = null; podEnt = null; liveSnap = null; if (endEl) endEl.style.top = ''; endEl.style.justifyContent = '';
   }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };

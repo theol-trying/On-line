@@ -14,6 +14,10 @@ import { crepuscule, creerDuel } from '../../crepuscule.js';
 import { creerJournal, blocFin } from '../../finpartie.js';
 // aides visuelles partagées : enchaînements (DOUBLÉ !), arrêt sur image + éclat à l'élimination, vignette de danger, pastilles de siège, lisibilité mobile
 import { createStreaks, createCallouts, streakText, createHitStop, drawFlash, drawDanger, drawSeatChip, readable, hudK } from '../../exploits.js';
+// fin de manche : ralenti du dernier char détruit, podium au canvas (chars), caméra de duel (2 survivants / 2 camps)
+import { createRalenti } from '../../ralenti.js';
+import { drawPodium, podiumEntries } from '../../podium.js';
+import { createDuelCam } from '../../camera-duel.js';
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -136,6 +140,11 @@ export default (function () {
   const parts = [], rings = [], scorch = [], prints = [], wrecks = [];   // effets ; cratères (manche) ; empreintes de chenilles ; épaves qui brûlent
   const recoil = {}, tread = {};                                         // siège -> heure du dernier tir ; siège -> odomètre des chenilles
   let scorchVer = 0;
+  const RL = createRalenti({ keepMs: 3000, windowMs: 1500, slow: 0.4 });   // tampon des derniers états : rejeu au ralenti du dernier char détruit
+  const CAM = createDuelCam({ maxZoom: 1.1, ease: 0.05, margin: 140 });      // zoom doux sur les 2 derniers chars (modeste : les obus venus de hors cadre restent visibles)
+  const DP = [{ x: 0, y: 0 }, { x: 0, y: 0 }];                                // points de la caméra de duel (réutilisés)
+  const rtread = {}; let TR = tread;                                          // odomètres du rejeu (séparés des vrais) ; TR = jeu d'odomètres courant
+  let replaying = false, rframe = null, pendingEnd = null, podT0 = 0, duskLast = 0;   // rejeu en cours (aucun son/fx) ; image rejouée ; carte de fin différée ; début de l'animation du podium ; dernier crépuscule réel
   const LUM = creerLumieres(24);                        // flashs de lumière au sol (départs de tir, impacts, explosions, EMP)
   const J = creerJournal();                             // journal de manche : vies par siège + moments marquants (écran de fin)
   let roundMs = 0, lastPlayT = 0, livesKey = '', prevShells = null;
@@ -203,6 +212,8 @@ export default (function () {
     lbBody.innerHTML = B.sort((a, b) => (b.wins || 0) - (a.wins || 0) || b.kd - a.kd).map(e =>
       `<div class="lbrow"><span class="lbn">${esc(e.name)}</span><span title="combats">🎮${e.games || 0}</span><span title="victoires">🏆${e.wins || 0}</span><span title="chars détruits">⚡${e.kills || 0}</span><span title="touches">🎯${e.dmg || 0}</span><span title="K/D">⚖${(e.deaths ? ((e.kills || 0) / e.deaths).toFixed(2) : (e.kills ? '∞' : '0'))}</span></div>`).join('');
   }
+  // La carte de fin recouvre tout le plateau : quand le podium est dessiné, on la descend sous sa bande (styles en ligne, retirés ici).
+  function resetEndCard() { if (!endEl) return; endEl.__top = null; endEl.style.top = ''; endEl.style.justifyContent = ''; endEl.style.borderRadius = ''; }
   function showEndscreen(m) {
     if (m.gs !== 'over' || !m.stats) { endEl.classList.add('hidden'); return; }
     endEl.classList.remove('hidden');
@@ -239,6 +250,9 @@ export default (function () {
     STK.reset(); flashes.length = 0;
     LUM.vider(); roundMs = 0; lastPlayT = 0;
     J.fin(); prevShells = null;                         // nouvelle manche (ou retour après teardown) : le journal repart au prochain 'play'
+    RL.clear(); CAM.reset(); pendingEnd = null; podT0 = 0; replaying = false; rframe = null; TR = tread; duskLast = 0;   // plus de rejeu, de carte de fin différée ni de zoom
+    for (const k in rtread) delete rtread[k];
+    resetEndCard();
   }
   // Obus ayant ricoché : le snapshot ne dit pas combien de rebonds un obus a faits. On apparie chaque obus
   // à celui de l'état précédent (même tireur, le plus proche) : une composante de vitesse qui change de signe
@@ -293,6 +307,7 @@ export default (function () {
     if (mk !== mudKey) { mudKey = mk; mudSet = new Set(m.mud || []); }
     snap = m; teamMode = !!(m.mode && m.mode !== 'ffa');
     if (m.round !== prevRound) { prevRound = m.round; resetRound(); }   // nouvelle manche : terrain propre
+    RL.push(m, performance.now());                           // tampon du ralenti : chaque état (grille déjà reconstituée ci-dessus), avant tout le reste
     const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
@@ -313,7 +328,7 @@ export default (function () {
       prevLv[s] = p.alive ? (p.lives | 0) : 0; prevInv[s] = inv;
     }
     msgKilled = {}; msgBarrels = [];
-    (m.fx || []).forEach(playFx);
+    (m.fx || []).forEach(playFx);                            // (jamais rejoués pendant le ralenti : ils sont consommés ici, à l'arrivée de l'état)
     if (msgBarrels.length >= 2) {                            // chaîne de barils : attribuée au tireur de l'obus qui l'a déclenchée
       const b0 = msgBarrels[0], sh = lastShellOf(-1, b0.x, b0.y, 60 * 60);
       if (sh && m.players[sh.o]) J.moment(tNow, sh.o, 'a fait sauter ' + msgBarrels.length + ' barils en chaîne', 3 + msgBarrels.length);
@@ -329,7 +344,14 @@ export default (function () {
     const me = mySeat >= 0 ? m.players[mySeat] : null;
     if (me && me.playing && me.alive && m.gs === 'play' && me.lives === 1 && prevMyLives > 1) music.sting('alert');   // dernière vie : alerte
     prevMyLives = me && me.playing && me.alive ? me.lives : -1;
-    if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); overAt = performance.now(); }
+    const wasOver = prevGs === 'over';
+    if (wasOver && m.gs !== 'over') { RL.clear(); pendingEnd = null; }   // on quitte l'écran de fin : plus de rejeu ni de carte différée
+    let replayed = false;
+    if (!wasOver && m.gs === 'over') {
+      replayed = !A.reduceFx && RL.start(performance.now());   // dernier char détruit : rejeu au ralenti (sinon comportement d'avant)
+      if (replayed) { pendingEnd = m; shakeMag = 0; }          // carte de fin, fanfare et podium attendent la fin du rejeu
+      else { sound('win'); music.sting('win'); overAt = performance.now(); }
+    }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte 3·2·1 : bip radio
     if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); }                            // « FEU ! » : salve
     lastCount = m.count;
@@ -338,7 +360,10 @@ export default (function () {
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive); if ((tot >= 3 && alive.length <= 2) || alive.some(p => p.lives === 1)) inten = 2; }
       music.setIntensity(inten); }
     refreshHUD();
-    if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } } else { endShown = false; endEl.classList.add('hidden'); }
+    if (m.gs === 'over') {
+      if (!endShown) { endShown = true; if (!replayed) { showEndscreen(m); podT0 = performance.now(); } }   // rejeu lancé : showEndscreen + podium sont déclenchés par draw() à sa fin
+      else if (pendingEnd) pendingEnd = m;                                                                  // rejeu en cours : la carte utilisera le dernier état reçu
+    } else { endShown = false; pendingEnd = null; podT0 = 0; endEl.classList.add('hidden'); resetEndCard(); }
     const idle = m.gs === 'lobby' || m.gs === 'over';
     const total = (m.connected || 0) + (m.botCount || 0);
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1 && total >= 2); startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
@@ -533,15 +558,40 @@ export default (function () {
   }
 
   // ───────────────────────── interpolation ─────────────────────────
+  // positions/angles des chars entre deux états (sa, sb) à la fraction al ; commun au temps réel et au rejeu
+  function lerpTanks(sa, sb, al) {
+    const out = {};
+    sb.players.forEach(pb => { if (!pb.playing) return; const pa = sa.players[pb.seat]; let x = pb.x, y = pb.y, ang = pb.angle; if (pa && pa.playing && Math.hypot(pb.x - pa.x, pb.y - pa.y) < 80) { x = pa.x + (pb.x - pa.x) * al; y = pa.y + (pb.y - pa.y) * al; const da = Math.atan2(Math.sin(pb.angle - pa.angle), Math.cos(pb.angle - pa.angle)); ang = pa.angle + da * al; } out[pb.seat] = { x, y, angle: ang }; });
+    return out;
+  }
   function viewTanks(now) {
     if (buf.length === 0) return null;
     const target = now - INTERP_MS; let a = buf[0], b = buf[buf.length - 1];
     for (let i = 0; i < buf.length; i++) if (buf[i].t <= target) a = buf[i];
     for (let i = buf.length - 1; i >= 0; i--) if (buf[i].t >= target) b = buf[i];
     const span = b.t - a.t; let al = span > 0 ? (target - a.t) / span : 0; al = al < 0 ? 0 : al > 1 ? 1 : al;
-    const out = {};
-    b.s.players.forEach(pb => { if (!pb.playing) return; const pa = a.s.players[pb.seat]; let x = pb.x, y = pb.y, ang = pb.angle; if (pa && pa.playing && Math.hypot(pb.x - pa.x, pb.y - pa.y) < 80) { x = pa.x + (pb.x - pa.x) * al; y = pa.y + (pb.y - pa.y) * al; const da = Math.atan2(Math.sin(pb.angle - pa.angle), Math.cos(pb.angle - pa.angle)); ang = pa.angle + da * al; } out[pb.seat] = { x, y, angle: ang }; });
-    return out;
+    return lerpTanks(a.s, b.s, al);
+  }
+  // Rejeu : état « affichable » entre deux instantanés du tampon (jamais modifiés). Les joueurs, mines, bonus, murs viennent de l'instantané
+  // le plus proche ; les obus sont appariés (même tireur, le plus proche) pour glisser d'un état à l'autre. `gs` forcé à 'play' : pas d'écran de fin.
+  const RS = {};
+  function replaySnap(f) {
+    const base = f.u < 0.5 ? f.a : f.b, other = base === f.a ? f.b : f.a, fromA = base === f.a;
+    for (const k in RS) delete RS[k];
+    for (const k in base) RS[k] = base[k];
+    RS.gs = 'play';
+    const sh = base.shells || [], os = other.shells || [], out = [];
+    for (let i = 0; i < sh.length; i++) {
+      const s = sh[i]; let best = null, bd = SHELL_MATCH2;
+      for (let j = 0; j < os.length; j++) { const q = os[j]; if (q.o !== s.o || !!q.h !== !!s.h) continue; const d = (q.x - s.x) * (q.x - s.x) + (q.y - s.y) * (q.y - s.y); if (d < bd) { bd = d; best = q; } }
+      if (!best) { out.push(s); continue; }
+      const pa = fromA ? s : best, pb = fromA ? best : s, c = {};
+      for (const k in s) c[k] = s[k];
+      c.x = pa.x + (pb.x - pa.x) * f.u; c.y = pa.y + (pb.y - pa.y) * f.u;
+      out.push(c);
+    }
+    RS.shells = out;
+    return RS;
   }
 
   // ───────────────────────── décor statique pré-rendu ─────────────────────────
@@ -757,8 +807,8 @@ export default (function () {
   // les maillons qui défilent, le canon (recul), la flamme de bouche et les accessoires de bonus sont en direct.
   const HX0 = -TANK_R * 1.14, HY0 = -TANK_R * 1.0, HW = TANK_R * 2.28, HH = TANK_R * 2.0;
   const tankSpr = {};
-  function getTankSpr(id, col, seat) {
-    const S = Math.max(1, cv.width / ARENA), key = col + '|' + seat + '|' + S.toFixed(3) + '|' + (A.contrast ? 1 : 0);
+  function getTankSpr(id, col, seat, mul) {           // mul : sur-échantillonnage (podium : le char y est dessiné bien plus grand qu'en jeu)
+    const S = Math.max(1, cv.width / ARENA) * (mul || 1), key = col + '|' + seat + '|' + S.toFixed(3) + '|' + (A.contrast ? 1 : 0);
     let o = tankSpr[id];
     if (o && o.key === key) return o;
     if (!o) o = tankSpr[id] = { hull: document.createElement('canvas'), tur: document.createElement('canvas'), key: '', w: HW, h: HH };
@@ -874,8 +924,8 @@ export default (function () {
   // odomètre des chenilles + empreintes + poussière : c'est la réaction du SOL, émise même pour un char camouflé
   // (le panneau d'aide le promet : « on peut te pister à la trace »). Tout ce qui vient du char lui-même est filtré.
   function stepTread(p, t, now, kdt) {
-    let tr = tread[p.seat];
-    if (!tr) tr = tread[p.seat] = { l: 0, r: 0, x: t.x, y: t.y, a: t.angle, mx: t.x, my: t.y, mv: 0, fwd: 0, sway: 0 };
+    let tr = TR[p.seat];                               // TR = odomètres réels, ou ceux du rejeu (séparés : le rejeu ne dérange pas les vrais)
+    if (!tr) tr = TR[p.seat] = { l: 0, r: 0, x: t.x, y: t.y, a: t.angle, mx: t.x, my: t.y, mv: 0, fwd: 0, sway: 0 };
     let dx = t.x - tr.x, dy = t.y - tr.y, da = Math.atan2(Math.sin(t.angle - tr.a), Math.cos(t.angle - tr.a));
     if (dx * dx + dy * dy > 900) { dx = 0; dy = 0; da = 0; tr.mx = t.x; tr.my = t.y; }   // replacement (vie perdue) : pas de glissade
     const ca = Math.cos(t.angle), sa = Math.sin(t.angle), fwd = dx * ca + dy * sa, w = TANK_R * 0.76;
@@ -884,7 +934,7 @@ export default (function () {
     const moving = Math.abs(fwd) > 0.04 || Math.abs(da) > 0.004;
     tr.mv = moving ? Math.min(1, tr.mv + 0.2 * kdt) : Math.max(0, tr.mv - 0.08 * kdt);
     tr.sway += ((moving ? -Math.sign(fwd) * 0.9 : 0) - tr.sway) * Math.min(1, 0.12 * kdt);
-    if (A.reduceFx || !moving) return tr;
+    if (A.reduceFx || replaying || !moving) return tr;   // rejeu : ni empreintes ni poussière
     const boue = mudSet.has(Math.floor(t.y / BLK) * G + Math.floor(t.x / BLK));
     if (Math.hypot(t.x - tr.mx, t.y - tr.my) > 3.4) { addPrint(t.x, t.y, ca, sa, boue, now); tr.mx = t.x; tr.my = t.y; }
     if (Math.random() < (boue ? 0.6 : 0.28) * kdt) {    // poussière (ou boue projetée) à l'arrière des chenilles
@@ -1142,11 +1192,12 @@ export default (function () {
     const cw = 20, aw = MAX_SHELLS * 9 + 4, total = aw + chips.length * (cw + 4), y = -17, x0 = -total / 2;
     const k = Math.min(hudK(cv, ARENA), (ARENA - 12) / (total + 14)), ax = ARENA / 2, ay = ARENA - 5, hw = (total / 2 + 7) * k, top = ay - 24 * k;
     let under = false;
-    for (let i = 0; i < vis.length && !under; i++) under = boxHit(vis[i].vx, vis[i].vy, TANK_R + 2, ax - hw, top, ax + hw, ay);
+    const w0 = CAM.toWorld(ax - hw, top), w1 = CAM.toWorld(ax + hw, ay), bx0 = w0.x, by0 = w0.y, bx1 = w1.x, by1 = w1.y;   // la jauge est hors caméra : son cadre est ramené dans le repère monde (zoom de duel)
+    for (let i = 0; i < vis.length && !under; i++) under = boxHit(vis[i].vx, vis[i].vy, TANK_R + 2, bx0, by0, bx1, by1);
     const mines = snap.mines || [], shells = snap.shells || [], pks = snap.pickups || [];
-    for (let i = 0; i < mines.length && !under; i++) under = boxHit(mines[i].x, mines[i].y, 9, ax - hw, top, ax + hw, ay);
-    for (let i = 0; i < shells.length && !under; i++) under = boxHit(shells[i].x, shells[i].y, SHELL_R + 2, ax - hw, top, ax + hw, ay);
-    for (let i = 0; i < pks.length && !under; i++) under = boxHit(pks[i].x, pks[i].y, 14, ax - hw, top, ax + hw, ay);
+    for (let i = 0; i < mines.length && !under; i++) under = boxHit(mines[i].x, mines[i].y, 9, bx0, by0, bx1, by1);
+    for (let i = 0; i < shells.length && !under; i++) under = boxHit(shells[i].x, shells[i].y, SHELL_R + 2, bx0, by0, bx1, by1);
+    for (let i = 0; i < pks.length && !under; i++) under = boxHit(pks[i].x, pks[i].y, 14, bx0, by0, bx1, by1);
     const tgt = under ? 0.3 : 1;
     hudA = A.reduceFx ? tgt : hudA + (tgt - hudA) * Math.min(1, 0.25 * kdt);
     ctx.save(); ctx.globalAlpha = hudA; ctx.translate(ax, ay); ctx.scale(k, k);
@@ -1215,29 +1266,47 @@ export default (function () {
         lumiere(ctx, t.x + ca * TANK_R * 2.6, t.y + sa * TANK_R * 2.6, TANK_R * 2.3, '#ffeec0', 0.32 * dusk);
       }
     }
-    LUM.dessiner(ctx, now);                          // flashs : départs de tir, impacts, explosions, barils, EMP
+    if (!replaying) LUM.dessiner(ctx, now);          // flashs : départs de tir, impacts, explosions, barils, EMP (pas pendant le rejeu : ce sont les flashs de la fin réelle)
   }
   const vis = [];                                     // chars visibles de cette image (réutilisé : pas d'allocation)
-  function draw() {
-    if (destroyed) return;
-    const now = performance.now();
-    if (!A.reduceFx && HS.frozen(now)) { lastFrame = now; return; }      // arrêt sur image (60 ms) sur un char détruit : on garde la dernière image affichée
+  // Caméra de duel : il ne reste que 2 chars en lice, de 2 camps différents (en FFA : les 2 derniers ; en équipes : un survivant par camp),
+  // sur une partie de 3 participants ou plus (un 1 contre 1 d'emblée n'a pas de « duel final »). Un char camouflé pour cet écran ne doit
+  // pas être trahi par le cadrage : caméra à plat dans ce cas. Renvoie les 2 points (réutilisés) ou null.
+  function duelPair(tv) {
+    if (!snap || nPlay < 3 || (snap.gs !== 'play' && snap.gs !== 'paused')) return null;
+    let n = 0, a = null, b = null;
+    for (const p of snap.players) { if (!p.playing || !p.alive) continue; if (++n > 2) return null; if (n === 1) a = p; else b = p; }
+    if (n !== 2 || (teamMode && a.team === b.team) || hiddenFor(a) || hiddenFor(b)) return null;
+    const ta = (tv && tv[a.seat]) || a, tb = (tv && tv[b.seat]) || b;
+    DP[0].x = ta.x; DP[0].y = ta.y; DP[1].x = tb.x; DP[1].y = tb.y;
+    return DP;
+  }
+  // Une image : temps réel, ou rejeu (rf = { a, b, u } du tampon ; `snap` est alors remplacé par l'état rejoué le temps de l'appel).
+  // Renvoie false si l'image est gelée (arrêt sur image : l'écran garde la précédente).
+  function drawFrame(now, rf) {
+    const rp = !!rf;
+    if (!rp && !A.reduceFx && HS.frozen(now)) { lastFrame = now; return false; }      // arrêt sur image (60 ms) sur un char détruit : on garde la dernière image affichée
     const kdt = Math.min(3, Math.max(0.25, (now - (lastFrame || now - 16.7)) / 16.7)); lastFrame = now;
     const sc = cv.width / ARENA, c = ARENA / 2, fx = !A.reduceFx, R = TANK_R;
     let ox = 0, oy = 0;
-    if (shakeMag > 0.3 && fx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= Math.pow(0.86, kdt); } else shakeMag = 0;
+    if (!rp && shakeMag > 0.3 && fx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= Math.pow(0.86, kdt); } else shakeMag = 0;
     ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
     ctx.fillStyle = K.bg; ctx.fillRect(-20, -20, ARENA + 40, ARENA + 40);
     ensureGround();
+    const tv = snap ? (rp ? lerpTanks(rf.a, rf.b, rf.u) : viewTanks(now)) : null;
+    let dusk;                                          // temps de manche OU duel final ; figé pendant le rejeu (l'état du duel ne se rejoue pas)
+    if (rp) dusk = duskLast; else { dusk = Math.max(duskT(now), DUEL.t(snap, now, duelAnnonce)); duskLast = dusk; }
+    const pair = duelPair(tv);
+    CAM.update(pair, ARENA, ARENA, !!pair, A, now);
+    ctx.save(); CAM.apply(ctx);                        // caméra : décor + pièces ; le HUD, les écrans et les annonces sont dessinés après ctx.restore()
     if (snap && snap.grid) { ensureWalls(); ctx.drawImage(wallsCv, 0, 0, ARENA, ARENA); }   // décor statique pré-rendu : 1 drawImage
     else ctx.drawImage(groundCv, 0, 0, ARENA, ARENA);
     if (fx) drawAmbient(now);
-    const dusk = Math.max(duskT(now), DUEL.t(snap, now, duelAnnonce)), tv = snap ? viewTanks(now) : null;   // temps de manche OU duel final
     if (snap) {
-      if (fx) drawPrints(now); else prints.length = 0;
+      if (fx && !rp) drawPrints(now); else if (!fx) prints.length = 0;
       if (fx) drawGroundLights(now, tv, dusk); else LUM.vider();   // lueurs sur le sol, sous les pièces
       // épaves / flaques de carburant qui brûlent encore quelques secondes
-      if (fx && wrecks.length) {
+      if (fx && !rp && wrecks.length) {
         ctx.save(); ctx.globalCompositeOperation = 'lighter';
         for (let i = wrecks.length - 1; i >= 0; i--) {
           const w = wrecks[i], tt = (now - w.born) / w.life; if (tt >= 1) { wrecks.splice(i, 1); continue; }
@@ -1282,7 +1351,7 @@ export default (function () {
         if (on && fx) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.7; ctx.drawImage(glow('255,70,50'), mn.x - 8, mn.y - 8, 16, 16); }
         ctx.restore();
       });
-      drawParts(0, now, kdt);                          // poussière, éclats, mottes : au sol, sous les chars
+      if (!rp) drawParts(0, now, kdt);                 // poussière, éclats, mottes : au sol, sous les chars (rien pendant le rejeu : ce sont les particules de la fin réelle)
       // chars — passe 1 : chenilles au sol + ombres ; passe 2 : caisses ; passe 3 : états, barres, repères
       const me = mySeat >= 0 ? snap.players[mySeat] : null, myRadar = !!(me && me.radar), over = snap.gs === 'over';
       const wt = over && typeof snap.winner === 'number' && snap.winner >= 0 ? snap.winner : -1;   // équipe victorieuse (-1 : égalité ou pas de fin) : seule elle est auréolée
@@ -1302,11 +1371,11 @@ export default (function () {
       }
       for (const tr of vis) {
         const p = tr.p, col = colSeat(p.seat), spr = getTankSpr(p.seat, col, p.seat);
-        const age = now - (recoil[p.seat] || -1e9);
+        const age = rp ? 1e9 : now - (recoil[p.seat] || -1e9);   // rejeu : ni recul ni flamme de bouche (fx)
         TO.alpha = tr.alpha; TO.trL = A.reduceFx ? 0 : tr.l; TO.trR = A.reduceFx ? 0 : tr.r; TO.rc = A.reduceFx || age > 170 ? 0 : 1 - age / 170; TO.flash = fx && age < 85 ? 1 - age / 85 : 0;
         TO.lives = p.lives; TO.rapid = !!p.rapid; TO.triple = !!p.triple; TO.pierce = !!p.pierce; TO.homing = !!p.homing; TO.radar = !!p.radar; TO.mineN = p.mineN | 0; TO.sway = A.reduceFx ? 0 : tr.sway;
         drawTank(spr, tr.vx, tr.vy, tr.va, TO, now);
-        if (fx) {                                     // émis par le CHAR (donc jamais pour un char invisible sur cet écran)
+        if (fx && !rp) {                              // émis par le CHAR (donc jamais pour un char invisible sur cet écran) ; pas pendant le rejeu
           const ca = Math.cos(tr.va), sa = Math.sin(tr.va);
           if (tr.mv > 0.3 && Math.random() < 0.1 * kdt) smokeAt(tr.vx - ca * R * 1.05 - sa * R * 0.35, tr.vy - sa * R * 1.05 + ca * R * 0.35, 1, '110,104,94', 2, 650, 0.3, tr.va + Math.PI);   // échappement
           if (p.lives <= 1 && Math.random() < 0.22 * kdt) smokeAt(tr.vx - ca * R * 0.7, tr.vy - sa * R * 0.7, 1, '52,50,50', 3, 1100, 0.35);   // fumée de char endommagé
@@ -1387,19 +1456,25 @@ export default (function () {
         } else { ctx.beginPath(); oval(ctx, 0, 0, SHELL_R * 1.15, SHELL_R * 0.78); ctx.fillStyle = '#fff6dc'; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = col; ctx.stroke(); }
         ctx.restore();
       }
-      drawParts(1, now, kdt); drawParts(2, now, kdt);   // fumée puis lumières additives
+      if (!rp) { drawParts(1, now, kdt); drawParts(2, now, kdt); }   // fumée puis lumières additives
       if (fx && snap.gs === 'play') drawHaze(now);      // brume de chaleur : filets qui ondulent en montant, très discrets
-      if (fx) for (let i = flashes.length - 1; i >= 0; i--) {   // éclat blanc à la place d'un char détruit
+      if (rp) {                                         // rejeu : éclat blanc dérivé des états (char vivant avant, détruit après), pas l'événement réseau
+        for (const pb of rf.b.players) { const pa = rf.a.players[pb.seat]; if (pa && pa.playing && pa.alive && !pb.alive) drawFlash(ctx, pa.x, pa.y, R * 1.7, rf.u); }
+      } else if (fx) for (let i = flashes.length - 1; i >= 0; i--) {   // éclat blanc à la place d'un char détruit
         const q = flashes[i], age = now - q.born; if (age >= FLASH_MS) { flashes.splice(i, 1); continue; }
         if (age >= 0) drawFlash(ctx, q.x, q.y, R * 1.7, age / FLASH_MS);
       } else flashes.length = 0;
-      if (fx && rings.length) {                        // ondes de choc
+      if (fx && !rp && rings.length) {                        // ondes de choc
         ctx.save();
         for (let i = rings.length - 1; i >= 0; i--) { const q = rings[i], tt = (now - q.born) / q.life; if (tt >= 1) { rings.splice(i, 1); continue; } if (tt < 0) continue; const e = 1 - (1 - tt) * (1 - tt); ctx.globalAlpha = 0.7 * (1 - tt); ctx.strokeStyle = q.col; ctx.lineWidth = q.lw * (1 - tt * 0.6); ctx.beginPath(); ctx.arc(q.x, q.y, q.r0 + (q.r1 - q.r0) * e, 0, 6.283); ctx.stroke(); }
         ctx.restore();
       } else if (!fx) { rings.length = 0; parts.length = 0; }
       // la manche s'étire : le soleil se couche sur le désert (étalonnage par-dessus l'arène, sous la jauge et les écrans)
       if (dusk > 0) crepuscule(ctx, -20, -20, ARENA + 40, ARENA + 40, dusk, { soleil: 'gauche', force: (A.reduceFx ? 0.55 : 1) * (A.contrast ? 0.6 : 1) });
+    }
+    ctx.restore();                                     // fin de la caméra : tout ce qui suit (HUD, vignette, écrans, annonces) est à plat
+    if (snap && !rp) {
+      const me = mySeat >= 0 ? snap.players[mySeat] : null;
       if (me && me.playing && me.alive && snap.gs === 'play' && me.lives === 1) {   // dernière vie : vignette rouge pulsée sur les bords (fixe en « réduire les effets »), posée sur l'écran sans secousse
         ctx.save(); ctx.setTransform(sc, 0, 0, sc, 0, 0); drawDanger(ctx, ARENA, ARENA, A.contrast ? 0.55 : 0.45, A.reduceFx ? 0 : now); ctx.restore();
       }
@@ -1424,7 +1499,57 @@ export default (function () {
         drawParade(c, Math.min(ARENA - 30, Math.max(c + 84, y2 + (n2 - 1) * f2 * 1.2 + f2 + 26)), now);   // le char de parade descend si les textes agrandis prennent de la place
       }
     }
-    CALL.draw(ctx, ARENA, ARENA, now, A);              // « DOUBLÉ ! » / « TRIPLÉ ! » / « CARNAGE ! » au tiers haut
+    if (!rp) CALL.draw(ctx, ARENA, ARENA, now, A);     // « DOUBLÉ ! » / « TRIPLÉ ! » / « CARNAGE ! » au tiers haut (pas pendant le rejeu)
+    return true;
+  }
+
+  // ───────────────────────── podium de fin (canvas) ─────────────────────────
+  // Bande en haut du plateau ; la carte DOM de fin (qui recouvre tout le plateau) est descendue sous elle par des styles en ligne.
+  // Un char par joueur, dessiné par le jeu (jamais d'avatar) ; le vainqueur (ou l'équipe victorieuse : tout le camp sur la 1re marche) tire une salve.
+  const PODIUM_THEME = { step: '#4a3e26', edge: K.gold, text: K.sand, glow: K.goldHi };
+  function podiumChar(c, e, x, y, size, rank, now) {
+    const R = TANK_R, k = size / (R * 3.3), spr = getTankSpr('p' + e.seat, e.color, e.seat, 2.5);
+    const ph = rank === 1 && !A.reduceFx ? now % 1800 : 9999;      // salve du vainqueur : recul du tube + flamme de bouche
+    c.translate(x, y); c.scale(k, k);
+    TO.alpha = 1; TO.trL = TO.trR = 0; TO.rc = ph < 160 ? 1 - ph / 160 : 0; TO.flash = ph < 90 ? 1 - ph / 90 : 0; TO.lives = 3;
+    TO.rapid = TO.triple = TO.pierce = TO.homing = TO.radar = false; TO.mineN = 0; TO.sway = 0;
+    drawTank(spr, 0, R * 0.29, -Math.PI / 2, TO, now);             // canon vers le haut, centré (la boîte englobante du char déborde côté canon)
+  }
+  function drawPodiumBand(now) {
+    const entries = podiumEntries(snap.players, colSeat);
+    if (!entries.length) return;
+    const sc = cv.width / ARENA, cw = cv.clientWidth || ARENA, bh = ARENA * (cw < 340 ? 0.44 : cw < 460 ? 0.36 : 0.4), strong = !!A.contrast;
+    const top = Math.round((cv.clientHeight || cw) * (bh / ARENA));
+    if (endEl.__top !== top) { endEl.__top = top; endEl.style.top = top + 'px'; endEl.style.justifyContent = 'flex-start'; endEl.style.borderRadius = '0 0 16px 16px'; }   // la carte commence sous la bande (et se lit du haut : elle défile si elle est plus haute)
+    ctx.save(); ctx.setTransform(sc, 0, 0, sc, 0, 0);
+    ctx.fillStyle = strong ? 'rgb(12,9,4)' : 'rgba(20,14,6,0.8)'; ctx.fillRect(0, 0, ARENA, bh);   // fond de la bande : le podium se lit sur le sable
+    hazard(0, bh - 6, ARENA, 6);
+    ctx.strokeStyle = 'rgba(224,169,46,' + (strong ? 0.9 : 0.55) + ')'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, 1); ctx.lineTo(ARENA, 1); ctx.stroke();
+    drawPodium(ctx, { x: ARENA * 0.03, y: 6, w: ARENA * 0.94, h: bh - 16 }, now, {
+      entries, A, W: ARENA, t0: podT0, nul: !(snap.winner >= 0), theme: PODIUM_THEME,
+      drawPiece(cc, e, x, y, size, rank) { podiumChar(cc, e, x, y, size, rank, now); },
+    });
+    ctx.restore();
+  }
+
+  // Point d'entrée du rendu : rejeu au ralenti de la fin de manche s'il est en cours, sinon image normale (+ podium à l'écran de fin).
+  function draw() {
+    if (destroyed) return;
+    const now = performance.now();
+    const rf = snap && !A.reduceFx ? RL.frame(now) : null;
+    if (rf) {
+      const real = snap;
+      replaying = true; rframe = rf; TR = rtread; snap = replaySnap(rf);   // l'état rejoué remplace `snap` le temps de l'image : toutes les aides le lisent
+      try { drawFrame(now, rf); }
+      finally { snap = real; replaying = false; rframe = null; TR = tread; }
+      ctx.save(); ctx.setTransform(cv.width / ARENA, 0, 0, cv.width / ARENA, 0, 0); RL.drawOverlay(ctx, ARENA, ARENA, now, A); ctx.restore();   // bandes « cinéma », ⟲ RALENTI, barre : par-dessus tout
+      return;
+    }
+    if (pendingEnd) {                                   // le rejeu est fini (ou passé, ou réduire les effets activé) : carte de fin, fanfare, podium
+      const m = pendingEnd; pendingEnd = null;
+      if (snap && snap.gs === 'over') { showEndscreen(m); podT0 = now; sound('win'); music.sting('win'); overAt = now; }
+    }
+    if (drawFrame(now, null) !== false && snap && snap.gs === 'over' && podT0 > 0) drawPodiumBand(now);
   }
   function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }   // filet : une erreur de rendu ne fige plus le jeu
 
@@ -1434,6 +1559,7 @@ export default (function () {
   const onKeyDown = e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
+    if (e.key === ' ' && !e.repeat && RL.active(performance.now())) { RL.skip(); return; }   // pendant le rejeu, le PREMIER Espace (pas la répétition d'une touche tenue) le passe seulement : ni « Rejouer », ni tir
     const playing = snap && (snap.gs === 'play' || snap.gs === 'paused');
     if (e.key === ' ') { if (snap && snap.gs !== 'play' && snap.gs !== 'paused') { if (!e.repeat) send({ t: 'start' }); return; } setIn('fire', true); return; }   // Espace TENU au moment de la fin : pas un « Rejouer »
     if ((e.code === 'KeyE' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && playing) { if (!e.repeat) send({ t: 'mine' }); return; }   // touche TENUE : une seule mine
@@ -1462,20 +1588,23 @@ export default (function () {
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('tkStart'); pauseBtn = $('tkPause'); modeBtn = $('tkMode'); botsBtn = $('tkBots'); arenaBtn = $('tkArena'); winBtn = $('tkWin'); ffBtn = $('tkFf'); pauseFloat = $('tkPauseFloat');
     lbBtn = $('tkLbBtn'); lbPanel = $('tkLbPanel'); lbBody = $('tkLbBody');
-    startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
+    startBtn.onclick = () => { unlockAudio(); if (RL.active(performance.now())) { RL.skip(); return; } send({ t: 'start' }); };   // pendant le rejeu : passe le rejeu, ne relance pas
     pauseBtn.onclick = () => send({ t: 'pause' }); pauseFloat.onclick = () => send({ t: 'pause' });
     modeBtn.onclick = () => send({ t: 'mode' }); arenaBtn.onclick = () => send({ t: 'arena' }); winBtn.onclick = () => send({ t: 'wintarget' }); ffBtn.onclick = () => send({ t: 'ff' });
     if (botsBtn) botsBtn.onclick = () => send({ t: 'bots' });
     diffBtn = $('tkDiff'); if (diffBtn) diffBtn.onclick = () => send({ t: 'botdiff' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('tkHelp'), helpPanel = $('tkHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
-    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
+    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (RL.active(performance.now())) { RL.skip(); return; } if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });   // clic / toucher pendant le rejeu : le passe seulement
     if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
     if (premiere) { hold('tkLeft', 'left'); hold('tkRight', 'right'); hold('tkFwd', 'fwd'); hold('tkBack', 'back'); hold('tkFire', 'fire'); }
     const mineBtn = $('tkMine'); if (mineBtn && premiere) mineBtn.addEventListener('pointerdown', e => { e.preventDefault(); send({ t: 'mine' }); });
     try { touch = matchMedia('(pointer: coarse)').matches; } catch { touch = 'ontouchstart' in window; }   // écran tactile : les indications clavier (Espace, E, P) sont masquées
     for (const k in prevLv) delete prevLv[k]; for (const k in prevInv) delete prevInv[k]; for (const k in spawnAt) delete spawnAt[k];
     flashes.length = 0; CALL = createCallouts(); STK.reset(); hudA = 1;   // annonces en cours d'une partie précédente : abandonnées
+    RL.clear(); CAM.reset(); pendingEnd = null; podT0 = 0; replaying = false; rframe = null; TR = tread; duskLast = 0;   // module réutilisé : ni rejeu, ni podium, ni zoom hérités
+    for (const k in rtread) delete rtread[k];
+    resetEndCard();
     applyColors(); resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);
     music = createMusic(() => actx, () => A, MUSIC_THEME);   // instance neuve : la précédente a été dispose()ée au teardown
@@ -1491,6 +1620,9 @@ export default (function () {
     music.stop(); music.dispose(); music = NOMUSIC;    // ordonnanceur arrêté + écouteur visibilitychange retiré (dispose) ; init() en recrée un
     if (actx) { try { actx.close(); } catch {} actx = null; noiseBuf = null; }   // AudioContext libéré : unlockAudio() en rouvre un au retour sur le jeu
     parts.length = 0; rings.length = 0; flashes.length = 0;
+    RL.clear(); CAM.reset(); pendingEnd = null; podT0 = 0; replaying = false; rframe = null; TR = tread;   // rejeu / carte différée / zoom : abandonnés
+    for (const k in rtread) delete rtread[k];
+    resetEndCard();                                    // la carte de fin (DOM statique) retrouve sa mise en page d'origine
   }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };

@@ -10,6 +10,9 @@ import { arenaSize } from '../../layout.js';   // taille du plateau : commune à
 import { lumiere, creerLumieres } from '../../lumiere.js';      // lanternes, charges, ondes et sorties éclairent l'argile
 import { crepuscule, creerDuel } from '../../crepuscule.js';               // le jour tombe à mesure que la paille se referme
 import { creerJournal, blocFin } from '../../finpartie.js';     // courbe du combat + meilleure action à l'écran de fin
+import { createRalenti } from '../../ralenti.js';               // ralenti du dernier coup (sortie décisive) rejoué à la fin de manche
+import { drawPodium, podiumEntries } from '../../podium.js';       // podium canvas de fin de manche (lutteurs dessinés par le jeu)
+import { createDuelCam } from '../../camera-duel.js';              // caméra de duel : zoom doux sur les deux derniers lutteurs
 import { createStreaks, streakText, createCallouts, createHitStop, drawFlash, drawDanger, drawSeatChip, readable, hudK } from '../../exploits.js';   // aides visuelles partagées (séries, arrêt sur image, vignette, pastilles)
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
@@ -108,19 +111,25 @@ export default (function () {
   const STREAK = createStreaks({ window: 5000 }), CALL = createCallouts(), HS = createHitStop(60);
   let goT0 = -1e9, petK = 0;                            // départ de manche (pastilles de siège 2 s) / fondu des pétales
   const TOUCH = typeof matchMedia === 'function' ? matchMedia('(pointer: coarse)').matches : 'ontouchstart' in window;   // indications clavier masquées sur tactile (un portable à écran tactile garde ses indices)
+  // ralenti / podium / caméra de duel (tout côté client, rien de plus sur le réseau)
+  const RL = createRalenti({ keepMs: 3000, windowMs: 1400, slow: 0.4 }), CAM = createDuelCam({ maxZoom: 1.16, ease: 0.05, margin: 120 });
+  const CPTS = [{ x: 0, y: 0 }, { x: 0, y: 0 }];         // points de la caméra (réutilisés : aucune allocation par image)
+  let pendingEnd = null, overT0 = 0, eatUntil = 0;       // fin de manche différée pendant le ralenti / début du podium / clic avalé (celui qui passe le ralenti)
+  let repOut = {}, repHas = false, podSrc = null, podList = [];   // sorties vues pendant le ralenti / entrées du podium (mises en cache par snapshot)
   let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, diffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl, dashBtn, braceBtn;
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team % TEAMCC.length] : CC[s % CC.length]; };
   const winTeam = m => (m && typeof m.winner === 'number' && m.winner >= 0) ? m.winner : -1;   // équipe gagnante, -1 = égalité / pas de vainqueur (null >= 0 est vrai en JS !)
   const nameOf = s => { const p = snap && snap.players[s]; return p ? (p.name || ('P' + (s + 1))) : '?'; };
-  function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; FX = A.reduceFx ? 0 : 1; decorKey = ''; bodyCache = {}; if (A.reduceFx) LUM.vider(); }
+  function applyColors() { CC = PAL[A.palette] || PAL.normal; TEAMCC = TEAMPAL[A.palette] || TEAMPAL.normal; FX = A.reduceFx ? 0 : 1; decorKey = ''; bodyCache = {}; podSrc = null; if (A.reduceFx) LUM.vider(); }
 
   function resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
     const size = arenaSize({ max: 760 });
     cv.style.width = size + 'px'; cv.style.height = size + 'px';
     cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr);
+    layoutEnd();
   }
 
   // ───────────────────────── HUD, classement, écran de fin ─────────────────────────
@@ -162,8 +171,23 @@ export default (function () {
       (e.deaths != null ? `<span title="sorties / éliminations subies">⚖${e.deaths ? ((e.kills || 0) / e.deaths).toFixed(2) : ((e.kills || 0) ? '∞' : '0')}</span>` : '') +
       (e.bestSurvivalSec != null ? `<span title="meilleure tenue sur le dohyō">⏱${Math.round(e.bestSurvivalSec || 0)}s</span>` : '') + '</div>').join('');
   }
+  // Carte de fin + podium canvas : le podium occupe le HAUT du cadre, la carte DOM se cale dessous (fond transparent en haut,
+  // défilement interne pour que le contenu ne recouvre jamais le podium). Sans entrée à afficher : carte plein cadre comme avant.
+  let endPod = false;
+  const podFrac = () => (cv && cv.clientWidth < 460 ? 0.46 : 0.42);   // téléphone : un peu plus de hauteur pour des noms lisibles
+  function layoutEnd() {
+    if (!endEl) return;
+    if (!endPod) { if (endEl.style.cssText) endEl.style.cssText = ''; return; }
+    const ph = Math.round((cv.clientHeight || 340) * podFrac());
+    endEl.style.cssText = 'justify-content:flex-start;overflow-y:auto;padding:' + (ph + 4) + 'px 12px 10px;background:linear-gradient(to bottom,rgba(5,6,14,0) ' + ph + 'px,rgba(5,6,14,.86) ' + (ph + 6) + 'px)';
+  }
+  function podEntries(m) {                                // entrées du podium, recalculées seulement quand le snapshot change
+    if (podSrc !== m) { podSrc = m; podList = m ? podiumEntries(m.players, colSeat) : []; }
+    return podList;
+  }
   function showEndscreen(m) {
-    if (m.gs !== 'over' || !m.stats) { endEl.classList.add('hidden'); return; }
+    if (m.gs !== 'over' || !m.stats) { endPod = false; layoutEnd(); endEl.classList.add('hidden'); return; }
+    podSrc = null; endPod = podEntries(m).length > 0; layoutEnd();
     endEl.classList.remove('hidden');
     const parts = m.players.filter(p => p.playing && p.place > 0).slice().sort((a, b) => a.place - b.place);
     const champ = winTeam(m) >= 0 ? parts.find(p => p.team === m.winner) : null;
@@ -181,8 +205,9 @@ export default (function () {
         <span class="estat" title="sorties provoquées">✋ ${p.kills | 0}</span><span class="eres">${res}</span></div>`;
     }).join('');
     const mvpLine = mvp ? `<div class="emeta">⭐ MVP : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.kills} sortie${mvp.kills > 1 ? 's' : ''}</div>` : '';
-    endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : K.washi}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} lutteurs</div>${mvpLine}<div class="elist">${rows}</div>${jRound === m.round ? blocFin(J, { titre: 'Marge sur la paille au fil du combat', couleur: s => colSeat(s), nom: s => nameOf(s) }) : ''}<div class="ehint">${TOUCH ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
+    const wrapO = endPod ? '<div style="width:100%;flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;align-items:center;gap:8px">' : '', wrapC = endPod ? '</div>' : '';   // podium au-dessus : la carte défile dans sa zone
+    endEl.innerHTML = wrapO + `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : K.washi}">${title}</div>
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} lutteurs</div>${mvpLine}<div class="elist">${rows}</div>${jRound === m.round ? blocFin(J, { titre: 'Marge sur la paille au fil du combat', couleur: s => colSeat(s), nom: s => nameOf(s) }) : ''}<div class="ehint">${TOUCH ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>` + wrapC;
   }
 
   // ───────────────────────── état réseau ─────────────────────────
@@ -196,14 +221,19 @@ export default (function () {
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
-    if (m.round !== prevRound) { prevRound = m.round; buf = []; puffs.length = 0; salt.length = 0; waves.length = 0; flyers.length = 0; outTxt.length = 0; sparks.length = 0; bursts.length = 0; flashes.length = 0; STREAK.reset(); LUM.vider(); }
+    if (m.round !== prevRound) { prevRound = m.round; buf = []; puffs.length = 0; salt.length = 0; waves.length = 0; flyers.length = 0; outTxt.length = 0; sparks.length = 0; bursts.length = 0; flashes.length = 0; STREAK.reset(); LUM.vider(); RL.clear(); CAM.reset(); pendingEnd = null; repOut = {}; repHas = false; }
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
+    if (m.gs === 'play' || m.gs === 'paused' || m.gs === 'over') RL.push(m, performance.now()); else { RL.clear(); pendingEnd = null; }   // tampon du ralenti : chaque snapshot de la manche
     if (m.gs === 'play' && (prevGs === 'countdown' || !J.actif() || jRound !== m.round)) {   // journal : départ de manche (ou arrivée en cours de manche)
       J.debut(performance.now()); jRound = m.round; jLast = -1e9; edge = {}; outChain = {}; hitAt = {};
     }
     (m.fx || []).forEach(playFx);
     suivreJournal(m, performance.now(), m.gs === 'over' && prevGs !== 'over');
-    if (prevGs !== 'over' && m.gs === 'over') { finJournal(m); sound('win'); music.sting('win'); }
+    if (prevGs !== 'over' && m.gs === 'over') {
+      finJournal(m);
+      if (!A.reduceFx && RL.start(performance.now())) pendingEnd = m;   // ralenti du dernier coup : carte de fin, jingle et podium attendent sa fin
+      else { sound('win'); music.sting('win'); }
+    }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte 3·2·1 au taiko
     if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); goT0 = performance.now(); }   // goT0 : pastilles de siège visibles 2 s après le coup d'envoi
     lastCount = m.count;
@@ -214,8 +244,8 @@ export default (function () {
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length; if (m.sd || (tot >= 3 && alive <= 2)) inten = 2; }
       music.setIntensity(inten); }
     refreshHUD();
-    if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } }
-    else { endShown = false; endEl.classList.add('hidden'); }
+    if (m.gs === 'over') { if (!endShown && !pendingEnd) { showEndscreen(m); endShown = true; overT0 = performance.now(); } }
+    else { endShown = false; pendingEnd = null; if (endPod) { endPod = false; layoutEnd(); } endEl.classList.add('hidden'); }
     const idle = m.gs === 'lobby' || m.gs === 'over';
     const total = (m.connected || 0) + (m.botCount || 0);
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1 && total >= 2);
@@ -731,7 +761,7 @@ export default (function () {
   // ───────────────────────── éclairage dynamique (sous les pièces) ─────────────────────────
   // Lanternes chaudes aux 4 coins du dohyō (plus présentes à la tombée du jour), halo des jetons, aura des
   // lutteurs en charge / en élan, puis les flashs éphémères (chocs, départs de charge, ondes, sorties).
-  function eclairer(now, pv) {
+  function eclairer(now, pv, rf) {
     const c = AR / 2, hp = platHalf(), li = 0.07 + 0.2 * duskV, lr = AR * (0.2 + 0.06 * duskV);
     for (let i = 0; i < 4; i++) {
       const t = TASSELS[i], fl = 1 + 0.06 * Math.sin(now / 170 + i * 2.1) + 0.04 * Math.sin(now / 53 + i);
@@ -747,7 +777,7 @@ export default (function () {
         else lumiere(ctx, v.x, v.y, r * 2, '#ff7a55', 0.14);
       });
     }
-    LUM.dessiner(ctx, now);
+    if (!rf) LUM.dessiner(ctx, now);                        // les éclats des événements ne sont pas rejoués
   }
 
   // ───────────────────────── pétales de cerisier (sakura) ─────────────────────────
@@ -767,16 +797,70 @@ export default (function () {
     ctx.restore();
   }
 
+  // ───────────────────────── ralenti, podium ─────────────────────────
+  // Positions interpolées d'un instant du ralenti (mêmes règles que viewPlayers : pas de glissement sur un saut > 60 u). Ne modifie jamais f.a / f.b.
+  function replayPlayers(f) {
+    const outp = {}, al = f.u;
+    f.b.players.forEach(pb => {
+      if (!pb.playing) return;
+      const pa = f.a.players[pb.seat]; let x = pb.x, y = pb.y, ang = pb.a || 0;
+      if (pa && pa.playing && pa.alive && Math.hypot(pb.x - pa.x, pb.y - pa.y) < 60) { x = pa.x + (pb.x - pa.x) * al; y = pa.y + (pb.y - pa.y) * al; const da = Math.atan2(Math.sin(ang - (pa.a || 0)), Math.cos(ang - (pa.a || 0))); ang = (pa.a || 0) + da * al; }
+      outp[pb.seat] = { x, y, a: ang };
+    });
+    return outp;
+  }
+  // lutteur sorti : s'envole en tournoyant vers « la caméra » (plus gros) puis s'efface ; t = 0..1 (direct : 1,1 s ; ralenti : 0,7 s de temps de jeu)
+  function drawFlyer(f, t, now) {
+    if (A.reduceFx) { drawRikishi(f.seat, f.x, f.y, f.a, f.r, { alpha: 1 - t, shadow: false, name: f.name }, now); return; }
+    const e = 1 - (1 - t) * (1 - t), dx = Math.cos(f.dir) * 70 * e, dy = Math.sin(f.dir) * 70 * e - 26 * Math.sin(Math.PI * t);
+    ctx.save(); ctx.fillStyle = 'rgba(40,20,8,' + (0.3 * (1 - t)) + ')'; ctx.beginPath(); ctx.arc(f.x + Math.cos(f.dir) * 70 * e + 8 * t, f.y + Math.sin(f.dir) * 70 * e + 12 * t, f.r * (1 - 0.3 * t), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    drawRikishi(f.seat, f.x + dx, f.y + dy, f.a, f.r, { scale: 1 + 0.9 * e, spin: t * 9, alpha: 1 - t * t, shadow: false, name: f.name }, now);
+  }
+  // fin du ralenti (fini ou passé) : la carte de fin, le jingle et le podium arrivent enfin
+  function finReplay(now) {
+    const m = pendingEnd; pendingEnd = null;
+    if (!m || !snap || snap.gs !== 'over') return;
+    showEndscreen(m); endShown = true; overT0 = now; sound('win'); music.sting('win');
+  }
+  // podium : lutteurs vus de dessus sur des marches de bois laqué, cordon de paille en arête ; fond de l'arène assombri (la carte DOM prend le bas du cadre)
+  function drawPodiumScene(now) {
+    const list = podEntries(snap);
+    if (!list.length) return;
+    const k = A.reduceFx ? 1 : Math.max(0, Math.min(1, (now - overT0) / 350));
+    ctx.save();
+    ctx.fillStyle = 'rgba(18,12,9,' + ((A.contrast ? 0.9 : 0.74) * k).toFixed(2) + ')'; ctx.fillRect(-24, -24, AR + 48, AR + 48);
+    ctx.restore();
+    const ph = AR * podFrac();
+    drawPodium(ctx, { x: AR * 0.03, y: AR * 0.015, w: AR * 0.94, h: ph - AR * 0.03 }, now, {
+      entries: list, A, W: AR, t0: overT0, nul: winTeam(snap) < 0,
+      theme: { step: '#6b4a2b', edge: K.straw, text: K.washi, glow: K.gold },
+      drawPiece(c, e, x, y, size, rank) { drawRikishi(e.seat, x, y, -Math.PI / 2 + (rank === 1 && !A.reduceFx ? 0.16 * Math.sin(now / 500) : 0), size * 0.4, { shadow: false }, now); },
+    });
+  }
+
   // ───────────────────────── rendu d'une image ─────────────────────────
+  // draw() choisit ce qu'on montre : pendant le ralenti, `snap` désigne (le temps de l'image) le snapshot rejoué le plus proche, ce qui fait
+  // tout lire au même endroit (arène, bonus, lutteurs) ; scene() reçoit rf (image du ralenti) ou null.
   function draw() {
     if (destroyed) return;
-    const now = performance.now(), kdt = Math.min(3, Math.max(0.25, (now - (lastFrame || now - 16.7)) / 16.7)); lastFrame = now;
-    if (!A.reduceFx && HS.frozen(now)) return;              // arrêt sur image (60 ms) à chaque sortie : on garde l'image précédente
+    const now = performance.now(), rf = A.reduceFx ? null : RL.frame(now);
+    if (!rf) { if (pendingEnd && (A.reduceFx || !RL.active(now))) finReplay(now); scene(now, null); return; }
+    const real = snap; snap = rf.u < 0.5 ? rf.a : rf.b;
+    try { scene(now, rf); } finally { snap = real; }
+  }
+  function scene(now, rf) {
+    const kdt = Math.min(3, Math.max(0.25, (now - (lastFrame || now - 16.7)) / 16.7)); lastFrame = now;
+    if (!A.reduceFx && !rf && HS.frozen(now)) return;       // arrêt sur image (60 ms) à chaque sortie : on garde l'image précédente
     const sc = cv.width / AR, c = AR / 2;
     let ox = 0, oy = 0;
-    if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.86; } else shakeMag = 0;
+    if (shakeMag > 0.3 && !A.reduceFx && !rf) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= 0.86; } else shakeMag = 0;
     if (ox || oy) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = K.wood; ctx.fillRect(0, 0, cv.width, cv.height); }   // marge peinte avant le décor : la secousse ne laisse plus de liseré de l'image d'avant
     ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
+    const pv = rf ? replayPlayers(rf) : (snap ? viewPlayers(now) : null);
+    { let nT = 0, nA = 0;                                   // caméra de duel : exactement 2 lutteurs encore en lice (sur 3 ou plus au départ)
+      if (snap && pv && (rf || snap.gs === 'play' || snap.gs === 'paused')) snap.players.forEach(q => { if (!q.playing) return; nT++; if (q.alive) { if (nA < 2) { const v = pv[q.seat] || q; CPTS[nA].x = v.x; CPTS[nA].y = v.y; } nA++; } });
+      CAM.update(CPTS, AR, AR, nT >= 3 && nA === 2, A, now); }
+    ctx.save(); CAM.apply(ctx);                             // le décor est dans la caméra (sinon pièces et décor se décalent) ; le HUD, le crépuscule et les textes restent dehors
     ensureDecor(); ctx.drawImage(decorCv, 0, 0, AR, AR);
     const R = snap && snap.ring ? snap.ring : RING_0;
     // zone perdue par le rétrécissement : argile assombrie + fantôme du cordon d'origine
@@ -789,14 +873,13 @@ export default (function () {
     drawTawara(R, now);
     petK += (((snap && snap.gs === 'play' && !A.reduceFx && !A.contrast) ? 1 : 0) - petK) * Math.min(1, 0.05 * kdt); if (petK < 0.01) petK = 0;   // pétales : fondu à l'entrée / la sortie de manche
     if (petK > 0) drawPetals(now, petK);
-    const pv = snap ? viewPlayers(now) : null;
-    if (!A.reduceFx) eclairer(now, pv);
+    if (!A.reduceFx) eclairer(now, pv, rf);
     // crépuscule : 0 tant que la paille est entière, 1 au plancher ; la mort subite l'amorce aussitôt
     let duskT = 0;
     if (snap && (snap.gs === 'play' || snap.gs === 'paused' || snap.gs === 'over')) {
       duskT = Math.max(0, Math.min(1, (1 - R / RING_0) / (1 - DUSK_FLOOR)));
       if (snap.sd) duskT = Math.max(duskT, Math.min(0.22, (now - sdT0) / 5000 * 0.22));
-      duskT = Math.max(duskT, DUEL.t(snap, now, duelAnnonce));   // duel final : la nuit tombe
+      duskT = Math.max(duskT, rf ? duskV : DUEL.t(snap, now, duelAnnonce));   // duel final : la nuit tombe (ralenti : on garde la nuit déjà tombée)
     }
     duskV += (duskT - duskV) * Math.min(1, 0.04 * kdt);
     if (duskV < 0.002) duskV = 0;
@@ -839,23 +922,28 @@ export default (function () {
         });
       }
       // danger : mon lutteur approche la paille -> l'arc du cordon le plus proche rougeoie
-      if (me && me.playing && me.alive && snap.gs === 'play') {
+      if (me && me.playing && me.alive && snap.gs === 'play' && !rf) {
         const v = (pv && pv[mySeat]) || me, d = Math.hypot(v.x - c, v.y - c), u = (d / R - 0.78) / 0.22;
         if (u > 0) dangerK = Math.min(1, u);
         if (u > 0) { const th = Math.atan2(v.y - c, v.x - c); ctx.save(); ctx.strokeStyle = K.verm; ctx.lineCap = 'round'; ctx.globalAlpha = Math.min(1, u) * (A.reduceFx ? 0.7 : 0.45 + 0.35 * Math.sin(now / 90)); ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(c, c, R - 9, th - 0.38, th + 0.38); ctx.stroke(); ctx.restore(); }
       }
     }
     // lutteurs sortis : s'envolent en tournoyant vers « la caméra » (plus gros), puis s'effacent
-    for (let i = flyers.length - 1; i >= 0; i--) {
+    for (let i = rf ? -1 : flyers.length - 1; i >= 0; i--) {   // (ralenti : les sorties en direct ne se rejouent pas, on les déduit plus bas)
       const f = flyers[i], t = (now - f.born) / 1100;
       if (t >= 1) { flyers.splice(i, 1); continue; }
-      if (A.reduceFx) { drawRikishi(f.seat, f.x, f.y, f.a, f.r, { alpha: 1 - t, shadow: false, name: f.name }, now); continue; }
-      const e = 1 - (1 - t) * (1 - t), dx = Math.cos(f.dir) * 70 * e, dy = Math.sin(f.dir) * 70 * e - 26 * Math.sin(Math.PI * t);
-      ctx.save(); ctx.fillStyle = 'rgba(40,20,8,' + (0.3 * (1 - t)) + ')'; ctx.beginPath(); ctx.arc(f.x + Math.cos(f.dir) * 70 * e + 8 * t, f.y + Math.sin(f.dir) * 70 * e + 12 * t, f.r * (1 - 0.3 * t), 0, Math.PI * 2); ctx.fill(); ctx.restore();
-      drawRikishi(f.seat, f.x + dx, f.y + dy, f.a, f.r, { scale: 1 + 0.9 * e, spin: t * 9, alpha: 1 - t * t, shadow: false, name: f.name }, now);
+      drawFlyer(f, t, now);
     }
+    if (rf) {                                               // ralenti : un lutteur vivant dans a, sorti dans b, s'envole comme en direct (durée en temps de jeu)
+      const g = rf.ta + rf.u * (rf.tb - rf.ta), ps = rf.b.players;
+      for (let i = 0; i < ps.length; i++) {
+        const pa = rf.a.players[i], pb = ps[i];
+        if (pa && pb && pa.playing && pa.alive && !pb.alive && !repOut[i]) { const v = (pv && pv[i]) || pb; repOut[i] = { seat: i, x: v.x, y: v.y, dir: Math.atan2(v.y - c, v.x - c), a: v.a || 0, r: pb.r || pa.r || PR, g0: g }; repHas = true; }
+      }
+      if (repHas) for (const k in repOut) { const f = repOut[k], t = (g - f.g0) / 700; if (t >= 0 && t < 1) drawFlyer(f, t, now); }
+    } else if (repHas) { repOut = {}; repHas = false; }
     // poussière (opaque), sel rituel (pseudo-3D : hauteur z + ombre au sol), étincelles de choc, ondes
-    if (!A.reduceFx) {
+    if (!A.reduceFx && !rf) {
       ctx.save();
       for (let i = puffs.length - 1; i >= 0; i--) { const q = puffs[i], tt = (now - q.born) / q.life; if (tt >= 1) { puffs.splice(i, 1); continue; } q.x += q.vx * kdt; q.y += q.vy * kdt; q.vx *= 0.94; q.vy *= 0.94; ctx.globalAlpha = (1 - tt) * 0.45; ctx.fillStyle = 'rgb(' + q.col + ')'; ctx.beginPath(); ctx.arc(q.x, q.y, q.r0 + tt * 7, 0, Math.PI * 2); ctx.fill(); }
       for (let i = salt.length - 1; i >= 0; i--) {
@@ -884,11 +972,12 @@ export default (function () {
       ctx.restore();
     } else { puffs.length = 0; salt.length = 0; sparks.length = 0; waves.length = 0; bursts.length = 0; flashes.length = 0; }
     drawTassels(now);
+    ctx.restore();                                          // fin de la caméra de duel
     // étalonnage jour → crépuscule par-dessus l'arène (débord de 24 u : la secousse ne découvre pas de bord clair)
     crepuscule(ctx, -24, -24, AR + 48, AR + 48, duskV, { soleil: 'haut', force: A.contrast ? 0.45 : A.reduceFx ? 0.55 : 1 });
     if (dangerK > 0) drawDanger(ctx, AR, AR, dangerK * (A.contrast ? 0.9 : 0.6), A.reduceFx ? 0 : now);   // vignette de danger (fixe sous « réduire les effets » : le pouls dépend de `now`)
     // « OUT » : gros texte vermillon cerné d'encre, qui claque puis s'efface (ramené vers l'intérieur pour rester lisible)
-    for (let i = outTxt.length - 1; i >= 0; i--) {
+    for (let i = rf ? -1 : outTxt.length - 1; i >= 0; i--) {
       const o = outTxt[i], t = (now - o.born) / 1300; if (t >= 1) { outTxt.splice(i, 1); continue; }
       const dx = o.x - c, dy = o.y - c, d = Math.hypot(dx, dy) || 1, pull = Math.min(d, Math.max(0, d - (AR / 2 - 70)) + 40);
       const x = Math.max(60, Math.min(AR - 60, o.x - dx / d * pull)), y = Math.max(40, Math.min(AR - 30, o.y - dy / d * pull));
@@ -903,7 +992,7 @@ export default (function () {
     // jauges du joueur local : charge et ancrage, + bonus actifs. Bloc HUD mis à l'échelle autour de son ancrage (bas-centre) pour rester
     // lisible sur téléphone (hudK) ; textes ≥ 9 px CSS (readable) ; les indications clavier n'apparaissent pas sur écran tactile.
     const me = (snap && mySeat >= 0) ? snap.players[mySeat] : null;
-    if (me && me.playing && me.alive && snap.gs === 'play') {
+    if (me && me.playing && me.alive && snap.gs === 'play' && !rf) {
       const bw = 112, bh = 10, gapx = 18, y = -12, x1 = -bw - gapx / 2, x2 = gapx / 2;
       const k = Math.min(hudK(cv, AR), AR * 0.94 / (2 * bw + gapx)), fs = readable(10, cv, AR / k, 9), fnt = 'bold ' + fs.toFixed(1) + 'px system-ui, sans-serif';
       ctx.save(); ctx.translate(c, AR - 12); ctx.scale(k, k);
@@ -960,7 +1049,9 @@ export default (function () {
         ctx.fillText(tot >= 2 ? (TOUCH ? '▶ Touche l\'écran pour monter sur le dohyō' : '▶ Espace / clic pour monter sur le dohyō') : 'En attente d\'un 2ᵉ lutteur… (ou ajoute un bot 🤖)', c, y0 + Math.max(26, (f1 + f2) * 0.8));
       }
     }
-    CALL.draw(ctx, AR, AR, now, A);                          // « DOUBLÉ ! / TRIPLÉ ! / CARNAGE ! » (fondu conservé sous « réduire les effets », sans l'animation d'échelle)
+    if (!rf && snap && snap.gs === 'over' && endShown) drawPodiumScene(now);   // podium : après le ralenti éventuel, sous la carte DOM qui se cale en dessous
+    if (rf) RL.drawOverlay(ctx, AR, AR, now, A);             // ralenti : bandes cinéma, « ⟲ RALENTI », barre de progression (en dernier)
+    if (!rf) CALL.draw(ctx, AR, AR, now, A);                 // « DOUBLÉ ! / TRIPLÉ ! / CARNAGE ! » (fondu conservé sous « réduire les effets », sans l'animation d'échelle)
   }
   function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }   // filet : une erreur de rendu ne fige plus le jeu
 
@@ -973,6 +1064,7 @@ export default (function () {
     unlockAudio();
     if (e.repeat) return;                                 // la répétition auto relançait charge/ancrage et renvoyait les mêmes touches
     // start seulement hors partie : pendant le compte à rebours, Espace (réflexe « prêt à charger ») renvoyait un start inutile
+    if (e.key === ' ' && (pendingEnd || RL.active(performance.now()))) { RL.skip(); return; }   // le PREMIER Espace pendant le ralenti le passe, sans lancer « Rejouer »
     if (e.key === ' ') { if (snap && (snap.gs === 'lobby' || snap.gs === 'over')) send({ t: 'start' }); else if (snap && snap.gs === 'play') send({ t: 'dash' }); return; }
     if ((e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyE') && isPlay()) { send({ t: 'brace' }); return; }
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && isPlay()) { send({ t: 'pause' }); return; }
@@ -1010,6 +1102,10 @@ export default (function () {
     if (diffBtn) diffBtn.onclick = () => send({ t: 'botdiff' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('smHelp'), helpPanel = $('smHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
+    if (premiere) {                                       // le PREMIER appui pendant le ralenti le passe seulement : ni « Rejouer » ni aucune autre action (phase de capture, avant les boutons)
+      root.addEventListener('pointerdown', e => { if (pendingEnd || RL.active(performance.now())) { RL.skip(); eatUntil = performance.now() + 700; e.stopPropagation(); } }, true);
+      root.addEventListener('click', e => { if (eatUntil && performance.now() < eatUntil) { eatUntil = 0; e.stopPropagation(); e.preventDefault(); } }, true);
+    }
     if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && !isPlay() && snap.gs !== 'countdown') send({ t: 'start' }); });
     if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
     if (premiere) { hold('smUp', 'up'); hold('smDown', 'down'); hold('smLeft', 'left'); hold('smRight', 'right'); tap('smDash', 'dash'); tap('smBrace', 'brace'); }
@@ -1020,9 +1116,10 @@ export default (function () {
     music.start();
     if (staleInput) { staleInput = false; pushInput(); }   // une touche était tenue quand on a quitté le jeu : le siège reçoit « tout relâché » (on est bien dans le Sumo ici)
     STREAK.reset(); bursts.length = 0; flashes.length = 0; goT0 = -1e9; petK = 0;
+    RL.clear(); CAM.reset(); pendingEnd = null; repOut = {}; repHas = false; endPod = false; layoutEnd();   // ralenti / caméra / podium repartent à neuf
     rafId = requestAnimationFrame(drawLoop);
   }
-  function onA11y() { applyColors(); }
+  function onA11y() { applyColors(); if (A.reduceFx) RL.skip(); }   // « réduire les effets » activé pendant un ralenti : on le coupe
   function teardown() {
     destroyed = true; music.dispose(); music = NOMUSIC; cancelAnimationFrame(rafId); J.fin(); LUM.vider();   // retour au jeu : journal repris à neuf
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
@@ -1032,6 +1129,7 @@ export default (function () {
     // audio : le contexte est fermé (il ne reste pas actif en arrière-plan, et iOS limite le nombre de contextes) ; unlockAudio() en recrée un au prochain geste
     if (actx) { const c0 = actx; actx = null; noiseBuf = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }
     puffs.length = 0; salt.length = 0; waves.length = 0; flyers.length = 0; outTxt.length = 0; sparks.length = 0; bursts.length = 0; flashes.length = 0; STREAK.reset();
+    RL.clear(); CAM.reset(); pendingEnd = null; repOut = {}; repHas = false;
   }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };

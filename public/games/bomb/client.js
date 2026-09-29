@@ -18,6 +18,9 @@ import { crepuscule, creerDuel } from '../../crepuscule.js';
 import { creerJournal, blocFin } from '../../finpartie.js';
 // aides visuelles partagées (vague 2) : enchaînements « DOUBLÉ ! », arrêt sur image, éclat, vignette de danger, pastilles de siège, textes lisibles
 import { createStreaks, streakText, createCallouts, createHitStop, drawFlash, drawDanger, drawSeatChip, readable } from '../../exploits.js';
+// ralenti du moment décisif (dernière élimination) puis podium dessiné au canvas (bombeurs, style Confiserie)
+import { createRalenti } from '../../ralenti.js';
+import { drawPodium, podiumEntries } from '../../podium.js';
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -204,6 +207,11 @@ export default (function () {
   let stkK = {};                                      // par siège : éliminations vues au dernier état (attribution = hausse de ⚡)
   let minU = 0, touch = false;                        // taille mini d'un texte en unités d'arène (≥ 9 px CSS) ; écran tactile (pas d'indications clavier)
   let dangerK = 0, dangerSm = 0, rainK = 0;           // danger : cible / lissé ; pluie de mort subite : opacité lissée
+  // ralenti + podium de fin de manche : tampon des derniers états, carte DOM de fin différée pendant le rejeu
+  const RL = createRalenti({ keepMs: 3000, windowMs: 1400, slow: 0.4 });
+  let pendingEnd = null, overT0 = 0, graceUntil = 0, inReplay = false, podOn = false, layoutOn = false, podKey = null, podEntries = [];
+  const rvObj = {};                                   // vue du rejeu (réutilisée à chaque image : a/b du ralenti ne sont jamais modifiés)
+  const POD_AN = { dir: 1, ph: 0, mt: 0, mv: false };   // bombeur du podium : de face, immobile
   const rd = base => Math.max(base, minU);            // texte de base `base` (unités d'arène), relevé si l'écran est petit
   const input = { up: false, down: false, left: false, right: false };
   let hud, cards, startBtn, pauseBtn, modeBtn, genBtn, ffBtn, revBtn, botsBtn, diffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
@@ -229,6 +237,19 @@ export default (function () {
     const dpr = window.devicePixelRatio || 1;
     const size = arenaSize({ max: 720 });
     cv.style.width = size + 'px'; cv.style.height = size + 'px'; cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr);
+    applyEndLayout();
+  }
+  // Podium canvas dans la BANDE HAUTE de l'arène (frac de sa hauteur) : la carte DOM de fin couvre tout le canvas d'un
+  // fond sombre, donc on la pousse sous la bande et on la rend transparente à cet endroit (styles en ligne, retirés dès
+  // que le podium disparaît). Téléphone : bande un peu plus basse, la carte défile comme avant.
+  const bandFrac = () => ((cv.clientWidth || parseFloat(cv.style.width) || 400) < 480 ? 0.38 : 0.40);
+  function applyEndLayout() {
+    if (!endEl) return;
+    if (!podOn) { if (layoutOn) { layoutOn = false; endEl.style.paddingTop = ''; endEl.style.justifyContent = ''; endEl.style.background = ''; } return; }
+    layoutOn = true;
+    const px = Math.round((cv.clientWidth || parseFloat(cv.style.width) || 340) * bandFrac());
+    endEl.style.paddingTop = px + 'px'; endEl.style.justifyContent = 'flex-start';
+    endEl.style.background = 'linear-gradient(to bottom, rgba(5,6,14,0) ' + px + 'px, rgba(5,6,14,.84) ' + (px + 18) + 'px)';
   }
 
   // ───────────────────────── HUD, classement, écran de fin ─────────────────────────
@@ -259,9 +280,10 @@ export default (function () {
       `<div class="lbrow"><span class="lbn">${esc(e.name)}</span><span>🎮${e.games}</span><span>🏆${e.wins}</span><span title="kills">⚡${e.kills}</span><span title="K/D">⚖${(e.deaths ? (e.kills / e.deaths).toFixed(2) : (e.kills ? '∞' : '0'))}</span><span title="meilleure survie">⏱${Math.round(e.bestSurvivalSec || 0)}s</span></div>`).join('');
   }
   function showEndscreen(m) {
-    if (m.gs !== 'over' || !m.stats) { endEl.classList.add('hidden'); return; }
+    if (m.gs !== 'over' || !m.stats) { endEl.classList.add('hidden'); podOn = false; applyEndLayout(); return; }
     endEl.classList.remove('hidden');
     const solo = m.stats.solo;
+    podOn = !solo; overT0 = performance.now(); applyEndLayout();   // podium canvas (pas en entraînement solo)
     const parts2 = m.players.filter(p => p.playing && p.place > 0).slice().sort((a, b) => a.place - b.place);
     const champ = m.winner >= 0 ? parts2.find(p => p.team === m.winner) : null;
     const who = champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[m.winner] : esc(champ.name || ('P' + (champ.seat + 1)))) : null;
@@ -323,6 +345,21 @@ export default (function () {
     });
   }
 
+  // Fanfare de fin : jingle + confettis de bonbons (le podium a les siens quand il y a un vainqueur : pas de doublon).
+  function endFanfare(m) { sound('win'); music.sting('win'); if (!(m.winner >= 0) || (m.stats && m.stats.solo)) confettiRain(); }
+  // Fin du rejeu (durée écoulée ou passé) : la carte DOM de fin et le podium arrivent, avec la fanfare.
+  function releaseEnd(now) {
+    const m = pendingEnd; pendingEnd = null; graceUntil = now + 300;
+    if (m && snap && snap.gs === 'over') { showEndscreen(m); endFanfare(m); }
+  }
+  // Premier Espace / clic / toucher pendant le rejeu : il ne fait QUE passer le rejeu (jamais « Rejouer ») ;
+  // 300 ms de grâce après la fin du rejeu pour qu'un appui tardif ne relance pas la manche par surprise.
+  function swallow() {
+    const t = performance.now();
+    if (RL.active(t)) { RL.skip(); graceUntil = t + 300; return true; }
+    return t < graceUntil;
+  }
+
   // ───────────────────────── état réseau ─────────────────────────
   function onMessage(m) { if (m && m.t === 'welcome') mySeat = m.seat; }
   function onLb(d) { board = (d && d.board) || []; renderLB(); }
@@ -358,18 +395,23 @@ export default (function () {
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
-    if (m.round !== prevRound) { prevRound = m.round; buf = []; clearFx(); }
+    if (m.round !== prevRound) { prevRound = m.round; buf = []; clearFx(); RL.clear(); pendingEnd = null; graceUntil = 0; }   // nouvelle manche : plus de rejeu, plus de carte de fin en attente
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     const now = performance.now();
+    // ralenti : chaque état de jeu entre dans le tampon (avant tout le reste) ; à la fin de manche, rejeu du moment décisif
+    if (m.gs === 'play' || (m.gs === 'over' && prevGs !== 'over')) RL.push(m, now);
+    else if (m.gs === 'lobby' || m.gs === 'countdown') { RL.clear(); pendingEnd = null; }
+    const rp = m.gs === 'over' && prevGs !== 'over' && !A.reduceFx && !(m.stats && m.stats.solo) && RL.start(now);   // rejeu lancé sur CET état
+    const mute = RL.active(now);                      // pendant le rejeu : ni sons ni effets rejoués
     const booms = trackBombs(m, now);
-    booms.forEach(k => explodeFx(k % GW, (k / GW) | 0, booms.length));
-    if (!A.reduceFx) {                                // un flash par bombe (pas par case) ; une réaction en chaîne partage l'intensité
+    if (!mute) booms.forEach(k => explodeFx(k % GW, (k / GW) | 0, booms.length));
+    if (!A.reduceFx && !mute) {                                // un flash par bombe (pas par case) ; une réaction en chaîne partage l'intensité
       const fa = booms.length > 1 ? 0.95 / Math.sqrt(booms.length) : 0.95;
       for (let i = 0; i < booms.length && i < 6; i++) flashes.ajouter(cpx(booms[i] % GW), cpx((booms[i] / GW) | 0), CELL * 3.2, '#ffc864', 560, fa);
     }
     journal(m, now); trackStreaks(m, now);
-    (m.fx || []).forEach(playFx);
-    if (prevGs !== 'over' && m.gs === 'over') { sound('win'); music.sting('win'); confettiRain(); }
+    if (!mute) (m.fx || []).forEach(playFx);
+    if (prevGs !== 'over' && m.gs === 'over' && !rp) endFanfare(m);   // avec rejeu : fanfare + confettis différés à la fin du rejeu
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte musical 3·2·1
     if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); goAt = now; }
     lastCount = m.count;
@@ -380,7 +422,8 @@ export default (function () {
       if (m.gs === 'play' || m.gs === 'countdown') inten = m.sd ? 2 : 1;
       music.setIntensity(inten); }
     refreshHUD();
-    if (m.gs === 'over') { if (!endShown) { showEndscreen(m); endShown = true; } } else { endShown = false; endEl.classList.add('hidden'); }
+    if (m.gs === 'over') { if (!endShown) { endShown = true; if (rp) pendingEnd = m; else showEndscreen(m); } }   // rejeu : carte DOM de fin différée jusqu'à sa fin
+    else { endShown = false; pendingEnd = null; endEl.classList.add('hidden'); podOn = false; applyEndLayout(); }
     const idle = m.gs === 'lobby' || m.gs === 'over';
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1); startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused'); pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
@@ -550,7 +593,7 @@ export default (function () {
 
   // ───────────────────────── interpolation ─────────────────────────
   function viewPlayers(now) {
-    if (buf.length === 0) return null;
+    if (buf.length === 0 || inReplay) return null;   // rejeu : les positions sont déjà interpolées dans la vue rejouée
     const target = now - INTERP_MS; let a = buf[0], b = buf[buf.length - 1];
     for (let i = 0; i < buf.length; i++) if (buf[i].t <= target) a = buf[i];
     for (let i = buf.length - 1; i >= 0; i--) if (buf[i].t >= target) b = buf[i];
@@ -931,7 +974,7 @@ export default (function () {
       for (let s = 0; s < 5; s++) { const cyc = now / 2400 + s * 0.37, n = Math.floor(cyc), t = cyc - n; if (t > 0.3) continue; const c = solidCells[Math.floor(hash2(s, n) * solidCells.length)]; star4(ctx, (c % GW) * CELL + 11, ((c / GW) | 0) * CELL + 8, 3.4 * Math.sin(t / 0.3 * Math.PI)); }
       ctx.fill();
     }
-    for (let i = scorch.length - 1; i >= 0; i--) { const s = scorch[i], t = (now - s.born) / 2600; if (t >= 1) { scorch.splice(i, 1); continue; } ctx.globalAlpha = 0.4 * (1 - t); ctx.drawImage(spr.scorch, s.x - CELL * 0.6, s.y - CELL * 0.6, CELL * 1.2, CELL * 1.2); }   // traces de caramel brûlé
+    if (!inReplay) for (let i = scorch.length - 1; i >= 0; i--) { const s = scorch[i], t = (now - s.born) / 2600; if (t >= 1) { scorch.splice(i, 1); continue; } ctx.globalAlpha = 0.4 * (1 - t); ctx.drawImage(spr.scorch, s.x - CELL * 0.6, s.y - CELL * 0.6, CELL * 1.2, CELL * 1.2); }   // traces de caramel brûlé
     ctx.globalAlpha = 1;
   }
   // Éclairage dynamique, posé sur le sol AVANT les pièces : lueur des téléporteurs, étincelle de chaque mèche,
@@ -1077,7 +1120,7 @@ export default (function () {
       }
     }
     ctx.restore();
-    if (FX) for (const bl of B) if (Math.random() < 0.1 * kdt) addP({ k: 'glow', x: cpx(bl.x) + (Math.random() - 0.5) * 18, y: cpx(bl.y) + (Math.random() - 0.5) * 18, vx: (Math.random() - 0.5) * 0.4, vy: -0.6 - Math.random() * 0.6, z: 0, vz: 0, born: now, life: 320, r: 7, col: '255,160,50', rot: 0, vr: 0 });   // langues de feu
+    if (FX && !inReplay) for (const bl of B) if (Math.random() < 0.1 * kdt) addP({ k: 'glow', x: cpx(bl.x) + (Math.random() - 0.5) * 18, y: cpx(bl.y) + (Math.random() - 0.5) * 18, vx: (Math.random() - 0.5) * 0.4, vy: -0.6 - Math.random() * 0.6, z: 0, vz: 0, born: now, life: 320, r: 7, col: '255,160,50', rot: 0, vr: 0 });   // langues de feu
   }
   function drawPlayers(now) {
     const pv = viewPlayers(now), over = snap.gs === 'over', list = [];
@@ -1111,8 +1154,8 @@ export default (function () {
       drawBomber(p.seat, t.x, t.y, { an: e.an, name: nomAvatar(p), me: p.seat === mySeat && !over, crown: e.crown, ghost: p.ghost, invuln: p.invuln, shield: p.shield > 0, kick: p.kick, throw: p.throw, remote: p.remote, line: p.line, rev: p.rev, slow: p.slow, auto: p.auto, skull: p.skull, speed: p.speed | 0 }, now);
       if (FX && (p.skull || p.ghost) && Math.random() < 0.05) addP({ k: 'bub', x: t.x + (Math.random() - 0.5) * 16, y: t.y - 4, vx: 0, vy: -0.5, z: 0, vz: 0, born: now, life: 700, r: 1.5 + Math.random() * 1.5, col: p.skull ? '192,112,240' : '220,215,255', rot: 0, vr: 0 });
     }
-    for (let i = poofs.length - 1; i >= 0; i--) if (!drawPoof(poofs[i], now)) poofs.splice(i, 1);
-    for (let i = hitFlashes.length - 1; i >= 0; i--) { const h = hitFlashes[i], t = (now - h.born) / 240; if (t >= 1) { hitFlashes.splice(i, 1); continue; } if (t >= 0) drawFlash(ctx, h.x, h.y, CELL * 0.8, t); }   // éclat blanc d'élimination (né après l'arrêt sur image)
+    if (!inReplay) for (let i = poofs.length - 1; i >= 0; i--) if (!drawPoof(poofs[i], now)) poofs.splice(i, 1);   // pas d'effets rejoués pendant le ralenti
+    if (!inReplay) for (let i = hitFlashes.length - 1; i >= 0; i--) { const h = hitFlashes[i], t = (now - h.born) / 240; if (t >= 1) { hitFlashes.splice(i, 1); continue; } if (t >= 0) drawFlash(ctx, h.x, h.y, CELL * 0.8, t); }   // éclat blanc d'élimination (né après l'arrêt sur image)
     // étiquettes par-dessus tous les sprites (nom, ou « VOUS »)
     const lfs = Math.round(rd(10));                   // ≥ 9 px CSS même sur petit écran ; noms raccourcis quand le texte grossit (pas de chevauchement)
     ctx.font = 'bold ' + lfs + 'px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.lineJoin = 'round';
@@ -1275,11 +1318,51 @@ export default (function () {
     inkText(touch ? 'Mèche soufflée — touchez ▶ pour reprendre' : 'Mèche soufflée — P / Échap pour reprendre', c, c + 36, sf(14, false), 'rgba(255,244,226,.85)', ARENA - 16);   // écran tactile : pas d'indication clavier
   }
 
+  // Vue du rejeu : l'état qui précède l'instant rejoué (u < 0,5) ou celui qui le suit, avec les positions des bombeurs
+  // interpolées entre les deux. Lecture seule sur a / b (objets du tampon de ralenti) ; gs forcé à « play » : le
+  // monde se dessine comme en manche (pas de couronne, pas d'écran de fin par-dessus).
+  function replayView(f, real) {
+    const a = f.a, b = f.b, u = f.u, base = u < 0.5 ? a : b;
+    for (const k in base) rvObj[k] = base[k];
+    rvObj.gs = 'play'; if (!rvObj.grid) rvObj.grid = real.grid;
+    rvObj.players = base.players.map((p, i) => {
+      const q = a.players[i], r = b.players[i];
+      return (p.playing && q && r && q.playing && r.playing && Math.hypot(r.x - q.x, r.y - q.y) < 60) ? Object.assign({}, p, { x: q.x + (r.x - q.x) * u, y: q.y + (r.y - q.y) * u }) : p;
+    });
+    return rvObj;
+  }
+  // Pièce du podium = le bombeur du jeu (casque à la couleur / motif du siège, visière, antenne), de face ; couronne au 1er.
+  // Jamais d'avatar. drawBomber lit ctx.globalAlpha pour la rangée grisée : on le lui repasse.
+  function podPiece(c, e, x, y, size, rank) {
+    const k = size / 44;
+    drawBomber(e.seat, x, y + 8 * k, { an: POD_AN, scale: k, shadow: false, alpha: c.globalAlpha, crown: rank === 1 && !(snap && snap.winner < 0) }, podNow);
+  }
+  let podNow = 0;
+  function drawPodiumBand(now, sc) {
+    if (podKey !== snap) { podKey = snap; podEntries = podiumEntries(snap.players, colSeat); }
+    if (!podEntries.length) return;
+    const bandU = ARENA * bandFrac(), nul = snap.winner < 0;
+    ctx.setTransform(sc, 0, 0, sc, 0, 0);
+    ctx.fillStyle = A.contrast ? 'rgba(10,4,16,.94)' : 'rgba(23,58,42,.8)'; ctx.fillRect(0, 0, ARENA, bandU);   // voile vert sombre derrière la bande
+    ctx.fillStyle = K.ink; ctx.fillRect(0, bandU - 2, ARENA, 2);
+    podNow = now;
+    drawPodium(ctx, { x: ARENA * 0.03, y: ARENA * 0.012, w: ARENA * 0.94, h: bandU - ARENA * 0.03 }, now, {
+      entries: podEntries, A, W: ARENA, t0: overT0, nul,
+      theme: { step: '#7a4526', edge: '#f0c979', text: K.cream, glow: K.lemon },   // marches de chocolat, arête de biscuit, lueur citron
+      drawPiece: podPiece,
+    });
+  }
   function draw() {
     if (destroyed) return;
+    const real = snap;
+    try { drawFrame(); } finally { snap = real; inReplay = false; }   // la vue du rejeu n'est prêtée que le temps d'une image
+  }
+  function drawFrame() {
     const now = performance.now(), dtMs = Math.min(100, Math.max(0, now - (lastFrame || now - 16.7))), kdt = Math.min(3, Math.max(0.25, dtMs / 16.7)); lastFrame = now;
     const sc = cv.width / ARENA; PXU = sc;
     minU = readable(0, cv, ARENA, 9);                 // plancher des textes du canvas : 9 px CSS exprimés en unités d'arène
+    const rf = RL.frame(now);                         // rejeu du moment décisif en cours ? (sinon null)
+    if (!rf && pendingEnd) releaseEnd(now);           // fin du rejeu : carte de fin + podium + fanfare
     if (hitStop.frozen(now) && !A.reduceFx) return;   // arrêt sur image (60 ms) à chaque élimination : on garde la dernière image (lastFrame déjà à jour : pas de saut de particules)
     // Arène qui évolue : l'après-midi dore à l'approche de la mort subite (dès 45 s de jeu, elle tombe à 65 s),
     // puis la nuit gagne à mesure que la spirale de blocs se referme. Lissé ; figé sur l'écran de fin.
@@ -1295,8 +1378,9 @@ export default (function () {
       tgt = Math.max(tgt, DUEL.t(snap, performance.now(), duelAnnonce));   // duel final : la nuit tombe
       dusk += (tgt - dusk) * Math.min(1, dtMs / 900);
     }
+    inReplay = !!(rf && snap); if (inReplay) snap = replayView(rf, snap);
     let ox = 0, oy = 0;
-    if (shakeMag > 0.3 && !A.reduceFx) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= Math.pow(0.86, kdt); } else shakeMag = 0;
+    if (shakeMag > 0.3 && !A.reduceFx && !inReplay) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= Math.pow(0.86, kdt); } else shakeMag = 0;
     ctx.setTransform(sc, 0, 0, sc, ox * sc, oy * sc);
     ctx.fillStyle = K.bg; ctx.fillRect(-12, -12, ARENA + 24, ARENA + 24);
     ensureSprites();
@@ -1306,15 +1390,15 @@ export default (function () {
       drawLights(now);                                // lueurs sur le sol, sous les pièces
       drawWarps(now);
       drawRange(now);
-      drawDropWarn(now);
+      if (!inReplay) drawDropWarn(now);
       drawPickups(now);
-      drawWallAnims(now);
+      if (!inReplay) drawWallAnims(now);
       drawBombs(now, kdt);
       drawBlasts(now, kdt);
       drawPlayers(now);
-      drawDrops(now);
+      if (!inReplay) drawDrops(now);                  // (son + éclats à l'impact : pas rejoués)
     }
-    drawParticles(now, kdt);
+    if (!inReplay) drawParticles(now, kdt);
     rainK += ((FX && snap && snap.sd && snap.gs === 'play' ? 1 : 0) - rainK) * Math.min(1, dtMs / 500);
     if (rainK > 0.02) drawRain(now);
     // étalonnage jour → crépuscule par-dessus l'arène (sol, pièces, particules), sous les écrans ; plafonné
@@ -1323,11 +1407,13 @@ export default (function () {
     if (snap && snap.grid && snap.sd && snap.gs === 'play') { ctx.strokeStyle = `rgba(255,60,60,${FX ? 0.3 + 0.25 * Math.sin(now / 160) : 0.45})`; ctx.lineWidth = 6; ctx.strokeRect(3, 3, ARENA - 6, ARENA - 6); }   // mort subite : cadre qui palpite (au-dessus du crépuscule : reste vif)
     if (snap && snap.gs === 'play') drawGoBurst(now);
     dangerSm += (dangerK - dangerSm) * Math.min(1, dtMs / 90); dangerK = 0;
-    if (dangerSm > 0.02) { ctx.save(); ctx.setTransform(sc, 0, 0, sc, 0, 0); drawDanger(ctx, ARENA, ARENA, A.reduceFx ? Math.min(0.6, dangerSm) : Math.min(1, dangerSm * (A.contrast ? 1.3 : 1)), A.reduceFx ? 0 : now); ctx.restore(); }   // je suis dans la portée d'une bombe qui saute dans < 1 s (reduceFx : vignette fixe, sans pulsation)
-    if (snap && (snap.gs === 'play' || snap.gs === 'over')) callouts.draw(ctx, ARENA, ARENA, now, A);   // « DOUBLÉ ! » / « TRIPLÉ ! » / « CARNAGE ! »
+    if (dangerSm > 0.02 && !inReplay) { ctx.save(); ctx.setTransform(sc, 0, 0, sc, 0, 0); drawDanger(ctx, ARENA, ARENA, A.reduceFx ? Math.min(0.6, dangerSm) : Math.min(1, dangerSm * (A.contrast ? 1.3 : 1)), A.reduceFx ? 0 : now); ctx.restore(); }   // je suis dans la portée d'une bombe qui saute dans < 1 s (reduceFx : vignette fixe, sans pulsation)
+    if (snap && !inReplay && (snap.gs === 'play' || snap.gs === 'over')) callouts.draw(ctx, ARENA, ARENA, now, A);   // « DOUBLÉ ! » / « TRIPLÉ ! » / « CARNAGE ! »
     if (snap && snap.gs === 'countdown') drawCountdown(now);
     if (snap && snap.gs === 'paused') drawPause(now);
     if (snap && snap.gs === 'lobby') { overlay(0.62); drawLobby(now); }
+    if (inReplay) { ctx.setTransform(sc, 0, 0, sc, 0, 0); RL.drawOverlay(ctx, ARENA, ARENA, now, A); }   // bandes cinéma, « ⟲ RALENTI », barre
+    else if (podOn && snap && snap.gs === 'over' && !pendingEnd) drawPodiumBand(now, sc);
   }
   function drawLoop() { if (destroyed) return; try { draw(); } catch (e) { console.error('[render]', e); } rafId = requestAnimationFrame(drawLoop); }   // filet : une erreur de rendu ne fige plus le jeu
 
@@ -1339,7 +1425,7 @@ export default (function () {
     if (e.repeat) return;                             // touche TENUE : jamais de renvoi (bombe, action, pause, « Rejouer » ; le mouvement n'a besoin que du 1er appui)
     unlockAudio();
     const playing = snap && (snap.gs === 'play' || snap.gs === 'paused');
-    if (e.key === ' ') { if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); else send({ t: 'bomb' }); return; }
+    if (e.key === ' ') { if (snap && snap.gs !== 'play' && snap.gs !== 'paused') { if (!swallow()) send({ t: 'start' }); } else send({ t: 'bomb' }); return; }   // 1er Espace pendant le rejeu : il le passe, rien d'autre
     if (e.code === 'KeyB' && playing) { send({ t: 'bomb' }); return; }
     if ((e.code === 'KeyX' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && playing) { send({ t: 'action' }); return; }
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && playing) { send({ t: 'pause' }); return; }
@@ -1361,21 +1447,22 @@ export default (function () {
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('bmc'); ctx = cv.getContext('2d'); hud = $('bmHud'); endEl = $('bmEnd');
     seatCache = {}; sprKey = ''; overlayG = null;   // les dégradés en cache appartiennent au contexte : on repart propre
+    RL.clear(); pendingEnd = null; podOn = false; layoutOn = true; applyEndLayout(); overT0 = 0; graceUntil = 0; podKey = null; inReplay = false;   // singleton réutilisé : ni rejeu ni podium hérités
     J.fin(); flashes.vider(); dusk = 0; playMs = 0; lastFrame = 0;   // singleton réutilisé : pas de journal / crépuscule hérités d'une visite précédente
     const wrap = cv.parentElement;   // conteneur .canvas-wrap : accueille les bandeaux bonus/malus
     initGameMsg(wrap && wrap.classList.contains('canvas-wrap') ? wrap : null);
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; el._pn = el.querySelector('.pn'); el._lv = el.querySelector('.lv'); el._pnH = el._lvH = el._col = null; hud.appendChild(el); return el; });
     startBtn = $('bmStart'); pauseBtn = $('bmPause'); modeBtn = $('bmMode'); genBtn = $('bmGen'); ffBtn = $('bmFf'); revBtn = $('bmRevenge'); botsBtn = $('bmBots'); pauseFloat = $('bmPauseFloat'); lbBtn = $('bmLbBtn'); lbPanel = $('bmLbPanel'); lbBody = $('bmLbBody');
-    startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
+    startBtn.onclick = () => { unlockAudio(); if (!swallow()) send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' }); pauseFloat.onclick = () => send({ t: 'pause' }); modeBtn.onclick = () => send({ t: 'mode' }); genBtn.onclick = () => send({ t: 'gen' }); ffBtn.onclick = () => send({ t: 'ff' });
     if (revBtn) revBtn.onclick = () => send({ t: 'revenge' });
     if (botsBtn) botsBtn.onclick = () => send({ t: 'bots' });
     diffBtn = $('bmDiff'); if (diffBtn) diffBtn.onclick = () => send({ t: 'botdiff' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('bmHelp'), helpPanel = $('bmHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
-    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused') send({ t: 'start' }); });
-    if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
+    if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused' && !swallow()) send({ t: 'start' }); });
+    if (premiere) endEl.addEventListener('click', () => { unlockAudio(); if (!swallow()) send({ t: 'start' }); });
     if (premiere) { hold('bmUp', 'up'); hold('bmDown', 'down'); hold('bmLeft', 'left'); hold('bmRight', 'right'); }
     const bomb = $('bmBomb'); if (bomb && premiere) bomb.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t: 'bomb' }); });
     const act = $('bmAct'); if (act && premiere) act.addEventListener('pointerdown', e => { e.preventDefault(); send({ t: 'action' }); });
@@ -1395,6 +1482,7 @@ export default (function () {
     if (held) { try { pushInput(); } catch (e) {} }   // touches tenues relâchées côté serveur aussi (un « tout relâché » est inoffensif si le hub a déjà changé de jeu)
     if (actx) { try { const pr = actx.close(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {} actx = null; } noiseBuf = null;   // l'AudioContext est fermé ; unlockAudio() en recrée un au retour
     hitFlashes.length = 0; streaks.reset(); dangerSm = 0; rainK = 0;
+    RL.clear(); pendingEnd = null; podOn = false; applyEndLayout(); podKey = null; podEntries = []; inReplay = false;   // rejeu / podium coupés, styles en ligne de la carte de fin retirés
   }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };

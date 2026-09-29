@@ -1096,6 +1096,33 @@ Corrigé ensuite en 2 vagues (commits « Audit 28/09, vague 1 / vague 2 ») :
   jamais finir (un revenant qui ne trouve jamais de case libre garde la manche ouverte) ; Snake n'a pas de durée max
   (deux serpents peuvent s'éviter indéfiniment) ; sur un nul total en Sumo/Bomberman, un seul joueur peut garder la place 1.
 
+## Fin de manche commune, sauvegardes, ralenti, podium, caméra de duel (29/09/2026)
+- **`games/fin-manche.js` — `classerManche(players, winner, opts)`** : la SEULE vérité pour les places, appelée par
+  l'endRound des 7 jeux (Pong : 3 chemins). Équipe gagnante = place 1 et elle seule ; les autres par ordre
+  d'élimination (même tick = même place, classement 1, 2, 2, 4) ; nul = les survivants (ou derniers morts) partagent la
+  place 1, jamais une place 1 isolée ; `opts.score` (Snake course, Pong au temps, Foot vies d'équipe, Bomberman
+  revanche). `recordRound` lit `winner >= 0 && p.place === 1`. Une place peut donc être PARTAGÉE (podiums compris).
+- **Bomberman `SD_GRACE`** (20 s) : arène pleine depuis 20 s → les revenants (et joueurs coincés) comptent comme
+  éliminés ; plus de manche sans fin en revanche. Solo : fin quand l'arène est pleine.
+- **`test/fins-de-manche.mjs`** (enchaîné par `npm test` après smoke.mjs) : harnais headless (fausse salle), graine
+  fixe `FINS_SEED`, 14 cas unitaires de `classerManche` + les 7 jeux (solo, duel, moitié, plein ; modes ; départs,
+  arrivées, pauses) → fin sous le plafond, place 1 = toute l'équipe gagnante, nul sans place 1 isolée, places
+  contiguës, pas de NaN. Snake et Tanks n'ont pas de durée max (plafond « doux » dans le test : manche abandonnée).
+- **Classement : 3 sauvegardes** espacées d'au moins 1 h (`<fichier>.sauv1..3` ou clés `<clé>:sauv1..3` + `:sauv-t`,
+  1 requête /pipeline par rotation), copie au démarrage si la dernière a plus d'1 h, jamais un classement vide par-dessus
+  une copie pleine ; mode d'emploi de restauration en tête de `leaderboard.js`.
+- **Briques client** : `ralenti.js` (tampon 3 s, rejoue les 1,4 s avant la fin à 0,4×, bandes cinéma « RALENTI » ;
+  le 1er appui ne fait que le passer, jamais « Rejouer » ; pas de sons/fx rejoués ; carte de fin différée ; coupé par
+  « Réduire les effets »), `podium.js` (`drawPodium`/`podiumEntries` : marches 2-1-3, ex æquo, nul, confettis teintés,
+  pièce du jeu via `drawPiece`, jamais d'avatar), `camera-duel.js` (`createDuelCam` : zoom doux borné à l'arène).
+- **7 clients** : ralenti du moment décisif + podium canvas dans le style du jeu, en bande haute ; la carte DOM de fin
+  est descendue sous le podium et lue depuis le haut (`justify-content:flex-start`, défilement conservé).
+  **Caméra de duel** : Sumo, Foot, Tanks, seulement quand la manche a commencé à 3 joueurs ou plus et qu'il n'en reste
+  que 2 (camps distincts). **Foot** : tir chargé visible par tous (anneau qui grandit avec `ch`, diffusé pour chacun).
+- Vérifié : `npm test` 101/101 + 21/21 ; navigateur (téléphone 375 px) : fin de manche des 7 jeux sans erreur, ralenti
+  passé par un toucher sans relancer la manche, podiums lisibles. Corrigés à la relecture : caméra du Foot active dès un
+  1 contre 1 ; titre de la carte de fin du Foot hors de vue ; carte du Sumo sans défilement.
+
 ## Limites connues (assumées)
 - ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».
 - Hébergement Render en **Europe (Frankfurt)** — confirmé par l'utilisateur, donc ~15-25 ms de ping : le ping
@@ -1122,7 +1149,6 @@ Corrigé ensuite en 2 vagues (commits « Audit 28/09, vague 1 / vague 2 ») :
   Ces choses-là n'ont jamais été trouvées par l'automatisation — toujours par les testeurs.
 
 ## Pistes non faites (idées futures)
-Mobs IA solo Bomberman ; salles multiples (codes de room) ; ralenti du moment décisif ; caméra de duel ; podium dessiné ;
-envoi incrémental de la géométrie / compression WebSocket (optim réseau) ; une fonction de fin de manche commune aux
-jeux + tests de fin de manche ; rotation des sauvegardes du classement ; nouveaux jeux via le contrat (idées : Territoire,
+Mobs IA solo Bomberman ; salles multiples (codes de room) ;
+envoi incrémental de la géométrie / compression WebSocket (optim réseau) ; durée max pour Snake et Tanks ; nouveaux jeux via le contrat (idées : Territoire,
 Patate chaude). (Faits depuis : crépuscule, lueurs `lumiere.js`, purge d'`identities`. Refusé : avatars sur les pièces.)

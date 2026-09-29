@@ -43,7 +43,9 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
   (étalonnage jour → crépuscule en mort subite), `finpartie.js` (journal de manche → courbe + meilleure
   action, textes échappés), `vitrine.js` (accueil en cartes animées), `echo-virage.js` (chevron immédiat du
   virage enregistré, jeux à pas discret), `exploits.js` (« DOUBLÉ ! », arrêt sur image, éclat, vignette de danger,
-  pastille numérotée, `readable`/`hudK` pour des textes lisibles sur téléphone). Un nouveau jeu doit aussi avoir sa mini-scène dans `vitrine.js`.
+  pastille numérotée, `readable`/`hudK` pour des textes lisibles sur téléphone), `ralenti.js` (ralenti du moment décisif),
+  `podium.js` (podium canvas de fin), `camera-duel.js` (zoom doux sur le duel final). Côté serveur, les places de fin de
+  manche passent TOUJOURS par `classerManche()` de `games/fin-manche.js` (vérifié par `test/fins-de-manche.mjs`). Un nouveau jeu doit aussi avoir sa mini-scène dans `vitrine.js`.
 - **Clés venant du réseau** (pseudo, id de jeu, direction…) : jamais `obj[cle]` nu sur un objet ordinaire —
   `Object.hasOwn` côté serveur (`Object.prototype.hasOwnProperty.call` côté client) ou `Object.create(null)`.
   Un simple `{t:'pick', id:'constructor'}` tuait le serveur (corrigé le 24/09). Tout appel au code d'un jeu hors
@@ -53,7 +55,7 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
 ## Lancer et tester
 
 ```
-npm test                      # test de fumée : les 7 jeux, de vrais clients WebSocket — À LANCER AVANT CHAQUE PUSH
+npm test                      # smoke.mjs (7 jeux, vrais clients WebSocket) puis fins-de-manche.mjs — AVANT CHAQUE PUSH
 node server.js                # :3000, ou preview_start via .claude/launch.json
 HUB_TRACE=1 node server.js    # journalise chaque diffusion
 ```
