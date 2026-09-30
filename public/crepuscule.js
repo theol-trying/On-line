@@ -25,11 +25,15 @@ const OR = [255, 190, 110], SANG = [228, 64, 58], VIOLET = [104, 70, 190];
    const D = creerDuel();   puis à chaque image :   t = Math.max(tJeu, D.t(snap, now, () => annonce()))
    `annonce` n'est appelée qu'une fois par manche (bandeau « Duel final »). */
 export function creerDuel() {
-  let debut = 0, maxCamps = 0, actif = false;
+  let debut = 0, maxCamps = 0, actif = false, manche;
+  const raz = () => { debut = 0; maxCamps = 0; actif = false; };
   return {
     t(snap, now, annonce) {
       const gs = snap && snap.gs;
-      if (gs !== 'play' && gs !== 'paused' && gs !== 'over') { debut = 0; maxCamps = 0; actif = false; return 0; }
+      if (gs !== 'play' && gs !== 'paused' && gs !== 'over') { raz(); return 0; }
+      // Nouvelle manche SANS passage par ici hors jeu (Foot et Sumo n'appellent t() qu'en play/paused/over) :
+      // reconnue au numéro de manche, sinon la nuit du duel précédent restait tombée dès le coup d'envoi (bug du 30/09).
+      if (snap.round !== undefined && snap.round !== manche) { manche = snap.round; raz(); }
       const camps = {}; let n = 0;
       const ps = snap.players || [];
       for (let i = 0; i < ps.length; i++) {
@@ -38,6 +42,7 @@ export function creerDuel() {
         const k = p.team == null ? 's' + i : 't' + p.team;
         if (!camps[k]) { camps[k] = 1; n++; }
       }
+      if (actif && n > 2) raz();                        // plus de 2 camps en lice : ce n'est plus le duel (jeu sans numéro de manche, ex. Pong)
       if (n > maxCamps) maxCamps = n;
       if (!actif && maxCamps > 2 && n === 2 && gs === 'play') { actif = true; debut = now; if (annonce) annonce(); }
       if (!actif) return 0;
