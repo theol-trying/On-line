@@ -26,6 +26,8 @@ const CARTES = {
   sumo:  { mode: 8, haut: 'smUp', bas: 'smDown', gauche: 'smLeft', droite: 'smRight' },
   // Foot : course continue en 8 directions, comme le Sumo (le tir part dans la direction tenue)
   foot:  { mode: 8, haut: 'ftUp', bas: 'ftDown', gauche: 'ftLeft', droite: 'ftRight' },
+  // Patate chaude : course libre en 8 directions (la patate se passe par contact : il faut pouvoir contourner et rattraper en biais)
+  patate: { mode: 8, haut: 'ptUp', bas: 'ptDown', gauche: 'ptLeft', droite: 'ptRight' },
 };
 
 let jeu = null, projeteur = null;                      // projeteur(dx, dy) → id | null (Pong : dépend du bord)

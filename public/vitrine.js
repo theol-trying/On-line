@@ -340,6 +340,49 @@ const SCENES = {
     },
   },
 };
+
+// Patate chaude : nappe vichy ronde sur l'herbe, trois pions qui tournent ; la patate en papier alu passe de l'un à l'autre en rougissant.
+SCENES.patate = {
+  fixe: 1.2,
+  fond(c, w, h, st) {
+    c.fillStyle = '#2d6a27'; c.fillRect(0, 0, w, h);
+    c.fillStyle = 'rgba(255,255,255,.05)'; for (let y = 0; y < h; y += 14) c.fillRect(0, y, w, 7);                   // pelouse tondue
+    const cx = w / 2, cy = h / 2, R = Math.min(h * 0.47, w * 0.36); st.R = R; st.cx = cx; st.cy = cy;
+    c.save(); c.beginPath(); c.arc(cx, cy, R, 0, TAU); c.clip();                                                  // nappe vichy
+    c.fillStyle = '#fbf3de'; c.fillRect(cx - R, cy - R, R * 2, R * 2);
+    const q = Math.max(3, R / 3.5);
+    c.fillStyle = 'rgba(216,72,58,.72)'; for (let x = cx - R; x < cx + R; x += q * 2) c.fillRect(x, cy - R, q, R * 2);
+    c.fillStyle = 'rgba(216,72,58,.72)'; for (let y = cy - R; y < cy + R; y += q * 2) c.fillRect(cx - R, y, R * 2, q);
+    c.restore();
+    c.strokeStyle = '#8a2a1c'; c.lineWidth = Math.max(1.5, R * 0.06); c.beginPath(); c.arc(cx, cy, R, 0, TAU); c.stroke();
+    for (let i = 0; i < 3; i++) {                                                                                   // bocaux en couronne
+      const a = -Math.PI / 2 + i * TAU / 3, x = cx + Math.cos(a) * R * 0.42, y = cy + Math.sin(a) * R * 0.42;
+      c.fillStyle = 'rgba(0,0,0,.25)'; disque(c, x + R * 0.04, y + R * 0.05, R * 0.15);
+      c.fillStyle = '#bfe3ea'; disque(c, x, y, R * 0.15); c.fillStyle = '#e8563f'; disque(c, x, y, R * 0.095); c.fillStyle = 'rgba(255,255,255,.7)'; disque(c, x - R * 0.05, y - R * 0.05, R * 0.035);
+    }
+  },
+  image(c, w, h, t, st) {
+    const R = st.R, cx = st.cx, cy = st.cy, r = R * 0.17, per = 2.6, n = Math.floor(t / per), k = (t % per) / per;
+    const cols = ['#4a9ee0', '#e0a020', '#9b6cf0'];
+    const pos = i => { const a = t * 0.55 + i * TAU / 3, rr = R * 0.66 + Math.sin(t * 1.7 + i * 2) * R * 0.08; return [cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]; };
+    const hold = n % 3, next = (n + 1) % 3;
+    for (let i = 0; i < 3; i++) {
+      const p0 = pos(i), x = p0[0], y = p0[1], hot = i === hold;
+      if (hot) { c.fillStyle = 'rgba(255,60,40,' + (0.28 + 0.2 * tri(t * 3)).toFixed(2) + ')'; disque(c, x, y, r * 2.1); }   // halo du porteur
+      c.fillStyle = 'rgba(0,0,0,.28)'; ombre(c, x + r * 0.2, y + r * 0.3, r, r * 0.9);
+      c.fillStyle = cols[i]; disque(c, x, y, r);
+      c.strokeStyle = 'rgba(255,255,255,.55)'; c.lineWidth = Math.max(1, r * 0.22); c.beginPath(); c.arc(x, y, r * 0.66, 0, TAU); c.stroke();
+    }
+    const ph = pos(hold), pn = pos(next);
+    const pk = k > 0.86 ? (k - 0.86) / 0.14 : 0, px = ph[0] + (pn[0] - ph[0]) * pk, py = ph[1] + (pn[1] - ph[1]) * pk - r * 0.2 * Math.sin(Math.PI * pk);   // passe en fin de cycle
+    const heat = k, tr = heat > 0.6 ? Math.sin(t * 40) * r * 0.08 * heat : 0, pr = r * 0.62;
+    c.fillStyle = 'rgba(0,0,0,.3)'; ombre(c, px + pr * 0.3, py + pr * 0.5, pr * 1.1, pr * 0.8);
+    c.fillStyle = heat > 0.66 ? '#e8523a' : heat > 0.33 ? '#e8a48a' : '#d2d6da'; ombre(c, px + tr, py, pr * 1.15, pr * 0.9);                  // alu qui rougit
+    c.fillStyle = 'rgba(255,255,255,.75)'; ombre(c, px + tr - pr * 0.3, py - pr * 0.3, pr * 0.4, pr * 0.22);
+    c.strokeStyle = '#3a2a18'; c.lineWidth = Math.max(1, r * 0.12); c.beginPath(); c.moveTo(px + tr, py - pr * 0.8); c.lineTo(px + tr + pr * 0.3, py - pr * 1.3); c.stroke();   // mèche
+    if (fr(t * 9) < 0.6) { c.fillStyle = '#ffd24a'; disque(c, px + tr + pr * 0.3, py - pr * 1.3, Math.max(1.2, r * 0.16)); }
+  },
+};
 const SCENE_VIDE = { fixe: 0, fond(c, w, h) { c.fillStyle = '#12142a'; c.fillRect(0, 0, w, h); }, image() {} };
 
 /* ============================================================================

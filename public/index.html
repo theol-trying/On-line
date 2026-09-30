@@ -7,7 +7,7 @@
 <title>Plateforme LAN</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Black+Ops+One&family=Dela+Gothic+One&family=Fredoka:wght@500;600;700&family=Orbitron:wght@600;800&family=Russo+One&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Black+Ops+One&family=Dela+Gothic+One&family=Fredoka:wght@500;600;700&family=Lilita+One&family=Orbitron:wght@600;800&family=Russo+One&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="game-pong">
@@ -518,6 +518,63 @@
         <div class="legrow"><span>🍯</span><b>Glu</b> — tes adversaires sont ralentis et privés de sprint pendant 5 s</div>
         <div class="legrow"><span>🔀</span><b>Inversion</b> — les commandes de tes adversaires sont inversées pendant 4 s</div>
         <div class="note">Le but est crédité au dernier adversaire qui a joué le ballon. Un ballon que tu pousses toi-même dans ta cage est un contre son camp.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== racine du jeu PATATE CHAUDE ===== -->
+  <div id="patate-root" class="game-root hidden">
+    <div class="stage"><div class="canvas-wrap">
+      <canvas id="ptc" width="600" height="600"></canvas>
+      <div id="ptBanner" class="banner-mid"></div>
+      <div id="ptEnd" class="endscreen hidden"></div>
+    </div></div>
+    <div id="ptHud" class="hud"></div>
+    <div class="bar">
+      <button id="ptStart" class="primary" disabled>▶ Démarrer</button>
+      <button id="ptPause" disabled>⏸ Pause</button>
+      <span class="sep"></span>
+      <button class="gm" id="ptBots">🤖 Bots : 0</button>
+      <button class="gm" id="ptDiff">🎯 IA : Normale</button>
+      <button class="gm" id="ptMode" disabled>⚔ FFA</button>
+      <button class="gm" id="ptFuse">🧨 Mèche : cachée</button>
+      <button class="gm" id="ptBonus">🎁 Bonus : oui</button>
+      <button id="ptHelp">❔ Règles</button>
+      <button id="ptLbBtn">🏆 Classement</button>
+    </div>
+    <div class="help">
+      Cours avec <b>↑ ↓ ← →</b> ou <b>Z Q S D</b> (W A S D) · <b>Maj</b> = sprint 🏃 · <b>P / Échap</b> = pause.
+      Si tu portes la patate 🥔, <b>touche un adversaire</b> pour la lui refiler avant qu'elle explose !
+    </div>
+    <div class="gpad">
+      <div class="dirs">
+        <button id="ptUp" class="touch" aria-label="haut">▲</button>
+        <div class="drow"><button id="ptLeft" class="touch" aria-label="gauche">◀</button><button id="ptDown" class="touch" aria-label="bas">▼</button><button id="ptRight" class="touch" aria-label="droite">▶</button></div>
+      </div>
+      <div class="acts">
+        <button id="ptSprint" class="touch fire" aria-label="sprint">🏃</button>
+      </div>
+    </div>
+    <button id="ptPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
+    <div id="ptLbPanel" class="settings hidden" style="width:94vw;max-width:460px;">
+      <div class="shead"><h3>🏆 Classement — Patate chaude</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody"><div id="ptLbBody"></div></div>
+    </div>
+    <div id="ptHelpPanel" class="settings hidden" style="width:94vw;max-width:420px;">
+      <div class="shead"><h3>Règles — Patate chaude</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody">
+        <h4>Principe</h4>
+        <div class="legrow"><span>🥔</span><b>La patate-bombe</b> — elle atterrit sur un joueur tiré au sort. Sa <b>mèche</b> dure entre 12 et 25 s, <b>cachée</b> : seule sa chaleur (la patate rougit, tremble, tic-tac de plus en plus rapide) te prévient. Quand elle explose, <b>son porteur est éliminé</b></div>
+        <div class="legrow"><span>🤝</span><b>La passer</b> — il suffit de <b>toucher</b> un autre joueur. Le donneur ne peut pas la récupérer pendant 1 s. Le porteur court <b>10 % plus vite</b>, et un halo rouge le signale à tous. En équipes, elle ne passe qu'à un <b>adversaire</b></div>
+        <div class="legrow"><span>💥</span><b>Explosion</b> — le souffle repousse les voisins (sans dégât) et laisse une tache de purée au sol. Une nouvelle patate arrive 2 s plus tard. À <b>7 joueurs ou plus</b>, il y en a <b>deux</b> en jeu</div>
+        <div class="legrow"><span>⭕</span><b>La nappe rétrécit</b> à chaque élimination : le dernier survivant (ou la dernière équipe) gagne. Les bocaux et salières bloquent le passage</div>
+        <div class="legrow"><span>🏃</span><b>Sprint</b> — <b>Maj</b> maintenue (ou bouton 🏃) : +40 % de vitesse tant que la barre d'endurance tient (1,6 s). Elle se recharge en 3 s ; vidée, tu es essoufflé jusqu'à 30 %</div>
+        <h4>Bonus (au sol, si activés — game master)</h4>
+        <div class="legrow"><span>🛡</span><b>Bouclier</b> — pendant 3 s, la patate ne peut pas te toucher</div>
+        <div class="legrow"><span>⚡</span><b>Turbo</b> — pendant 3 s : +25 % de vitesse et sprint illimité</div>
+        <h4>Options du game master</h4>
+        <div class="legrow"><span>🧨</span><b>Mèche</b> — <b>cachée</b> (défaut) ou <b>visible</b> : le temps restant s'affiche sur la patate</div>
+        <div class="note">L'explosion est créditée au dernier adversaire qui t'a passé la patate. Une passe lancée dans la dernière seconde avant l'explosion : « IN EXTREMIS ! ».</div>
       </div>
     </div>
   </div>
