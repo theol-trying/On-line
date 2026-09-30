@@ -3,7 +3,7 @@
 > Dossier : `C:\Users\theoi\Documents\PONG\pong-line\` (source unique de vérité).
 > **Plateforme multijeux** : un hub Node.js **autoritatif** sert plusieurs jeux sélectionnables ;
 > **une seule partie active à la fois** (jeu choisi dans un lobby commun).
-> **Jeux : Pong · Tron · Tanks · Bomberman · Snake · Sumo · Foot.** **Zéro dépendance** (WebSocket implémenté à la main). Un appareil par joueur.
+> **Jeux : Pong · Tron · Tanks · Bomberman · Snake · Sumo · Foot · Patate chaude.** **Zéro dépendance** (WebSocket implémenté à la main). Un appareil par joueur.
 > **En production** : GitHub `theol-trying/On-line` → **Render** (HTTPS/`wss://`) + **Upstash Redis** (classement + avatars).
 > Consignes projet permanentes : **zéro dépendance npm, zéro build, aucun fichier binaire** ; secrets via `process.env` uniquement.
 > L'assistant gère **git** (commit + push) depuis septembre 2026, et **Node est installé depuis le 21/09/2026** :
@@ -287,6 +287,34 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
   inversion (4 s, bots compris). Largeur de cage par équipe (`cageK`) en 7e valeur des arêtes de `geo`.
 - Panneau « 🏟 Terrain & bonus » (`#ftOptPanel`, synchronisé sur `snap.opt`). `npm test` : 97 vérifications (bloc
   « Foot : les 5 terrains »). Simulation : tous les terrains finissent (15 s à 2, ~1 min à 4, ~2,5 min à 8).
+
+## Jeu : PATATE CHAUDE  (`patate`, 2–10, tickHz 30) — ajouté le 30/09
+- **Principe** : une patate-bombe passe d'un joueur à l'autre au **contact** ; mèche **cachée** tirée entre
+  `FUSE_MIN=12` et `FUSE_MAX=25` s ; à l'explosion le porteur est éliminé (crédit `by` = dernier donneur), souffle qui
+  repousse (rayon 150, impulsion 11), nouvelle patate 2 s plus tard sur un survivant au hasard. Dernier survivant /
+  dernier camp gagne ; places par `classerManche()`. Durée bornée par construction (~20 s à 2, ~1 min à 4, ~2 min 20
+  à 10 en simulation) ; filet `TIME_CAP` 330 s jamais atteint.
+- **Règles fines** : **2 patates** tant qu'il reste ≥ 7 joueurs en lice (un porteur n'en reçoit pas une 2e) ; le donneur
+  est immunisé 1 s (`imm`) contre TOUTE patate ; le receveur ne peut la repasser qu'après 8 ticks (+ petit recul des
+  deux) ; en équipes, elle ne passe qu'à un adversaire. Porteur **+10 %** de vitesse ; sprint **Maj** comme le Foot.
+- **Arène** : cercle (nappe vichy) de rayon `R0` selon le nombre de joueurs (`scaleFor`, comme le Foot), 3 à 5 piliers
+  (bocaux, salière, moutarde) en couronne à 0,38·R0 ; le cercle rétrécit vers 55 % de R0 au duel.
+- **Options** (game master) : mèche cachée / **visible** (`fuse`, champ `pt[].f` seulement en visible), **bonus**
+  (`bonus` : `bouclier` 3 s, `turbo` 3 s ×1,25 + sprint illimité ; 1 toutes les 8 s, 2 max), mode FFA / équipes,
+  bots (bouton cyclique 0 → max) et difficulté. Bots : le porteur intercepte l'adversaire non immunisé le plus proche,
+  les autres fuient les porteurs en évitant bords et piliers.
+- **Protocole** : `input` = booléens `{up,down,left,right}` (comme le Foot ; `{mx,my}` accepté aussi), `sprint {on}`,
+  `fuse`, `bonus`, + messages communs. Snapshot : `ar, R, R0, pil, pt[{o, lv 0..3, f?}], pk[[x,y,k]], opt, stats` ;
+  joueurs `x, y, a, sta, spr, ess, imm, sh, tb, hp, passes, booms` ; fx `pass{from,to,x,y,ex}` (`ex` = explosion dans la
+  seconde → « IN EXTREMIS ! »), `boom{seat,x,y,by}`, `spawn{seat}` (aussi au départ d'un porteur), `pick`, `shrink`.
+  2,9 Ko en snapshot complet à 10 (Sumo 3,6), ~160 o de delta par tick.
+- **Client** : nappe vichy sur herbe, pions ronds au motif du siège (jamais d'avatar), patate en papier alu qui
+  rougit et tremble avec la chaleur, halo rouge du porteur, tic-tac qui accélère, « BAOUM ! » + tache de purée qui reste
+  sur la nappe ; ralenti de la dernière explosion, podium, crépuscule du duel final (manche commencée à ≥ 3), caméra de
+  duel, pastilles numérotées, vignette de danger quand JE porte la patate, journal de fin (passes cumulées).
+- **Classement** : `{games, wins, kills (= explosions provoquées), passes, deaths, survSum, bestSurvivalSec}`.
+- Vérifié : `npm test` 108/108 + 22/22 ; navigateur (bureau, téléphone 375 px à 2, 3 et 10 joueurs, « Réduire les
+  effets »), sans erreur. **Pas encore joué à plusieurs humains.**
 
 ## ZQSD / WASD dans tous les jeux (25/09)
 Les 7 jeux lisent le clavier par `e.code` (position PHYSIQUE) : `KeyW`/`KeyA` sont les touches Z/Q d'un clavier
