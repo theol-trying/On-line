@@ -3,7 +3,7 @@
 //    node test/smoke.mjs          (ou : npm test)
 //
 // Démarre le serveur sur un port dédié, ouvre de VRAIS clients WebSocket, joue une manche
-// dans chacun des 6 jeux et vérifie que rien ne casse. Sort en code 1 au moindre échec.
+// dans chacun des jeux et vérifie que rien ne casse. Sort en code 1 au moindre échec.
 //
 // Pourquoi ce fichier existe : `node --check` ne voit que la syntaxe. Les deux pannes de
 // production du 21/09/2026 étaient invisibles pour lui —
@@ -119,6 +119,10 @@ async function jouer(id, participants, attentes = {}) {
     else if (id === 'sumo') {                          // état tenu des 4 directions + une charge de temps en temps
       c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });
       if (Math.random() < 0.15) c.jeu({ t: 'dash' });
+    }
+    else if (id === 'patate') {                        // course tenue + sprint (comme le Foot) ; la patate passe au contact
+      c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });
+      if (Math.random() < 0.15) c.jeu({ t: 'sprint', on: Math.random() < 0.6 });
     }
     else c.jeu({ t: 'input', left: Math.random() < 0.4, right: Math.random() < 0.4, fwd: true, fire: Math.random() < 0.3 });
   }, 150);
@@ -436,6 +440,7 @@ cadences.tank = await jouer('tank', 8, { arene: { lire: s => 'grille ' + s.ag, v
 cadences.bomb = await jouer('bomb', 8, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 17' } });
 cadences.foot = await jouer('foot', 10, { arene: { lire: s => 'arène ' + s.ar + ' · ' + (s.geo && s.geo.e ? s.geo.e.length : 0) + ' côtés', valeur: 'arène 1123 · 10 côtés' } });   // un côté (une cage) par joueur
 cadences.sumo = await jouer('sumo', 10, { arene: { lire: s => 'arène ' + s.ar, valeur: 'arène 1080' } });   // k = 1.8 → 600 × 1.8
+cadences.patate = await jouer('patate', 10, { arene: { lire: s => 'arène ' + s.ar + ' · ' + (s.pil || []).length + ' piliers · R ' + Math.round(s.R0), valeur: 'arène 1123 · 5 piliers · R 532' } });   // k = 1.56 → 720 × 1.56 ; rayon utile = 1123/2 − 30
 await arriveeEnCours();
 await protections();
 await robustesse();

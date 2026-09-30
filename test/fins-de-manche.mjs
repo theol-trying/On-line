@@ -24,7 +24,7 @@ import { dirname, join } from 'path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 for (const k of ['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'LEADERBOARD_KEY', 'AVATAR_KEY', 'ADMIN_KEY', 'LEADERBOARD_FILE']) delete process.env[k];
 const T0 = Date.now();
-const IDS = ['pong', 'tron', 'tank', 'bomb', 'snake', 'sumo', 'foot'];
+const IDS = ['pong', 'tron', 'tank', 'bomb', 'snake', 'sumo', 'foot', 'patate'];
 const SEED = Number(process.env.FINS_SEED || 20260929);
 
 let echecs = 0, tests = 0;
@@ -123,6 +123,7 @@ const INPUT = {
   snake: () => [{ t: 'dir', d: pick(DIRS) }],
   sumo: () => [{ t: 'input', up: chance(0.3), down: chance(0.3), left: chance(0.3), right: chance(0.3) }, ...(chance(0.05) ? [{ t: 'dash' }] : [])],
   foot: () => [{ t: 'input', up: chance(0.3), down: chance(0.3), left: chance(0.3), right: chance(0.3) }, ...(chance(0.05) ? [{ t: 'charge', on: chance(0.5) }] : []), ...(chance(0.03) ? [{ t: 'shoot' }] : [])],
+  patate: () => [{ t: 'input', up: chance(0.3), down: chance(0.3), left: chance(0.3), right: chance(0.3) }, ...(chance(0.05) ? [{ t: 'sprint', on: chance(0.5) }] : [])],
 };
 // réglages qui changent l'issue d'une manche (variantes de fin) — un tirage par manche
 const REGLAGES = {
@@ -133,14 +134,15 @@ const REGLAGES = {
   snake: () => [{ t: 'rush' }, { t: 'variant' }],
   sumo: () => [{ t: 'botdiff' }],
   foot: () => [{ t: 'lives' }, { t: 'terrain', v: pick(['stade', 'boue', 'glace', 'flipper', 'tempete']) }],
+  patate: () => [{ t: 'botdiff' }, { t: 'fuse' }, { t: 'bonus' }],
 };
 // plafond de durée d'une manche, en secondes de JEU (pauses exclues). Pong : MAX_ROUND_TICKS ; Sumo : TIME_CAP ;
-// Foot : TIME_CAP ; Tron : arène qui se referme ; Bomberman : mort subite + SD_GRACE (grille 17 : ~160 s).
+// Foot : TIME_CAP ; Patate : chaque patate explose au bout de 25 s (pire cas ≈ 190 s à 10 joueurs) ; Tron : arène qui se referme ; Bomberman : mort subite + SD_GRACE (grille 17 : ~160 s).
 // Tanks et Snake n'ont AUCUN plafond documenté (deux serpents peuvent s'éviter indéfiniment, un solo aussi) : leur
 // « plafond » n'est qu'un filet du test — la manche est abandonnée et comptée, sans échec (cf. SOUPLE).
-const CAP = { pong: 605, tron: 200, tank: 900, bomb: 175, snake: 600, sumo: 185, foot: 365 };
+const CAP = { pong: 605, tron: 200, tank: 900, bomb: 175, snake: 600, sumo: 185, foot: 365, patate: 205 };
 const SOUPLE = new Set(['tank', 'snake']);
-const PLAN = { pong: 9, tron: 12, tank: 9, bomb: 12, snake: 12, sumo: 12, foot: 9 };   // manches par configuration
+const PLAN = { pong: 9, tron: 12, tank: 9, bomb: 12, snake: 12, sumo: 12, foot: 9, patate: 9 };   // manches par configuration
 
 /* ---------- invariants ---------- */
 function mauvaisesValeurs(o, chemin, out, prof) {
@@ -299,9 +301,9 @@ async function jouerJeu(id, rapport) {
 }
 
 /* =====================================================================================================
-   4. Les 7 jeux
+   4. Les 8 jeux
    ===================================================================================================== */
-console.log('Fins de manche — 7 jeux, bots, équipes, départs, pauses (graine ' + SEED + ')');
+console.log('Fins de manche — 8 jeux, bots, équipes, départs, pauses (graine ' + SEED + ')');
 for (const id of IDS) {
   R = mulberry32(SEED + IDS.indexOf(id) * 7919); Math.random = mulberry32(SEED ^ (IDS.indexOf(id) * 104729 + 1));
   const rap = { manches: 0, finies: 0, abandons: 0, nuls: 0, sansFin: 0, sansPlafond: 0, charges: 0, maxDuree: 0, problemes: {} };
