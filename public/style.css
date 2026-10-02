@@ -73,6 +73,22 @@ body.playing input, body.playing textarea{ -webkit-user-select:text; user-select
 .etitle{ font-size:clamp(20px,5vw,30px); font-weight:800; text-shadow:0 0 22px currentColor; }
 body.flat .etitle{ text-shadow:none; }
 .emeta{ color:var(--txt2); font-size:12px; }
+/* Fin de manche EN PLEIN ÉCRAN (public/ecran-fin.js) : la page reste en mise en page de partie (body.playing) pendant le
+   ralenti et la carte de fin ; body.fin ajoute seulement ce qui n'a plus lieu d'être. */
+body.playing.fin .gpad, body.playing.fin .joyzone, body.playing.fin .dpad, body.playing.fin .tankpad,
+body.playing.fin .stage > div:not(.canvas-wrap), body.playing.fin #pauseFloat, body.playing.fin .pauseFloat{ display:none !important; }   /* manette tactile et pause : inutiles à la fin */
+body.playing.fin .endscreen, body.playing.fin #endscreen{ padding-bottom:16px; padding-bottom:calc(16px + env(safe-area-inset-bottom, 0px)); }
+/* deux grands boutons tactiles « ↻ Relancer » / « ⌂ Accueil » en bas de la carte de fin (pas de gap flex : marges, iOS 15) */
+.efBtns{ display:-webkit-flex; display:flex; -webkit-flex:0 0 auto; flex:0 0 auto; -webkit-justify-content:center; justify-content:center;
+  width:100%; max-width:460px; margin-top:8px; cursor:default; }
+.efBtn{ -webkit-flex:1 1 0; flex:1 1 0; min-width:0; min-height:56px; margin:0 5px; padding:12px 8px; font-size:17px; font-weight:800;
+  border-radius:14px; touch-action:manipulation; -webkit-tap-highlight-color:transparent;
+  -webkit-touch-callout:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none; user-select:none; }
+.efBtn.efRelancer{ background:linear-gradient(92deg,#3f8bff,#7c5cff); border-color:transparent; color:#fff; box-shadow:0 8px 24px -8px rgba(90,110,255,.8); }
+.efBtn.efAccueil{ background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.3); color:#eef0fb; }
+.efBtn:disabled{ opacity:.4; }
+body.flat .efBtn.efRelancer{ box-shadow:none; }
+@media (max-width:600px){ .efBtn{ min-height:60px; font-size:16px; } }
 .elist{ width:100%; max-width:440px; display:flex; flex-direction:column; gap:5px; margin-top:4px; }
 .erow{ display:flex; flex-wrap:wrap; align-items:center; gap:4px 9px;
   background:var(--panel); border:1px solid var(--border); border-radius:9px; padding:6px 9px; }

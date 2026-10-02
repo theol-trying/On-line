@@ -50,6 +50,7 @@ const pick = a => a[Math.floor(R() * a.length)];
 const chance = p => R() < p;
 
 const { classerManche } = await import(pathToFileURL(join(ROOT, 'games', 'fin-manche.js')).href);
+const { creerMatch, CIBLES } = await import(pathToFileURL(join(ROOT, 'games', 'match.js')).href);
 const lb = await import(pathToFileURL(join(ROOT, 'leaderboard.js')).href);
 
 /* =====================================================================================================
@@ -75,6 +76,69 @@ const lb = await import(pathToFileURL(join(ROOT, 'leaderboard.js')).href);
   { mk.n = 0; const ps = [mk(0, true, -1), mk(1, false, 3)]; const r = classerManche(ps, 5); ok('classerManche : équipe gagnante absente = nul, pas d\'exception', r.nul && ps[0].place === 1 && ps[1].place === 1); }
   { mk.n = 0; const ps = [mk(0, false, 3), mk(1, true, -1), mk(2, false, 8)]; const r = classerManche(ps, 1); ok('classerManche : podium trié par place', r.podium.map(p => p.seat).join(',') === '1,2,0' && !r.nul && r.participants === 3); }
   ok('classerManche : liste vide', classerManche([], 0).podium.length === 0);
+}
+
+/* =====================================================================================================
+   1b. creerMatch (games/match.js) : match en N manches gagnantes, pur, sans jeu
+   ===================================================================================================== */
+{
+  const mkp = (n, team) => Array.from({ length: n }, (_, i) => ({ seat: i, team: team ? team(i) : i, playing: true, score: 0 }));
+  // une manche gagnée par `w` : comme les jeux, +1 à tous les membres de l'équipe, PUIS apresManche
+  const manche = (mt, ps, w) => { mt.debutManche(ps); if (w >= 0) ps.forEach(p => { if (p.playing && p.team === w) p.score++; }); return mt.apresManche(ps, w); };
+  const sc = ps => ps.map(p => p.score).join(',');
+
+  ok('match : cibles disponibles 1, 2, 3, 5', CIBLES.join(',') === '1,2,3,5');
+  { const mt = creerMatch(), ps = mkp(3);
+    ok('match : cible 1 par défaut, etat() === null (pas undefined)', mt.cible === 1 && mt.etat(ps) === null);
+    ok('match : cible 1 = jamais de match gagné, scores qui s\'accumulent', !manche(mt, ps, 0) && !manche(mt, ps, 0) && !manche(mt, ps, 0) && sc(ps) === '3,0,0' && !mt.gagne && mt.etat(ps) === null); }
+  { const mt = creerMatch(), ps = mkp(3); ps[1].score = 4;
+    const c = []; for (let i = 0; i < 5; i++) c.push(mt.changer(ps));
+    ok('match : changer() cycle 2, 3, 5, 1, 2 et remet les scores à 0', c.join(',') === '2,3,5,1,2' && sc(ps) === '0,0,0'); }
+  { // premier à 2 : le vainqueur du match est le premier à la cible, la balle de match est annoncée avant
+    const mt = creerMatch(), ps = mkp(3); mt.changer(ps);
+    let e = (manche(mt, ps, 0), mt.etat(ps));
+    ok('match à 2 : après 1-0 → balle de match pour l\'équipe 0, match en cours', e.n === 2 && e.f === 0 && e.w === -1 && e.bm.join() === '0' && e.r === 1, JSON.stringify(e));
+    const f1 = manche(mt, ps, 1); e = mt.etat(ps);
+    ok('match à 2 : 1-1 → les deux équipes ont la balle de match, manche 2', !f1 && e.bm.join() === '0,1' && e.r === 2 && !mt.gagne, JSON.stringify(e));
+    const f2 = manche(mt, ps, 1); e = mt.etat(ps);
+    ok('match à 2 : 1-2 → l\'équipe 1 gagne le match (f=1, w=1, plus de balle de match)', f2 && mt.gagne && mt.gagnant === 1 && e.f === 1 && e.w === 1 && e.bm.length === 0 && sc(ps) === '1,2,0', JSON.stringify(e) + ' ' + sc(ps));
+    ok('match : apresManche ne re-gagne pas un match déjà gagné', !mt.apresManche(ps, 1));
+    const deb = mt.debutManche(ps); e = mt.etat(ps);
+    ok('match à 2 : manche suivante = nouveau match, scores remis à 0, manche 1', deb && sc(ps) === '0,0,0' && !mt.gagne && mt.gagnant === -1 && e.f === 0 && e.w === -1 && e.r === 1 && e.bm.length === 0, JSON.stringify(e) + ' ' + sc(ps)); }
+  { // premier à 3, avec nuls : une manche nulle n'avance rien et ne gagne jamais le match
+    const mt = creerMatch(), ps = mkp(2); mt.changer(ps); mt.changer(ps);
+    manche(mt, ps, 0); manche(mt, ps, -1); manche(mt, ps, 0);
+    let e = mt.etat(ps);
+    ok('match à 3 : nul sans effet, 2-0 → balle de match, manche 3', mt.cible === 3 && !mt.gagne && sc(ps) === '2,0' && e.bm.join() === '0' && e.r === 3, JSON.stringify(e));
+    ok('match à 3 : la 3e manche gagnée termine le match', manche(mt, ps, 0) && mt.gagnant === 0 && sc(ps) === '3,0'); }
+  { // équipes : tous les membres de l'équipe gagnante comptent, balle de match une seule fois par équipe
+    const mt = creerMatch(), ps = mkp(4, i => i % 2); mt.changer(ps);
+    manche(mt, ps, 1); const e = mt.etat(ps);
+    ok('match en équipes : 2 membres à 1 → UNE balle de match (équipe 1)', e.bm.join() === '1' && sc(ps) === '0,1,0,1', JSON.stringify(e));
+    ok('match en équipes : équipe 1 gagne le match', manche(mt, ps, 1) && mt.gagnant === 1 && sc(ps) === '0,2,0,2'); }
+  { // un membre de l'équipe gagnante parti entre-temps : le score d'un autre membre suffit ; les non-participants sont ignorés
+    const mt = creerMatch(), ps = mkp(4, i => i % 2); mt.regler(2, ps);
+    ps[2].score = 1; ps[2].playing = false;             // un ancien joueur de l'équipe 0, plus en jeu : ne compte ni pour la balle de match ni pour la victoire
+    ok('match : un non-participant n\'est pas compté pour la balle de match', mt.etat(ps).bm.length === 0);
+    ps[0].score = 1; ps[0].playing = false; ps[2].playing = true;
+    ps[2].score = 2; const w = mt.apresManche(ps, 0);
+    ok('match : victoire par n\'importe quel membre de l\'équipe gagnante (score >= cible)', w && mt.gagnant === 0); }
+  { // changer la cible en plein lobby / over : repart d'un match neuf, scores à 0 au prochain départ même sans joueurs passés à changer()
+    const mt = creerMatch(), ps = mkp(2); mt.changer(ps); manche(mt, ps, 0);
+    mt.changer();                                       // le jeu a oublié de passer les joueurs
+    ok('match : changer() sans joueurs → scores remis à 0 au départ suivant', mt.debutManche(ps) && sc(ps) === '0,0' && mt.etat(ps).r === 1, sc(ps));
+    mt.regler(5, ps); ok('match : regler(5) fixe la cible', mt.cible === 5);
+    mt.regler(99, ps); ok('match : regler plafonne à 9', mt.cible === 9);
+    mt.regler(-3, ps); ok('match : regler(<1) = manche simple, etat null', mt.cible === 1 && mt.etat(ps) === null);
+    mt.regler(4, ps); ok('match : une cible hors liste (4) passe à la suivante de CIBLES (5)', mt.changer(ps) === 5);
+    mt.regler(9, ps); ok('match : depuis 9 le cycle revient à 1', mt.changer(ps) === 1); }
+  { // la première manche d'un match après un changement ne doit pas effacer les scores d'une manche déjà commencée
+    const mt = creerMatch(), ps = mkp(2); mt.changer(ps); manche(mt, ps, 1);
+    mt.debutManche(ps);
+    ok('match : manche suivante d\'un match en cours = scores conservés', sc(ps) === '0,1' && mt.etat(ps).r === 2); }
+  { const mt = creerMatch(), ps = mkp(2); mt.changer(ps); manche(mt, ps, 0); mt.reinit();
+    ok('match : reinit() = cible 1, état vierge', mt.cible === 1 && !mt.gagne && mt.etat(ps) === null); }
+  ok('match : apresManche tolère winner invalide / liste vide', !creerMatch().apresManche([], 3) && !(() => { const m = creerMatch(); m.regler(2); return m.apresManche(mkp(2), undefined); })());
 }
 
 /* =====================================================================================================
