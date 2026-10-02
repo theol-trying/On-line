@@ -1151,6 +1151,27 @@ Corrigé ensuite en 2 vagues (commits « Audit 28/09, vague 1 / vague 2 ») :
   passé par un toucher sans relancer la manche, podiums lisibles. Corrigés à la relecture : caméra du Foot active dès un
   1 contre 1 ; titre de la carte de fin du Foot hors de vue ; carte du Sumo sans défilement.
 
+## Match en N manches, bots plus malins, fin en plein écran (01-02/10/2026)
+- **`games/match.js` — `creerMatch()`** (serveur, pur), branché dans les 8 jeux : cible 1 (manche simple, défaut) / 2 / 3 / 5
+  (message `match`, GM_ONLY, seulement lobby/over), `debutManche` dans startGame (scores remis à 0 après un match gagné),
+  `apresManche` après le `p.score++` de l'équipe gagnante, champ `match` = `{ n, f, w, bm, r }` ou **null** (cible 1) ;
+  `stats.match`. Tanks : `winTarget` remplacé (alias `wintarget` 1 → 3 → 5) ; Pong : dérivé de `winMode` 'rounds' +
+  `roundsTarget` et synchronisé avec son panneau Options (null en survivor / kills) ; Snake : compteur séparé `p.wins`
+  (`p.score` = pommes) ; Tron, Sumo, Foot envoient désormais `score`.
+- **Clients** : `public/match.js` (bouton « 🏆 Manche simple / Premier à N » dans la barre, chip « Premier à 3 · manche 4 »,
+  pastilles de manches gagnées, « BALLE DE MATCH pour … ! » au décompte, titre « VICTOIRE DU MATCH ») ;
+  `public/ecran-fin.js` : la fin de manche RESTE en plein écran (`body.playing` + `body.fin`, manette masquée) — ralenti et
+  podium en grand — et la carte propose **« ↻ Relancer »** (« Manche suivante » / « Nouveau match ») et **« ⌂ Accueil »**
+  (choix par joueur, remis à zéro à la manche suivante). `app.js` retire `playing`/`fin` à chaque changement de jeu.
+- **Bots** : Tron (choix par espace libre, remplissage borné contre les têtes adverses ; commande inversée d'avance sous
+  ⇄ : 0-1 % des morts au lieu de 11-21 % ; niveaux distincts : en partie mixte Facile 5-9 %, Normale ~30 %, Difficile
+  ~62 % des victoires ; ~0,3 ms/tick à 10 bots Difficile) ; Pong (balle la plus menaçante en multi-balle, plus de suivi
+  d'une balle invisible) ; Tanks (tir seulement si l'obus simulé touche : métal 47 % → 2 %, précision ×2 ; anticipation,
+  esquive, mines visibles évitées : 281 → 3 vies perdues sur le banc ; rien de caché n'est vu).
+- Vérifié : `npm test` 113/113 + 68/68 ; navigateur (téléphone) : fin en plein écran et 2 boutons dans les 8 jeux, match à
+  2 au Sumo (balle de match, victoire, nouveau match), Accueil, changement de jeu depuis l'écran de fin.
+  **À juger à plusieurs humains** : difficulté réelle des nouveaux bots (Normale/Difficile nettement plus forts).
+
 ## Limites connues (assumées)
 - ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».
 - Hébergement Render en **Europe (Frankfurt)** — confirmé par l'utilisateur, donc ~15-25 ms de ping : le ping

@@ -44,7 +44,9 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
   action, textes échappés), `vitrine.js` (accueil en cartes animées), `echo-virage.js` (chevron immédiat du
   virage enregistré, jeux à pas discret), `exploits.js` (« DOUBLÉ ! », arrêt sur image, éclat, vignette de danger,
   pastille numérotée, `readable`/`hudK` pour des textes lisibles sur téléphone), `ralenti.js` (ralenti du moment décisif),
-  `podium.js` (podium canvas de fin), `camera-duel.js` (zoom doux sur le duel final). Côté serveur, les places de fin de
+  `podium.js` (podium canvas de fin), `camera-duel.js` (zoom doux sur le duel final), `ecran-fin.js` (fin de manche en
+  plein écran + boutons Relancer / Accueil : un jeu NE calcule PAS lui-même son `inGame`), `match.js` (UI du match en N
+  manches). Côté serveur, le match passe par `creerMatch()` de `games/match.js`. Côté serveur, les places de fin de
   manche passent TOUJOURS par `classerManche()` de `games/fin-manche.js` (vérifié par `test/fins-de-manche.mjs`). Un nouveau jeu doit aussi avoir sa mini-scène dans `vitrine.js`.
 - **Clés venant du réseau** (pseudo, id de jeu, direction…) : jamais `obj[cle]` nu sur un objet ordinaire —
   `Object.hasOwn` côté serveur (`Object.prototype.hasOwnProperty.call` côté client) ou `Object.create(null)`.
