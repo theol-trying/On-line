@@ -9,6 +9,7 @@ function setGrid(n) {
 }
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
+import { creerMatch } from '../match.js';
 
 const GID = 'tron';
 const MAX_SEATS = 10;
@@ -103,7 +104,9 @@ export function createTron(room) {
       kills: 0, place: 0, elimTick: -1, score: 0,
     }));
   }
+  const match = creerMatch();                         // match en N manches (games/match.js) : cible 1 = manche simple, comportement historique
   function fullReset() {
+    match.reinit();
     players = makePlayers(); occupied = new Occ(); pickups = [];
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = [];
     mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; shrinkLevel = 0; fadeMode = false; botCount = 0; botDiff = 1; seatByMid = {};
@@ -147,6 +150,7 @@ export function createTron(room) {
     for (const p of players) { if (bots <= 0) break; if (!p.member) { p.bot = true; parts.push(p); bots--; } } // complète avec des bots
     parts.forEach((p, i) => { if (p.bot) p.name = '🤖 Bot ' + (i + 1); });
     if (parts.length < 2) return;
+    match.debutManche(players);                        // match gagné (ou cible changée) : scores remis à 0 avant cette manche
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
@@ -165,7 +169,7 @@ export function createTron(room) {
     gameState = 'over'; endTick = tick;
     const s = aliveTeams();
     winner = s.size === 1 ? [...s][0] : -1;
-    if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
+    if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; }); match.apresManche(players, winner);
     classerManche(players, winner);                    // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
     recordRound();
   }
@@ -385,13 +389,14 @@ export function createTron(room) {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
       round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, shrink: shrinkLevel, fade: fadeMode, gw: GW, gh: GH,
       pickups: pickups.map(p => ({ x: p.gx, y: p.gy, t: p.type })),
-      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts } : null,
+      match: match.etat(players),
+      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, match: match.gagne } : null,
       players: players.map(p => ({
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot,
         head: p.cells.length ? { x: head(p).x, y: head(p).y } : { x: 0, y: 0 },
         path: corners(p.cells),
         boost: Math.round(p.boost), ghost: p.ghostUntil > tick, speed: p.speedUntil > tick, boosting: p.boostHeld && p.boost > 0, inv: p.invertUntil > tick, brk: p.breaker,
-        kills: p.kills, place: p.place, elimTick: p.elimTick,
+        kills: p.kills, score: p.score, place: p.place, elimTick: p.elimTick,
       })),
     };
   }
@@ -451,6 +456,7 @@ export function createTron(room) {
     else if (m.t === 'fade') { if (editable()) fadeMode = !fadeMode; }
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
     else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
+    else if (m.t === 'match') { if (editable()) match.changer(players); }   // cycle manche simple → premier à 2 / 3 / 5 (GM_ONLY dans hub.js)
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

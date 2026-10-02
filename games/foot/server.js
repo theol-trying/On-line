@@ -9,6 +9,7 @@
 import { AR0, MARGE, PR, BR, POST_R, GOAL0, GOAL_SD, TERRAINS, ITEMS } from '../../public/games/foot/shared.js';
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
+import { creerMatch } from '../match.js';
 
 const GID = 'foot';
 const MAX_SEATS = 10;
@@ -129,7 +130,9 @@ export function createFoot(room) {
     }));
   }
   function setArena(n) { ar = Math.round(AR0 * scaleFor(n)); }
+  const match = creerMatch();                         // match en N manches (games/match.js) : cible 1 = manche simple, comportement historique
   function fullReset() {
+    match.reinit();
     players = makePlayers();
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; pend = [];
     mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; botCount = 0; botDiff = 1; lives = LIVES_CYCLE[0];
@@ -287,6 +290,7 @@ export function createFoot(room) {
     for (const p of players) { if (bots <= 0) break; if (!p.member) { p.bot = true; parts.push(p); bots--; } } // complète avec des bots
     parts.forEach((p, i) => { if (p.bot) p.name = '🤖 Bot ' + (i + 1); });
     if (parts.length < 2) return;
+    match.debutManche(players);                        // match gagné (ou cible changée) : scores remis à 0 avant cette manche
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
@@ -326,7 +330,7 @@ export function createFoot(room) {
       s = tie ? new Set() : new Set([best]);
     }
     winner = s.size === 1 ? [...s][0] : -1;
-    if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
+    if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; }); match.apresManche(players, winner);
     // encore en lice : classées par vies restantes (le nul en tête partage la place 1) ; puis les équipes sorties, la dernière sortie d'abord
     classerManche(players, winner, { score: p => (p.alive ? Math.max(0, teamLives[p.team] || 0) : 0) });
     pickups = [];
@@ -678,7 +682,8 @@ export function createFoot(room) {
       wind: [r2(wind.x), r2(wind.y)], wn: windNext && windAt - tick <= WIND_WARN && windAt > tick ? [r2(windNext.x), r2(windNext.y)] : 0,
       pk: pickups.map(it => [r1(it.x), r1(it.y), ITEMS.indexOf(it.k)]),
       ball: { x: r1(ball.x), y: r1(ball.y), o: ball.owner, l: ball.last },
-      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts } : null,
+      match: match.etat(players),
+      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, match: match.gagne } : null,
       players: players.map(p => ({
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot, edge: p.edge,
         x: r1(p.x), y: r1(p.y), a: r2(p.a), lives: p.lives, goals: p.goals, kills: p.kills,
@@ -686,7 +691,7 @@ export function createFoot(room) {
         ch: p.chargeStart >= 0 ? r2(Math.min(1, (tick - p.chargeStart) / CHARGE_TICKS)) : 0,
         sta: Math.round(p.sta * 20) / 20, spr: p.sprinting, ess: p.winded,
         tb: p.turboUntil > tick, cn: p.canonUntil > tick ? p.canonShots : 0, gl: p.gluUntil > tick, iv: p.invUntil > tick,
-        place: p.place, elimTick: p.elimTick, elimBy: p.elimBy,
+        score: p.score, place: p.place, elimTick: p.elimTick, elimBy: p.elimBy,
       })),
     };
   }
@@ -743,6 +748,7 @@ export function createFoot(room) {
     else if (m.t === 'lives') { if (editable()) lives = LIVES_CYCLE[(LIVES_CYCLE.indexOf(lives) + 1) % LIVES_CYCLE.length]; }
     else if (m.t === 'terrain') { if (editable() && (m.v === 'hasard' || TERRAINS.indexOf(m.v) >= 0)) { terSel = m.v; apercu(); } }   // chaîne de la liste seulement
     else if (m.t === 'item') { if (editable() && typeof m.k === 'string' && ITEMS.indexOf(m.k) >= 0) itemsOn[m.k] = !!m.on; }
+    else if (m.t === 'match') { if (editable()) match.changer(players); }   // cycle manche simple → premier à 2 / 3 / 5 (GM_ONLY dans hub.js)
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

@@ -3,6 +3,7 @@
 import { AR0, RING0, PR } from '../../public/games/sumo/shared.js';
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
+import { creerMatch } from '../match.js';
 
 const GID = 'sumo';
 const MAX_SEATS = 10;
@@ -105,7 +106,9 @@ export function createSumo(room) {
     }));
   }
   function setArena(n) { const k = scaleFor(n); ar = Math.round(AR0 * k); ring0 = RING0 * k; ring = ring0; }
+  const match = creerMatch();                         // match en N manches (games/match.js) : cible 1 = manche simple, comportement historique
   function fullReset() {
+    match.reinit();
     players = makePlayers(); pickups = [];
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; pend = [];
     mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; botCount = 0; botDiff = 1; seatByMid = {};
@@ -158,6 +161,7 @@ export function createSumo(room) {
     for (const p of players) { if (bots <= 0) break; if (!p.member) { p.bot = true; parts.push(p); bots--; } } // complète avec des bots
     parts.forEach((p, i) => { if (p.bot) p.name = '🤖 Bot ' + (i + 1); });
     if (parts.length < 2) return;
+    match.debutManche(players);                        // match gagné (ou cible changée) : scores remis à 0 avant cette manche
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
@@ -178,7 +182,7 @@ export function createSumo(room) {
     gameState = 'over'; endTick = tick;
     const s = aliveTeams();
     winner = s.size === 1 ? [...s][0] : -1;
-    if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
+    if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; }); match.apresManche(players, winner);
     classerManche(players, winner);                    // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
     recordRound();
   }
@@ -405,14 +409,15 @@ export function createSumo(room) {
       round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams,
       ar, ring: r1(ring), ring0: r1(ring0), sd: gameState === 'play' && tick >= SD_START && ring > ringFloor(),
       pickups: pickups.map(pk => ({ x: r1(pk.x), y: r1(pk.y), t: pk.t })),
-      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts } : null,
+      match: match.etat(players),
+      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, match: match.gagne } : null,
       players: players.map(p => ({
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot,
         x: r1(p.x), y: r1(p.y), vx: r1(p.vx), vy: r1(p.vy), a: r2(p.a), r: r1(radius(p)),
         dcd: cd(p.dashReadyAt, p.dashCdLen || DASH_CD), dashing: dashing(p), brace: bracing(p), bcd: cd(p.braceReadyAt, BRACE_CD),
         heavy: heavy(p), lvl: p.lvl, grip: grip(p), boost: p.boostUntil > tick,
         tired: p.tiredUntil > tick, slip: slippy(p), stun: stunned(p),
-        kills: p.kills, place: p.place, elimTick: p.elimTick, outBy: p.outBy,
+        kills: p.kills, score: p.score, place: p.place, elimTick: p.elimTick, outBy: p.outBy,
       })),
     };
   }
@@ -461,6 +466,7 @@ export function createSumo(room) {
     else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; } }
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); if (gameState === 'lobby') setArena(partCount()); } }
     else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
+    else if (m.t === 'match') { if (editable()) match.changer(players); }   // cycle manche simple → premier à 2 / 3 / 5 (GM_ONLY dans hub.js)
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

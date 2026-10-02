@@ -14,6 +14,8 @@ import { createRalenti } from '../../ralenti.js';               // ralenti du de
 import { drawPodium, podiumEntries } from '../../podium.js';       // podium canvas de fin de manche (lutteurs dessinés par le jeu)
 import { createDuelCam } from '../../camera-duel.js';              // caméra de duel : zoom doux sur les deux derniers lutteurs
 import { createStreaks, streakText, createCallouts, createHitStop, drawFlash, drawDanger, drawSeatChip, readable, hudK } from '../../exploits.js';   // aides visuelles partagées (séries, arrêt sur image, vignette, pastilles)
+import { createEcranFin } from '../../ecran-fin.js';                // fin de manche en plein écran + boutons « Relancer » / « Accueil »
+import { boutonMatch, texteMatch, balleDeMatch, titreFin, pastillesTexte } from '../../match.js';   // match en N manches (bouton GM, chip, balle de match, titre de fin, pastilles)
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -117,6 +119,13 @@ export default (function () {
   let pendingEnd = null, overT0 = 0, eatUntil = 0;       // fin de manche différée pendant le ralenti / début du podium / clic avalé (celui qui passe le ralenti)
   let repOut = {}, repHas = false, podSrc = null, podList = [];   // sorties vues pendant le ralenti / entrées du podium (mises en cache par snapshot)
   let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, diffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl, dashBtn, braceBtn;
+  let matchBtn = null, chipEl = null, chipTxt = '', bmRound = -1;   // match : bouton du GM, chip du HUD, manche dont la « balle de match » est déjà annoncée
+  // fin de manche EN PLEIN ÉCRAN : la page reste en mise en page de partie (body.playing) jusqu'à « ⌂ Accueil » ; aChange = le choix (ou body.fin) vient de changer
+  const EF = createEcranFin({ aChange: () => { if (destroyed || !cv) return; applyPlaying(snap && snap.gs); resizeCanvas(); } });
+  function applyPlaying(gs) {
+    const inGame = EF.enJeu(gs);
+    if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
+  }
 
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team % TEAMCC.length] : CC[s % CC.length]; };
@@ -134,8 +143,15 @@ export default (function () {
 
   // ───────────────────────── HUD, classement, écran de fin ─────────────────────────
   function cdTxt(v, lab) { return v >= 1 ? lab + ' prête' : lab + ' ' + Math.round((v || 0) * 100) + '%'; }
+  function nomEquipe(t) {                                 // « Équipe B » en équipes, sinon le nom du lutteur de cette équipe (en FFA une équipe = un lutteur)
+    if (teamMode) return 'Équipe ' + (TEAM_LETTER[t] || '?');
+    const q = snap && snap.players.find(p => p.playing && p.team === t);
+    return q ? (q.name || ('P' + (q.seat + 1))) : '';
+  }
   function refreshHUD() {
     if (!snap) return;
+    const ct = texteMatch(snap.match);                    // chip « Premier à 3 · manche 2 » pendant un match
+    if (chipEl && ct !== chipTxt) { chipTxt = ct; chipEl.textContent = ct; chipEl.style.display = ct ? '' : 'none'; }
     snap.players.forEach((p, i) => {
       const shown = p.connected || p.playing;
       cards[i].classList.toggle('hidden', !shown);
@@ -149,7 +165,9 @@ export default (function () {
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const glyph = SEAT_GLYPH[i % SEAT_GLYPH.length];   // constante : rappel du motif peint sur la mawashi
-      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}<span class="sg" style="opacity:.8">${glyph}</span> ${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.kills | 0} ✋</span> ${tags.join('')}`;
+      const pas = pastillesTexte(p.score, snap.match && snap.match.n);   // match : manches gagnées (●●○), couleur du siège
+      const pasH = pas ? ` <span class="sc" title="manches gagnées" style="color:${col};letter-spacing:1px;white-space:nowrap">${pas}</span>` : '';
+      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}<span class="sg" style="opacity:.8">${glyph}</span> ${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.kills | 0} ✋</span>${pasH} ${tags.join('')}`;
       if (cards[i]._pn !== pnH) { cards[i]._pn = pnH; cards[i].querySelector('.pn').innerHTML = pnH; }   // innerHTML seulement si la chaîne change (30 Hz sinon)
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       const setLv = t => { if (cards[i]._lv !== t) { cards[i]._lv = t; lv.textContent = t; } };
@@ -182,7 +200,14 @@ export default (function () {
     endEl.style.cssText = 'justify-content:flex-start;overflow-y:auto;padding:' + (ph + 4) + 'px 12px 10px;background:linear-gradient(to bottom,rgba(5,6,14,0) ' + ph + 'px,rgba(5,6,14,.86) ' + (ph + 6) + 'px)';
   }
   function podEntries(m) {                                // entrées du podium, recalculées seulement quand le snapshot change
-    if (podSrc !== m) { podSrc = m; podList = m ? podiumEntries(m.players, colSeat) : []; }
+    if (podSrc !== m) {
+      podSrc = m; podList = m ? podiumEntries(m.players, colSeat) : [];
+      if (m && m.match && m.match.f && podList.length) {   // match gagné : le podium est celui du MATCH (équipe gagnante en tête, puis manches gagnées ; ex æquo = même marche)
+        const key = e => { const p = m.players[e.seat]; return (p && p.team === m.match.w ? 1000 : 0) + ((p && p.score) | 0); };
+        const ks = podList.map(key).sort((a, b) => b - a);
+        podList = podList.map(e => ({ ...e, place: ks.indexOf(key(e)) + 1 })).sort((a, b) => a.place - b.place || a.seat - b.seat);
+      }
+    }
     return podList;
   }
   function showEndscreen(m) {
@@ -192,7 +217,11 @@ export default (function () {
     const parts = m.players.filter(p => p.playing && p.place > 0).slice().sort((a, b) => a.place - b.place);
     const champ = winTeam(m) >= 0 ? parts.find(p => p.team === m.winner) : null;
     const who = champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[m.winner] : esc(champ.name || ('P' + (champ.seat + 1)))) : null;
-    const title = champ ? who + ' reste sur le dohyō !' : 'Égalité — torinaoshi';
+    // match en N manches : titre « VICTOIRE DU MATCH » / « Manche gagnée » + score (une valeur par équipe : les équipiers partagent leur score)
+    const sc = []; parts.forEach(p => { if (!teamMode || sc[p.team] === undefined) sc[teamMode ? p.team : sc.length] = p.score | 0; });
+    const T = titreFin(m.match, champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[m.winner] : (champ.name || ('P' + (champ.seat + 1)))) : '', sc.filter(v => v !== undefined));
+    const title = T.titre ? esc(T.titre) + (champ ? ' — ' + who : '') : (champ ? who + ' reste sur le dohyō !' : 'Égalité — torinaoshi');
+    const matchLine = T.sous ? `<div class="emeta">${esc(T.sous)}</div>` : '';
     const medals = ['🥇', '🥈', '🥉'];
     // MVP : le plus de sorties provoquées, départage au classement (≥ 1 sortie, sinon personne)
     let mvp = null; parts.forEach(p => { if ((p.kills | 0) > 0 && (!mvp || p.kills > mvp.kills || (p.kills === mvp.kills && p.place < mvp.place))) mvp = p; });
@@ -207,7 +236,10 @@ export default (function () {
     const mvpLine = mvp ? `<div class="emeta">⭐ MVP : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.kills} sortie${mvp.kills > 1 ? 's' : ''}</div>` : '';
     const wrapO = endPod ? '<div style="width:100%;flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;align-items:center;gap:8px">' : '', wrapC = endPod ? '</div>' : '';   // podium au-dessus : la carte défile dans sa zone
     endEl.innerHTML = wrapO + `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : K.washi}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} lutteurs</div>${mvpLine}<div class="elist">${rows}</div>${jRound === m.round ? blocFin(J, { titre: 'Marge sur la paille au fil du combat', couleur: s => colSeat(s), nom: s => nameOf(s) }) : ''}<div class="ehint">${TOUCH ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>` + wrapC;
+      ${matchLine}<div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} lutteurs</div>${mvpLine}<div class="elist">${rows}</div>${jRound === m.round ? blocFin(J, { titre: 'Marge sur la paille au fil du combat', couleur: s => colSeat(s), nom: s => nameOf(s) }) : ''}<div class="ehint">${TOUCH ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>` + wrapC;
+    EF.boutons(endEl, { relancer: () => { unlockAudio(); send({ t: 'start' }); },   // = l'action Rejouer ; le libellé suit le match
+      libelle: m.match && m.match.f ? 'Nouveau match' : (m.match ? 'Manche suivante' : 'Relancer'),
+      accueil: () => { endEl.classList.add('hidden'); } });                        // « ⌂ Accueil » : EF.accueil() déjà fait, aChange() relance la mise en page d'accueil
   }
 
   // ───────────────────────── état réseau ─────────────────────────
@@ -217,7 +249,7 @@ export default (function () {
     if (m.ar && m.ar !== AR) AR = m.ar;                  // arène redimensionnée (nombre de lutteurs) : tout le rendu lit AR
     if (m.ring0 && m.ring0 !== RING_0) RING_0 = m.ring0;
     snap = m; teamMode = !!(m.mode && m.mode !== 'ffa');
-    const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
+    const inGame = EF.suivre(m.gs);                      // plein écran en jeu ET à la fin de manche (jusqu'au choix « ⌂ Accueil »)
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
@@ -234,6 +266,12 @@ export default (function () {
       if (!A.reduceFx && RL.start(performance.now())) pendingEnd = m;   // ralenti du dernier coup : carte de fin, jingle et podium attendent sa fin
       else { sound('win'); music.sting('win'); }
     }
+    if (m.gs === 'lobby') bmRound = -1;
+    if (m.gs === 'countdown' && bmRound !== m.round) {   // « BALLE DE MATCH pour … ! » : une seule fois par manche, au décompte
+      bmRound = m.round;
+      const bm = balleDeMatch(m.match, nomEquipe);
+      if (bm) { music.sting('alert'); msgGlobal('🏆', bm, { color: K.gold }); CALL.push('BALLE DE MATCH !', K.gold, performance.now()); }
+    }
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte 3·2·1 au taiko
     if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); goT0 = performance.now(); }   // goT0 : pastilles de siège visibles 2 s après le coup d'envoi
     lastCount = m.count;
@@ -243,6 +281,7 @@ export default (function () {
     { let inten = 0;                                      // musique : 1 en jeu, 2 en mort subite ou au duel final (parmi 3+)
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length; if (m.sd || (tot >= 3 && alive <= 2)) inten = 2; }
       music.setIntensity(inten); }
+    if (matchBtn) matchBtn.maj(m.match, m.gs);          // bouton « 🏆 Premier à N » : grisé hors lobby / fin de manche
     refreshHUD();
     if (m.gs === 'over') { if (!endShown && !pendingEnd) { showEndscreen(m); endShown = true; overT0 = performance.now(); } }
     else { endShown = false; pendingEnd = null; if (endPod) { endPod = false; layoutEnd(); } endEl.classList.add('hidden'); }
@@ -832,7 +871,7 @@ export default (function () {
     ctx.restore();
     const ph = AR * podFrac();
     drawPodium(ctx, { x: AR * 0.03, y: AR * 0.015, w: AR * 0.94, h: ph - AR * 0.03 }, now, {
-      entries: list, A, W: AR, t0: overT0, nul: winTeam(snap) < 0,
+      entries: list, A, W: AR, t0: overT0, nul: (snap.match && snap.match.f ? snap.match.w : winTeam(snap)) < 0,
       theme: { step: '#6b4a2b', edge: K.straw, text: K.washi, glow: K.gold },
       drawPiece(c, e, x, y, size, rank) { drawRikishi(e.seat, x, y, -Math.PI / 2 + (rank === 1 && !A.reduceFx ? 0.16 * Math.sin(now / 500) : 0), size * 0.4, { shadow: false }, now); },
     });
@@ -1049,7 +1088,7 @@ export default (function () {
         ctx.fillText(tot >= 2 ? (TOUCH ? '▶ Touche l\'écran pour monter sur le dohyō' : '▶ Espace / clic pour monter sur le dohyō') : 'En attente d\'un 2ᵉ lutteur… (ou ajoute un bot 🤖)', c, y0 + Math.max(26, (f1 + f2) * 0.8));
       }
     }
-    if (!rf && snap && snap.gs === 'over' && endShown) drawPodiumScene(now);   // podium : après le ralenti éventuel, sous la carte DOM qui se cale en dessous
+    if (!rf && snap && snap.gs === 'over' && endShown && EF.enJeu('over')) drawPodiumScene(now);   // podium : après le ralenti éventuel, sous la carte DOM qui se cale en dessous
     if (rf) RL.drawOverlay(ctx, AR, AR, now, A);             // ralenti : bandes cinéma, « ⟲ RALENTI », barre de progression (en dernier)
     if (!rf) CALL.draw(ctx, AR, AR, now, A);                 // « DOUBLÉ ! / TRIPLÉ ! / CARNAGE ! » (fondu conservé sous « réduire les effets », sans l'animation d'échelle)
   }
@@ -1091,10 +1130,13 @@ export default (function () {
     const wrap = cv.parentElement;                                                  // cadre du canvas : support des bandeaux bonus/malus
     initGameMsg(wrap && wrap.classList.contains('canvas-wrap') ? wrap : null);
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
+    chipEl = document.createElement('div'); chipTxt = ''; chipEl.style.cssText = 'display:none;grid-column:1/-1;justify-self:center;padding:3px 12px;border-radius:999px;font-size:12px;font-weight:800;color:' + K.gold + ';background:rgba(224,178,60,.14);border:1px solid rgba(224,178,60,.5)'; hud.appendChild(chipEl);   // chip du match, au-dessus des cartes
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('smStart'); pauseBtn = $('smPause'); modeBtn = $('smMode'); botsBtn = $('smBots'); diffBtn = $('smDiff'); pauseFloat = $('smPauseFloat');
     lbBtn = $('smLbBtn'); lbPanel = $('smLbPanel'); lbBody = $('smLbBody'); dashBtn = $('smDash'); braceBtn = $('smBrace');
     startBtn.onclick = () => { unlockAudio(); send({ t: 'start' }); };
+    matchBtn = boutonMatch(startBtn.parentNode, send);     // 🏆 Manche simple / Premier à N (game master, grisé hors lobby / fin)
+    if (snap) matchBtn.maj(snap.match, snap.gs);
     pauseBtn.onclick = () => send({ t: 'pause' });
     pauseFloat.onclick = () => send({ t: 'pause' });
     modeBtn.onclick = () => send({ t: 'mode' });
@@ -1122,6 +1164,7 @@ export default (function () {
   function onA11y() { applyColors(); if (A.reduceFx) RL.skip(); }   // « réduire les effets » activé pendant un ralenti : on le coupe
   function teardown() {
     destroyed = true; music.dispose(); music = NOMUSIC; cancelAnimationFrame(rafId); J.fin(); LUM.vider();   // retour au jeu : journal repris à neuf
+    EF.suivre('lobby');                                   // retire body.fin et le choix « Accueil » (aChange est muet : destroyed) ; l'accueil gère body.playing
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
     // touches relâchées côté client SANS rien envoyer maintenant (le hub a peut-être déjà changé de jeu : un « input » partirait vers un autre jeu) ;
     // si l'une était tenue, staleInput fait renvoyer l'état « tout relâché » au prochain init() du Sumo

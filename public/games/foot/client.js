@@ -14,6 +14,8 @@ import { createCallouts, createHitStop, drawFlash, drawDanger, drawSeatChip, str
 import { createRalenti } from '../../ralenti.js';                 // ralenti du dernier but à la fin de manche
 import { drawPodium, podiumEntries } from '../../podium.js';       // podium canvas (footballeurs) après le ralenti
 import { createDuelCam } from '../../camera-duel.js';              // caméra de duel : 2 joueurs restants + ballon
+import { createEcranFin } from '../../ecran-fin.js';              // fin de manche en plein écran + boutons Relancer / Accueil
+import { boutonMatch, texteMatch, balleDeMatch, titreFin, pastillesTexte } from '../../match.js';   // match en N manches
 
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
 
@@ -93,6 +95,7 @@ export default (function () {
   const TOUCH = (() => { try { return !!(window.matchMedia && matchMedia('(pointer: coarse)').matches); } catch { return 'ontouchstart' in window; } })();   // écran tactile : pas d'indications clavier
   let gCount = {}, flashes = [], bulbs = [], bulbT0 = 0, sdCue = 0, chipUntil = 0, prevFrz = 0, bvx = 0, bvy = 0, dangerK = 0, dangerE = null, KH = 1, hudTop = AR0;
   const input ={ up: false, down: false, left: false, right: false };
+  let matchBtn = null, matchChip = null;                // bouton du game master (barre) et chip « Premier à N » (HUD)
   let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, diffBtn, livesBtn, optBtn, optPanel, pauseFloat, lbBtn, lbPanel, lbBody, endEl, shootBtn, tackleBtn, sprintBtn;
   const runPhase = {};                                  // par siège : phase de course (animation des jambes)
   // ralenti : fenêtre 1,7 s de jeu à 0,5× (≈ 3,4 s réelles) ; carte de fin et journal différés jusqu'à sa fin (pendEnd) ; skipT : dernier saut (le clic/tap qui suit ne relance rien)
@@ -100,9 +103,32 @@ export default (function () {
   let pendEnd = false, skipT = -1e9, podT0 = 0, podSnap = null, podEnt = null, frzT0 = 0, liveSnap = null;
   const DP = [{ x: 0, y: 0 }, { x: 0, y: 0 }];         // coins du cadre (2 joueurs + ballon) passés à la caméra de duel
 
+  // fin de manche en plein écran : inGame vient d'EF.enJeu (play / countdown / paused, et over tant que le joueur n'a pas choisi « Accueil »)
+  const EF = createEcranFin({ aChange: () => { if (destroyed || !cv || !snap) return; applyPlaying(snap.gs); resizeCanvas(); } });
+  function applyPlaying(gs) {
+    const inGame = EF.enJeu(gs);
+    if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
+    return inGame;
+  }
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team % TEAMCC.length] : CC[s % CC.length]; };
   const nameOf = s => { const p = snap && snap.players[s]; return p ? (p.name || ('P' + (s + 1))) : '?'; };
+  // nom d'une équipe (index d'équipe p.team) : « Équipe B » en équipes, le nom du joueur en chacun pour soi (TEXTE BRUT)
+  const nomEquipe = t => {
+    if (teamMode) return 'Équipe ' + (TEAM_LETTER[t] || '?');
+    const p = snap && snap.players.find(q => q.playing && q.team === t);
+    return p ? (p.name || ('P' + (p.seat + 1))) : '';
+  };
+  // match gagné : le podium et la carte classent par MANCHES gagnées (p.score), pas par la place de la dernière manche
+  // (ex æquo = même place ; l'équipe gagnante du match, à la cible, passe devant)
+  function joueursMatch(m) {
+    if (!(m.match && m.match.f)) return m.players;
+    return m.players.map(p => {
+      if (!p.playing) return p;
+      let rg = 1; m.players.forEach(q => { if (q.playing && (q.score | 0) > (p.score | 0)) rg++; });
+      return Object.assign({}, p, { place: rg });
+    });
+  }
   // une cage appartient à une ÉQUIPE (en chacun pour soi : une équipe d'un joueur) ; s = siège représentant de la cage
   const cageNom = s => { const p = snap && snap.players[s]; return teamMode && p ? 'Équipe ' + (TEAM_LETTER[p.team] || '?') : nameOf(s); };
   const maCage = f => { const me = snap && mySeat >= 0 ? snap.players[mySeat] : null, v = snap && snap.players[f.seat]; if (!me || !me.playing) return false; return f.team != null ? me.team === f.team : !!(v && v.team === me.team); };
@@ -140,6 +166,7 @@ export default (function () {
   function refreshHUD() {
     if (!snap) return;
     const tot = snap.lives || 3;
+    if (matchChip) { const tm = texteMatch(snap.match); setT(matchChip, tm); matchChip.style.display = tm ? '' : 'none'; }
     snap.players.forEach((p, i) => {
       const shown = p.connected || p.playing;
       cards[i].classList.toggle('hidden', !shown);
@@ -153,7 +180,7 @@ export default (function () {
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const glyph = SEAT_GLYPH[i % SEAT_GLYPH.length];
-      setH(cards[i].querySelector('.pn'), `${(window.__AV && window.__AV(p.name)) || ''}<span class="sg" style="opacity:.8">${glyph}</span> ${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.goals | 0} ⚽</span> ${tags.join('')}`);
+      setH(cards[i].querySelector('.pn'), `${(window.__AV && window.__AV(p.name)) || ''}<span class="sg" style="opacity:.8">${glyph}</span> ${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.goals | 0} ⚽</span>${snap.match && p.playing ? ` <span class="sc" title="manches gagnées" style="color:${col};letter-spacing:1px">${pastillesTexte(p.score, snap.match.n)}</span>` : ''} ${tags.join('')}`);
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       if (!p.playing) { setT(lv, 'prêt'); return; }
       if (!p.alive) { setT(lv, p.elimBy >= 0 && p.elimBy !== i ? '✖ éliminé par ' + nameOf(p.elimBy) : '✖ éliminé'); return; }
@@ -175,10 +202,11 @@ export default (function () {
   function showEndscreen(m) {
     if (m.gs !== 'over' || !m.stats) { endEl.classList.add('hidden'); return; }
     endEl.classList.remove('hidden');
-    const parts = m.players.filter(p => p.playing && p.place > 0).slice().sort((a, b) => a.place - b.place || (b.goals | 0) - (a.goals | 0));
+    const parts = joueursMatch(m).filter(p => p.playing && p.place > 0).slice().sort((a, b) => a.place - b.place || (b.goals | 0) - (a.goals | 0));
     const champ = m.winner >= 0 ? parts.find(p => p.team === m.winner) : null;
     const who = champ ? (teamMode ? 'Équipe ' + (TEAM_LETTER[m.winner] || '?') : esc(champ.name || ('P' + (champ.seat + 1)))) : null;
-    const title = champ ? who + ' remporte le match !' : 'Match nul — tout le monde aux tirs au but';
+    const T = titreFin(m.match, champ ? nomEquipe(m.winner) : '', m.players.filter(p => p.playing).map(p => p.score | 0));   // match en N manches : « VICTOIRE DU MATCH » / « Manche gagnée » (T.titre vide hors match)
+    const title = T.titre ? (champ ? esc(T.titre) + ' — ' + who : esc(T.titre)) : champ ? who + ' remporte le match !' : 'Match nul — tout le monde aux tirs au but';
     const medals = ['🥇', '🥈', '🥉'];
     let mvp = null; parts.forEach(p => { if ((p.goals | 0) > 0 && (!mvp || p.goals > mvp.goals || (p.goals === mvp.goals && p.place < mvp.place))) mvp = p; });
     const rows = parts.map(p => {
@@ -191,7 +219,12 @@ export default (function () {
     }).join('');
     const mvpLine = mvp ? `<div class="emeta">⭐ Meilleur buteur : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.goals} but${mvp.goals > 1 ? 's' : ''}</div>` : '';
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : K.chalk}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} joueurs · ${LOOK().i} ${LOOK().nom}</div>${mvpLine}<div class="elist">${rows}</div>${jRound === m.round ? blocFin(J, { titre: 'Vies au fil du match', couleur: s => colSeat(s), nom: s => nameOf(s), max: m.lives || 3 }) : ''}<div class="ehint">${TOUCH ? 'Touchez pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} joueurs · ${LOOK().i} ${LOOK().nom}</div>${T.sous ? `<div class="emeta">🏆 ${esc(T.sous)}</div>` : ''}${mvpLine}<div class="elist">${rows}</div>${jRound === m.round ? blocFin(J, { titre: 'Vies au fil du match', couleur: s => colSeat(s), nom: s => nameOf(s), max: m.lives || 3 }) : ''}<div class="ehint">${TOUCH ? 'Touchez pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
+    // boutons de la carte : ↻ Relancer (= Rejouer) et ⌂ Accueil (mise en page d'accueil ; la carte se range, le podium reste sur le terrain)
+    EF.boutons(endEl, { relancer: () => { if (skipRep()) return; unlockAudio(); send({ t: 'start' }); },
+      libelle: m.match && m.match.f ? 'Nouveau match' : (m.match ? 'Manche suivante' : 'Relancer'),
+      accueil: () => { endEl.classList.add('hidden'); endEl.style.top = ''; endEl.style.justifyContent = ''; } });
+    if (T.titre && champ && m.match.f && !A.reduceFx) [0.25, 0.5, 0.75].forEach(f => confetti(AR * f, AR * 0.5, colSeat(champ.seat), 40));   // victoire du match : confettis
   }
 
   // ───────────────────────── panneau « Terrain & bonus » (game master) ─────────────────────────
@@ -229,8 +262,7 @@ export default (function () {
     teamMode = m.gs === 'lobby' ? !!(m.mode && m.mode !== 'ffa') : (m.nteams > 0 && m.nteams < m.players.filter(p => p.playing).length);
     const t = TERRAINS[m.ter | 0] || 'stade'; if (t !== terId) { terId = t; decorKey = ''; }
     syncGeo(m);
-    const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
-    if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
+    EF.suivre(m.gs); applyPlaying(m.gs);
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
     if (m.round !== prevRound) { prevRound = m.round; buf = []; puffs.length = 0; waves.length = 0; sparks.length = 0; confs.length = 0; texts.length = 0; trail = []; LUM.vider(); gCount = {}; flashes.length = 0; bulbT0 = 0; sdCue = 0; chipUntil = 0; dangerK = 0; bvx = 0; bvy = 0; prevFrz = 0; RL.clear(); pendEnd = false; frzT0 = 0; podSnap = null; CAM.reset(); }
@@ -257,6 +289,10 @@ export default (function () {
       }
       prevFrz = frz; }
     if (prevGs !== 'countdown' && m.gs === 'countdown' && terId !== 'stade') msgGlobal(LOOK().i, 'Terrain : ' + LOOK().nom + ' — ' + TER_DESC[terId], { color: K.amber });
+    if (prevGs !== 'countdown' && m.gs === 'countdown') {      // balle de match : annoncée UNE fois, au décompte
+      const bm = balleDeMatch(m.match, nomEquipe);
+      if (bm) { msgGlobal('🏆', bm, { color: K.gold }); CALL.push('BALLE DE MATCH !', K.gold, performance.now()); }
+    }
     lastCount = m.count;
     if (m.sd && !prevSd) { sdT0 = performance.now(); sdCue = sdT0; music.sting('alert'); msgGlobal('⚠', 'Prolongations : les cages s\'agrandissent !', { bad: true }); }
     prevSd = !!m.sd;
@@ -265,6 +301,7 @@ export default (function () {
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const camps = {}; let nc = 0; m.players.forEach(p => { if (p.playing && p.alive && !camps[p.team]) { camps[p.team] = 1; nc++; } }); if (m.sd || ((m.nteams || 0) >= 3 && nc <= 2)) inten = 2; }
       music.setIntensity(inten); }
     refreshHUD(); syncOptPanel(m);
+    if (matchBtn) matchBtn.maj(m.match, m.gs);
     if (m.gs === 'over') { if (!endShown && !pendEnd) { showEndscreen(m); endShown = true; podT0 = performance.now(); } }
     else { endShown = false; endEl.classList.add('hidden'); endEl.style.top = ''; endEl.style.justifyContent = ''; }
     const idle = m.gs === 'lobby' || m.gs === 'over', total = (m.connected || 0) + (m.botCount || 0);
@@ -1093,7 +1130,7 @@ export default (function () {
     c.rotate(-Math.PI / 2); if (rank === 1) drawBall(r * 0.95, r * 0.95, r * 0.34, 0.5, false);      // le vainqueur garde le ballon au pied
   }
   function drawFootPodium(now) {
-    if (podSnap !== snap) { podSnap = snap; podEnt = podiumEntries(snap.players, colSeat); }
+    if (podSnap !== snap) { podSnap = snap; podEnt = podiumEntries(joueursMatch(snap), colSeat); }   // match gagné : podium du match
     if (!podEnt || !podEnt.length) { endEl.style.top = ''; endEl.style.justifyContent = ''; return; }
     const hp = AR * POD_H;
     ctx.save(); ctx.fillStyle = A.contrast ? '#000' : 'rgba(6,12,9,0.8)'; ctx.fillRect(0, 0, AR, hp);
@@ -1150,10 +1187,13 @@ export default (function () {
     const wrap = cv.parentElement;
     initGameMsg(wrap && wrap.classList.contains('canvas-wrap') ? wrap : null);
     hud.innerHTML = '';
+    matchChip = document.createElement('div'); matchChip.className = 'ftMatchChip'; matchChip.style.cssText = 'display:none;grid-column:1/-1;justify-self:center;-webkit-align-self:center;align-self:center;padding:3px 12px;border-radius:999px;font:700 12px system-ui,sans-serif;letter-spacing:.04em;color:' + K.gold + ';background:rgba(6,12,9,.7);border:1px solid rgba(242,246,238,.25)';
+    hud.appendChild(matchChip);
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     startBtn = $('ftStart'); pauseBtn = $('ftPause'); modeBtn = $('ftMode'); botsBtn = $('ftBots'); diffBtn = $('ftDiff'); livesBtn = $('ftLives'); pauseFloat = $('ftPauseFloat');
     lbBtn = $('ftLbBtn'); lbPanel = $('ftLbPanel'); lbBody = $('ftLbBody'); shootBtn = $('ftShoot'); tackleBtn = $('ftTackle'); sprintBtn = $('ftSprint');
     optBtn = $('ftOpt'); optPanel = $('ftOptPanel'); buildOptPanel();
+    matchBtn = boutonMatch(startBtn.parentNode, send);                  // 🏆 Manche simple / Premier à N (game master, lobby / fin)
     startBtn.onclick = () => { if (skipRep()) return; unlockAudio(); send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' });
     pauseFloat.onclick = () => send({ t: 'pause' });
@@ -1180,6 +1220,7 @@ export default (function () {
   function onA11y() { applyColors(); }
   function teardown() {
     destroyed = true; cancelAnimationFrame(rafId); J.fin(); LUM.vider();
+    EF.suivre('lobby'); document.body.classList.remove('playing', 'fin'); inGamePrev = false;   // fin plein écran : classes remises à zéro (aChange inactif : destroyed)
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
     // touches / boutons tenus : on renvoie l'état RELÂCHÉ (seulement si quelque chose était tenu — sinon on n'écrit rien au hub,
     // qui a peut-être déjà changé de jeu)

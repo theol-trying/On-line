@@ -27,6 +27,8 @@ import { creerJournal, blocFin } from '../../finpartie.js';      // écran de fi
 import { createStreaks, createCallouts, streakText, createHitStop, drawFlash, drawDanger, drawSeatChip, readable } from '../../exploits.js';   // aides partagées : « DOUBLÉ ! », arrêt sur image, éclat, danger, pastilles, lisibilité
 import { createRalenti } from '../../ralenti.js';                   // ralenti du point décisif (rejeu des derniers snapshots)
 import { drawPodium, podiumEntries } from '../../podium.js';        // podium de fin de manche dessiné au canvas
+import { createEcranFin } from '../../ecran-fin.js';               // fin de manche en plein écran + boutons « ↻ Relancer » / « ⌂ Accueil »
+import { boutonMatch, texteMatch, balleDeMatch, titreFin, pastillesTexte } from '../../match.js';   // match en N manches : bouton GM, chip HUD, balle de match, titre de fin, pastilles
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -237,6 +239,11 @@ export default (function () {
   let pred = null, padSpd = 5.5, dernierInputT = 0;
   // DOM refs
   let hud, cards, startBtn, pauseBtn, botsBtn, modeBtn, presetBtn, pauseFloat;
+  // Fin de manche en plein écran (body.playing reste posé à 'over' tant que le joueur n'a pas choisi « ⌂ Accueil »).
+  // aChange : body.fin / le choix « Accueil » viennent de changer → on rebascule body.playing et on redimensionne le plateau.
+  const EF = createEcranFin({ aChange: () => { if (destroyed || !cv) return; const av = inGamePrev; applyPlaying(snap && snap.gs); if (inGamePrev === av) resizeCanvas(); } });
+  let accueilFin = false;                                  // « Accueil » choisi pendant cette fin : la carte de fin ne se ré-affiche pas (ex. classement reçu après coup)
+  let matchBtn = null, matchEl = null, matchTxt = null, matchShown = '';   // bouton du game master · chip « Premier à 3 · manche 2 » du HUD (DOM) · dernier texte posé
   let optBtn, optionsPanel, optLives, optSpeed, optPu, optAccel, optWin, optSudden, optServe, optHandi;
   let optTarRow, optTar, optTarLbl, optNeg, optBot, optStyle, optBump, lbBtn, lbPanel, voteBtn, histPreset, histMode;
 
@@ -266,6 +273,29 @@ export default (function () {
     if (endShown && snap) podLayout(snap);         // la carte de fin garde sa place sous le podium quand la taille change
   }
 
+  function applyPlaying(gs) {                              // remplace le test historique play/countdown/paused : la fin reste plein écran
+    const inGame = EF.enJeu(gs);
+    if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
+  }
+  // Match en N manches : snapshot `match` ({ n, f, w, bm, r } ou null). Bouton du GM (grisé hors lobby/over ET en mode « éliminations »,
+  // dont l'objectif est réglé dans Options : le serveur ignore alors le message) + chip du HUD « Premier à 3 · manche 2 ».
+  function refreshMatch(m) {
+    if (matchBtn) {
+      matchBtn.maj(m.match, m.gs);
+      if (m.opts && m.opts.winMode === 'kills') { matchBtn.el.disabled = true; matchBtn.el.title = 'Mode « éliminations » : l\'objectif se règle dans Options'; }
+    }
+    if (!matchEl) return;
+    const t = texteMatch(m.match);
+    if (t === matchShown) return;
+    matchShown = t; matchTxt.textContent = t; matchEl.classList.toggle('hidden', !t);
+  }
+  // Nom de l'équipe d'un indice d'équipe (balle de match) : « Équipe A » en équipes, sinon le joueur du siège concerné.
+  function nomEquipe(t) {
+    if (teamMode) return 'Équipe ' + (TEAM_LETTER[t] || (t + 1));
+    const q = snap && snap.players.find(p => p.team === t && p.edge >= 0);
+    return q ? (q.name || ('P' + (q.seat + 1))) : '';
+  }
+
   function refreshHUD() {
     if (!snap) return;
     snap.players.forEach((p, i) => {
@@ -284,7 +314,8 @@ export default (function () {
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const gl = `<span style="opacity:.75;margin-right:3px" title="motif de la raquette">${SEAT_GLYPH[i % SEAT_GLYPH.length]}</span>`;   // glyphe = motif du siège (constante, jamais du réseau)
-      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}${gl}${p.name || ('P' + (i + 1))} <span class="sc">${p.score} pt</span> ${tags.join('')}`;
+      const pastilles = snap.match ? pastillesTexte(p.score, snap.match.n) : '';   // « ●●○ » : manches gagnées pendant un match (sinon « 2 pt »)
+      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}${gl}${p.name || ('P' + (i + 1))} <span class="sc"${pastilles ? ' title="manches gagnées"' : ''}>${pastilles || (p.score + ' pt')}</span> ${tags.join('')}`;
       if (hudPn[i] !== pnH) { hudPn[i] = pnH; document.getElementById('pn' + i).innerHTML = pnH; }
       cards[i].classList.toggle('dead', p.playing && !p.alive);
       cards[i].classList.toggle('me', i === mySeat);
@@ -324,14 +355,20 @@ export default (function () {
 
   function showEndscreen(m) {
     const es = $('endscreen');
-    if (m.gs !== 'over' || !m.stats) { es.classList.add('hidden'); return; }
+    if (m.gs !== 'over' || !m.stats || accueilFin) { es.classList.add('hidden'); return; }
     es.classList.remove('hidden');
     const nm = s => { const q = m.players[s]; return q ? (q.name || ('P' + (s + 1))) : ('P' + (s + 1)); };
     const parts = m.players.filter(p => p.edge >= 0 && p.place > 0).slice().sort((a, b) => a.place - b.place);
     const w = m.winner, champ = w >= 0 ? parts.find(p => p.team === w) : null;
     const isMatch = m.stats && m.stats.match;
     const who = champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[w] : nm(champ.seat)) : null;
-    const title = (m.stats && m.stats.nParts === 1) ? '🎯 Entraînement terminé' : (champ ? (isMatch ? '🏆 ' + who + ' REMPORTE LE MATCH' : who + ' gagne') : 'Égalité');
+    // match en N manches (snapshot `match`) : titre via titreFin, « 2 – 1 · premier à 3 » en sous-titre ; le mode « éliminations » garde son stats.match
+    const scores = [], vus = {};
+    for (const p of parts) { if (teamMode) { if (vus[p.team]) continue; vus[p.team] = 1; } scores.push(p.score || 0); }
+    const T = titreFin(m.match, who, scores);
+    const title = (m.stats && m.stats.nParts === 1) ? '🎯 Entraînement terminé'
+      : (champ ? (isMatch || (m.match && m.match.f) ? '🏆 ' + who + ' REMPORTE LE MATCH' : (T.titre ? who + ' gagne la manche' : who + ' gagne')) : (T.titre ? 'Manche nulle' : 'Égalité'));
+    const matchLine = T.sous && m.stats.nParts !== 1 ? `<div class="emeta" style="font-weight:800;color:#ffd76b">${T.sous}</div>` : '';
     const medals = ['🥇', '🥈', '🥉'];
     const rows = parts.map(p => {
       const col = colOf(p), place = p.place || 0;
@@ -370,8 +407,16 @@ export default (function () {
     // habillage borne d'arcade : bandeau « GAME OVER » au-dessus du titre, « CONTINUE ? » sous le podium
     es.innerHTML = `<div class="emeta" style="font-family:Orbitron,'Segoe UI',sans-serif;font-weight:800;letter-spacing:.32em;color:#ff5db4">GAME OVER</div>
       <div class="etitle" style="color:${champ ? colOf(champ) : '#fff'}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · 🏓 ${m.stats.bounces} rebonds · ${m.stats.nParts} joueurs</div>
+      ${matchLine}<div class="emeta">⏱ ${m.stats.durationSec}s · 🏓 ${m.stats.bounces} rebonds · ${m.stats.nParts} joueurs</div>
       ${mvpLine}<div class="elist">${rows}</div>${finHtml}${podHtml}<div class="ehint"><b style="font-family:Orbitron,'Segoe UI',sans-serif;letter-spacing:.12em;color:#6ff0ff">CONTINUE ?</b> ${touch ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
+    // « ↻ Relancer » (= Rejouer) et « ⌂ Accueil » : le ralenti et le podium restent au-dessus de la carte, qui n'apparaît qu'après le ralenti
+    const bt = EF.boutons(es, {
+      libelle: (isMatch || (m.match && m.match.f)) ? 'Nouveau match' : (m.match ? 'Manche suivante' : 'Relancer'),
+      relancer: () => { unlockAudio(); if (rlBlock()) return; send({ t: 'start' }); },
+      accueil: () => { accueilFin = true; es.classList.add('hidden'); },
+    });
+    // la carte de Pong est haute (classement, courbe, podium cumulé) et défile : les boutons restent collés en bas du cadre
+    bt.el.style.position = 'sticky'; bt.el.style.bottom = '0'; bt.el.style.zIndex = '2'; bt.el.style.padding = '8px 0'; bt.el.style.background = 'rgba(5,6,14,.92)'; bt.el.style.borderRadius = '14px';
     podLayout(m);
   }
 
@@ -454,7 +499,8 @@ export default (function () {
     if (m.pspd) padSpd = m.pspd;                    // vitesse par tick (dépend du nombre de joueurs)
     teamMode = m.mode && m.mode !== 'ffa';
     if (typeof m.maxLives === 'number') maxLives = m.maxLives;
-    const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
+    if (m.gs !== 'over') accueilFin = false;                // nouvelle manche / retour au lobby : la prochaine fin s'affiche de nouveau
+    const inGame = EF.suivre(m.gs);                         // la fin de manche reste plein écran jusqu'à « ⌂ Accueil » (body.fin posé par EF)
     if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
@@ -465,7 +511,11 @@ export default (function () {
     if (ge && ge.length && ((m.gs !== 'play' && m.gs !== 'paused' && m.gs !== 'over') || !geo0 || geo0.length !== ge.length * 2)) {
       geo0 = []; for (const e of ge) geo0.push(e.ax, e.ay);
     }
-    if (m.gs === 'countdown' && prevGs !== 'countdown') { RL.clear(); endPend = null; podEntries = null; breaks.length = 0; shards.length = 0; elimFl.length = 0; flashes.vider(); sdAcc = 0; streaks.reset(); dangerK = 0; }   // nouvelle manche : bords réparés, retour au jour
+    if (m.gs === 'countdown' && prevGs !== 'countdown') {
+      RL.clear(); endPend = null; podEntries = null; breaks.length = 0; shards.length = 0; elimFl.length = 0; flashes.vider(); sdAcc = 0; streaks.reset(); dangerK = 0;   // nouvelle manche : bords réparés, retour au jour
+      const bdm = balleDeMatch(m.match, nomEquipe);        // « BALLE DE MATCH pour … ! » : une fois par manche, au décompte (bandeau + annonce du terrain)
+      if (bdm) { msgGlobal('🎯', bdm, { color: '#ffd76b' }); callouts.push('BALLE DE MATCH !', '#ffd76b', performance.now()); }
+    }
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
     (m.fx || []).forEach(playFx);
     (m.fx || []).forEach(f => {
@@ -487,7 +537,7 @@ export default (function () {
     { let inten = 0;                                  // musique : 1 en jeu, 2 quand les échanges deviennent rapides
       if (m.gs === 'play' || m.gs === 'countdown') inten = (m.gs === 'play' && musicIntensity() > 0.55) ? 2 : 1;
       curInten = inten; music.setIntensity(inten); }
-    refreshHUD(); refreshTimer(m);
+    refreshHUD(); refreshTimer(m); refreshMatch(m);
     if (m.gs === 'over') { if (!endShown && !endPend) { showEndscreen(m); endShown = true; } }   // pendant le ralenti : carte différée (finRalenti)
     else { endShown = false; $('endscreen').classList.add('hidden'); podLayout(null); }
     const n = m.connected + m.botCount;
@@ -1677,6 +1727,10 @@ export default (function () {
     tlEl.innerHTML = '<div class="dot"></div><div class="inf"><div class="pn"><span></span></div></div>';
     tlTxt = tlEl.querySelector('span'); tlTxt.style.cssText = 'font-size:17px;font-weight:800;font-variant-numeric:tabular-nums';
     hud.appendChild(tlEl); tlShown = -1; tlPrev = null; tlVal = null;
+    matchEl = document.createElement('div'); matchEl.className = 'pc me hidden';   // chip du match (« Premier à 3 · manche 2 ») : visible aussi sur téléphone (classe me)
+    matchEl.innerHTML = '<div class="dot"></div><div class="inf"><div class="pn"><span></span></div></div>';
+    matchTxt = matchEl.querySelector('span'); matchTxt.style.cssText = 'font-size:14px;font-weight:800;color:#ffd76b';
+    hud.appendChild(matchEl); matchShown = '';
     touch = isTouch(); dangerK = 0; elimFl.length = 0; streaks.reset();
     RL.clear(); endPend = null; rpl = false; swallow = 0; podEntries = null; duelLast = 0;   // singleton réutilisé : pas de rejeu ni de podium hérités
     startBtn = $('startBtn'); pauseBtn = $('pauseBtn'); botsBtn = $('botsBtn'); modeBtn = $('modeBtn'); presetBtn = $('presetBtn'); pauseFloat = $('pauseFloat');
@@ -1685,6 +1739,8 @@ export default (function () {
     optWin = $('optWin'); optSudden = $('optSudden'); optServe = $('optServe'); optHandi = $('optHandi');
     optTarRow = $('optTarRow'); optTar = $('optTar'); optTarLbl = $('optTarLbl'); optNeg = $('optNeg'); optBot = $('optBot'); optStyle = $('optStyle'); optBump = $('optBump');
     lbBtn = $('lbBtn'); lbPanel = $('lbpanel'); voteBtn = $('voteBtn'); histPreset = $('histPreset'); histMode = $('histMode');
+    matchBtn = boutonMatch(root.querySelector('.bar') || startBtn.parentNode, m => send(m));   // bouton GM « 🏆 Manche simple / Premier à N » (retrouvé s'il existe déjà : singleton)
+    accueilFin = false;
 
     startBtn.onclick = () => { unlockAudio(); if (rlBlock()) return; send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' });
@@ -1733,6 +1789,8 @@ export default (function () {
     clearTimeout(bannerTimer);
     if (input.up || input.dn) { input.up = input.dn = false; try { send({ t: 'input', up: false, dn: false }); } catch (e) {} }   // touches tenues : relâchées côté serveur (sinon la raquette file seule)
     if (actx) { const c0 = actx; actx = null; noiseBuf = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {} }   // ferme l'AudioContext (nouveau au prochain geste)
+    EF.suivre('lobby'); accueilFin = false; matchShown = '';   // fin plein écran quittée (body.fin retiré ; destroyed = vrai : pas de redimensionnement)
+    if (inGamePrev) { inGamePrev = false; document.body.classList.remove('playing'); }   // changer de jeu pendant une fin plein écran : la page ne doit pas rester en mise en page de partie
     elimFl.length = 0; dangerK = 0; streaks.reset();
     RL.clear(); endPend = null; rpl = false; swallow = 0; podEntries = null; podLayout(null);   // ralenti et podium remis à zéro (carte de fin rendue à son style)
     J.fin(); flashes.vider(); sdAcc = 0;   // singleton : un retour en cours de manche ne doit pas prolonger l'ancien journal

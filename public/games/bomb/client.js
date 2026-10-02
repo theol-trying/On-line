@@ -21,6 +21,9 @@ import { createStreaks, streakText, createCallouts, createHitStop, drawFlash, dr
 // ralenti du moment décisif (dernière élimination) puis podium dessiné au canvas (bombeurs, style Confiserie)
 import { createRalenti } from '../../ralenti.js';
 import { drawPodium, podiumEntries } from '../../podium.js';
+// fin de manche en plein écran (ralenti + podium + carte « ↻ Relancer / ⌂ Accueil ») et match en N manches (bouton GM, chip HUD, balle de match, pastilles)
+import { createEcranFin } from '../../ecran-fin.js';
+import { boutonMatch, texteMatch, balleDeMatch, titreFin, pastillesTexte } from '../../match.js';
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -190,6 +193,14 @@ export default (function () {
   let A, send, root, cv, ctx, togglePanel = () => {}, closePanels = () => {};
   let CC = PAL.normal, TEAMCC = TEAMPAL.normal, FX = 1;
   let mySeat = -1, snap = null, prevGs = 'lobby', teamMode = false, endShown = false, inGamePrev = false, prevRound = -1, lastCount = -1, prevSd = false;
+  let gsNow = 'lobby', bmRound = -1, matchBtn = null, matchChip = null, efH = null, efLib = '';   // gs réel (le rejeu prête un snap en « play »), manche dont la balle de match est annoncée, bouton / chip du match, boutons de la carte de fin
+  // La fin de manche reste EN PLEIN ÉCRAN (body.playing) tant que le joueur n'a pas choisi « ⌂ Accueil » (ecran-fin.js).
+  const EF = createEcranFin({ aChange: () => { if (destroyed || !cv) return; if (!applyPlaying(gsNow)) resizeCanvas(); } });
+  function applyPlaying(gs) {
+    const inGame = EF.enJeu(gs);
+    if (inGame === inGamePrev) return false;
+    inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); return true;
+  }
   let board = [], buf = [];
   // effets : tous plafonnés, tous vidés au changement de manche
   const parts = [], rings = [], poofs = [], wallAnims = [], dropAnims = [], scorch = [];
@@ -255,6 +266,7 @@ export default (function () {
   // ───────────────────────── HUD, classement, écran de fin ─────────────────────────
   function refreshHUD() {
     if (!snap) return;
+    if (matchChip) { const ch = texteMatch(snap.match); if (ch !== matchChip._t) { matchChip._t = ch; matchChip.textContent = ch ? '🏆 ' + ch : ''; matchChip.style.display = ch ? '' : 'none'; } }
     snap.players.forEach((p, i) => {
       const shown = p.connected || p.playing;
       cards[i].classList.toggle('hidden', !shown);
@@ -265,7 +277,8 @@ export default (function () {
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const gly = `<span class="sc" style="color:${col}" title="motif du siège">${SEAT_GLYPH[i % SEAT_GLYPH.length]}</span>`;   // glyphe = motif porté par le personnage
-      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}${esc(p.name || ('P' + (i + 1)))} ${gly} <span class="sc">${p.kills | 0} ⚡</span> ${tags.join('')}`;
+      const pw = snap.match ? pastillesTexte(p.score, snap.match.n) : '';   // manches gagnées du match (●●○), partagées par l'équipe
+      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}${esc(p.name || ('P' + (i + 1)))} ${gly} <span class="sc">${p.kills | 0} ⚡</span> ${pw ? `<span class="sc" style="color:${col}" title="manches gagnées">${pw}</span> ` : ''}${tags.join('')}`;
       if (pnH !== el._pnH) { el._pnH = pnH; el._pn.innerHTML = pnH; }   // innerHTML seulement si la chaîne change (pas de reconstruction du DOM à chaque état)
       const ab = [p.kick ? '🦵' : '', p.remote ? '📡' : '', p.ghost ? '👻' : '', p.throw ? '🧤' : '', p.line ? '📏' : '', p.shield ? '🛡' : '', p.rev ? '🔀' : '', p.slow ? '🐌' : '', p.auto ? '⏱' : '', p.skull ? '💀' : ''].filter(Boolean).join('');
       const lvH = p.playing ? (p.alive ? `💣${p.bombs} 🔥${p.power} 👟${p.speed}${ab ? ' · ' + ab : ''}` : (p.rvn ? '☠ revanche (bord)' : '✖ éliminé')) : 'prêt';
@@ -287,7 +300,9 @@ export default (function () {
     const parts2 = m.players.filter(p => p.playing && p.place > 0).slice().sort((a, b) => a.place - b.place);
     const champ = m.winner >= 0 ? parts2.find(p => p.team === m.winner) : null;
     const who = champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[m.winner] : esc(champ.name || ('P' + (champ.seat + 1)))) : null;
-    const title = solo ? 'Entraînement terminé' : (champ ? who + ' rafle le bocal !' : 'Égalité — tout a sauté !');
+    const sc = [], seenT = {}; parts2.forEach(p => { if (!seenT[p.team]) { seenT[p.team] = 1; sc.push(p.score | 0); } });   // score de match par équipe (un seul par équipe)
+    const T = solo ? { titre: '', sous: '' } : titreFin(m.match, champ ? who : '', sc);   // hors match : titre '' (on garde celui du jeu)
+    const title = solo ? 'Entraînement terminé' : (T.titre ? T.titre + (champ ? ' — ' + who : '') : (champ ? who + ' rafle le bocal !' : 'Égalité — tout a sauté !'));
     const medals = ['🥇', '🥈', '🥉'];
     // MVP : le plus d'éliminations, départage au classement (≥ 1, sinon personne)
     let mvp = null; if (!solo) parts2.forEach(p => { if ((p.kills | 0) > 0 && (!mvp || p.kills > mvp.kills || (p.kills === mvp.kills && p.place < mvp.place))) mvp = p; });
@@ -300,8 +315,13 @@ export default (function () {
     }).join('');
     const mvpLine = mvp ? `<div class="emeta">⭐ MVP : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.kills} élimination${mvp.kills > 1 ? 's' : ''}</div>` : '';
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : '#fff'}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} bombeur${m.stats.nParts > 1 ? 's' : ''}</div>${mvpLine}<div class="elist">${rows}</div>${blocFin(J, { titre: 'Puissance 💣 + 🔥 au fil de la manche', couleur: colSeat, nom: nomSeat })}<div class="ehint">${touch ? 'Touchez pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} bombeur${m.stats.nParts > 1 ? 's' : ''}</div>${T.sous ? `<div class="emeta">🏆 ${esc(T.sous)}</div>` : ''}${mvpLine}<div class="elist">${rows}</div>${blocFin(J, { titre: 'Puissance 💣 + 🔥 au fil de la manche', couleur: colSeat, nom: nomSeat })}<div class="ehint">${touch ? 'Touchez pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
+    efLib = finLib(m);
+    efH = EF.boutons(endEl, { libelle: efLib, relancer: () => { unlockAudio(); if (!swallow()) send({ t: 'start' }); },   // = Rejouer (même garde : le rejeu / les 300 ms de grâce)
+      accueil: () => { endEl.classList.add('hidden'); podOn = false; applyEndLayout(); } });   // EF.accueil() déjà fait : mise en page d'accueil rendue par aChange
   }
+  const finLib = m => (m.match ? (m.match.f ? 'Nouveau match' : 'Manche suivante') : 'Relancer');   // libellé du bouton « Relancer » selon le match
+  const nomEquipe = t => { if (teamMode) return 'Équipe ' + TEAM_LETTER[t]; const p = snap && snap.players.find(q => q.playing && q.team === t); return p ? (p.name || ('P' + (p.seat + 1))) : ''; };
   // Journal tenu à chaque état reçu (aucune donnée serveur en plus) : puissance par bombeur + faits marquants.
   // Le serveur ne dit pas qui a tué qui : on le déduit de la hausse des éliminations (⚡) d'un état à l'autre.
   function jVals(m) { const v = {}; m.players.forEach(p => { if (p.playing) v[p.seat] = p.alive ? (p.bombs | 0) + (p.power | 0) : 0; }); return v; }
@@ -391,8 +411,8 @@ export default (function () {
     if (m.gw && m.gw !== GW) { GW = m.gw; GH = m.gh || m.gw; ARENA = GW * CELL; clearFx(); }   // grille redimensionnée (nb de participants)
     if (m.grid === undefined && snap) m.grid = snap.grid;   // delta réseau : grille absente = inchangée
     snap = m; teamMode = m.mode && m.mode !== 'ffa';
-    const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
-    if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
+    gsNow = m.gs; EF.suivre(m.gs); applyPlaying(m.gs);   // plein écran jusqu'à « Accueil » : à 'over' la page garde la mise en page de partie
+    if (matchBtn) matchBtn.maj(m.match, m.gs);
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
     if (m.round !== prevRound) { prevRound = m.round; buf = []; clearFx(); RL.clear(); pendingEnd = null; graceUntil = 0; }   // nouvelle manche : plus de rejeu, plus de carte de fin en attente
@@ -413,6 +433,10 @@ export default (function () {
     if (!mute) (m.fx || []).forEach(playFx);
     if (prevGs !== 'over' && m.gs === 'over' && !rp) endFanfare(m);   // avec rejeu : fanfare + confettis différés à la fin du rejeu
     if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte musical 3·2·1
+    if (m.gs === 'countdown' && m.round !== bmRound) {   // balle de match : annoncée UNE fois par manche, au décompte (annonce plein écran courte + bandeau avec le nom)
+      bmRound = m.round; const bb = balleDeMatch(m.match, nomEquipe);
+      if (bb) { callouts.push('BALLE DE MATCH !', '#ffd24a', now); msgGlobal('🏆', bb, { color: '#ffd24a' }); }
+    }
     if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); goAt = now; }
     lastCount = m.count;
     if (m.sd && !prevSd) { music.sting('alert'); msgGlobal('🧱', 'Mort subite : des blocs tombent', { bad: true }); }   // riser + annonce : mort subite
@@ -423,9 +447,10 @@ export default (function () {
       music.setIntensity(inten); }
     refreshHUD();
     if (m.gs === 'over') { if (!endShown) { endShown = true; if (rp) pendingEnd = m; else showEndscreen(m); } }   // rejeu : carte DOM de fin différée jusqu'à sa fin
-    else { endShown = false; pendingEnd = null; endEl.classList.add('hidden'); podOn = false; applyEndLayout(); }
+    else { endShown = false; pendingEnd = null; efH = null; endEl.classList.add('hidden'); podOn = false; applyEndLayout(); }
+    if (m.gs === 'over' && efH) { const lb = finLib(m); if (lb !== efLib) { efLib = lb; efH.libelle(lb); } }   // la cible du match change à l'écran de fin : libellé à jour
     const idle = m.gs === 'lobby' || m.gs === 'over';
-    startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1); startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
+    startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1); startBtn.textContent = m.gs === 'over' ? '↻ ' + (m.match ? finLib(m) : 'Rejouer') : '▶ Démarrer';
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused'); pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
     const total = m.connected + (m.botCount || 0);
@@ -1338,8 +1363,13 @@ export default (function () {
     drawBomber(e.seat, x, y + 8 * k, { an: POD_AN, scale: k, shadow: false, alpha: c.globalAlpha, crown: rank === 1 && !(snap && snap.winner < 0) }, podNow);
   }
   let podNow = 0;
+  // Match gagné : le podium classe le MATCH (équipes par manches gagnées, ex æquo à la même place), pas la dernière manche.
+  function podMatch(es) {
+    es.forEach(e => { const g = {}; let r = 1; es.forEach(o => { if ((o.score | 0) > (e.score | 0) && !g[o.team]) { g[o.team] = 1; r++; } }); e.place = r; });
+    es.sort((a, b) => a.place - b.place || a.seat - b.seat);
+  }
   function drawPodiumBand(now, sc) {
-    if (podKey !== snap) { podKey = snap; podEntries = podiumEntries(snap.players, colSeat); }
+    if (podKey !== snap) { podKey = snap; podEntries = podiumEntries(snap.players, colSeat); if (snap.match && snap.match.f) podMatch(podEntries); }
     if (!podEntries.length) return;
     const bandU = ARENA * bandFrac(), nul = snap.winner < 0;
     ctx.setTransform(sc, 0, 0, sc, 0, 0);
@@ -1349,7 +1379,7 @@ export default (function () {
     drawPodium(ctx, { x: ARENA * 0.03, y: ARENA * 0.012, w: ARENA * 0.94, h: bandU - ARENA * 0.03 }, now, {
       entries: podEntries, A, W: ARENA, t0: overT0, nul,
       theme: { step: '#7a4526', edge: '#f0c979', text: K.cream, glow: K.lemon },   // marches de chocolat, arête de biscuit, lueur citron
-      drawPiece: podPiece,
+      drawPiece: podPiece, title: snap.match && snap.match.f ? 'VICTOIRE DU MATCH' : undefined,
     });
   }
   function draw() {
@@ -1408,7 +1438,7 @@ export default (function () {
     if (snap && snap.gs === 'play') drawGoBurst(now);
     dangerSm += (dangerK - dangerSm) * Math.min(1, dtMs / 90); dangerK = 0;
     if (dangerSm > 0.02 && !inReplay) { ctx.save(); ctx.setTransform(sc, 0, 0, sc, 0, 0); drawDanger(ctx, ARENA, ARENA, A.reduceFx ? Math.min(0.6, dangerSm) : Math.min(1, dangerSm * (A.contrast ? 1.3 : 1)), A.reduceFx ? 0 : now); ctx.restore(); }   // je suis dans la portée d'une bombe qui saute dans < 1 s (reduceFx : vignette fixe, sans pulsation)
-    if (snap && !inReplay && (snap.gs === 'play' || snap.gs === 'over')) callouts.draw(ctx, ARENA, ARENA, now, A);   // « DOUBLÉ ! » / « TRIPLÉ ! » / « CARNAGE ! »
+    if (snap && !inReplay && (snap.gs === 'play' || snap.gs === 'over' || snap.gs === 'countdown')) callouts.draw(ctx, ARENA, ARENA, now, A);   // « DOUBLÉ ! » / « TRIPLÉ ! » / « CARNAGE ! »
     if (snap && snap.gs === 'countdown') drawCountdown(now);
     if (snap && snap.gs === 'paused') drawPause(now);
     if (snap && snap.gs === 'lobby') { overlay(0.62); drawLobby(now); }
@@ -1452,13 +1482,18 @@ export default (function () {
     const wrap = cv.parentElement;   // conteneur .canvas-wrap : accueille les bandeaux bonus/malus
     initGameMsg(wrap && wrap.classList.contains('canvas-wrap') ? wrap : null);
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
+    matchChip = document.createElement('div'); matchChip._t = '';   // chip « 🏆 Premier à 3 · manche 2 » : masquée hors match
+    matchChip.style.cssText = 'display:none;grid-column:1 / -1;justify-self:center;padding:4px 14px;border-radius:999px;border:1px solid #ffd24a;color:#ffd24a;font-weight:800;font-size:13px;background:rgba(0,0,0,.35);-webkit-user-select:none;user-select:none';
+    bmRound = -1; efH = null; gsNow = 'lobby';
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; el._pn = el.querySelector('.pn'); el._lv = el.querySelector('.lv'); el._pnH = el._lvH = el._col = null; hud.appendChild(el); return el; });
+    hud.appendChild(matchChip);
     startBtn = $('bmStart'); pauseBtn = $('bmPause'); modeBtn = $('bmMode'); genBtn = $('bmGen'); ffBtn = $('bmFf'); revBtn = $('bmRevenge'); botsBtn = $('bmBots'); pauseFloat = $('bmPauseFloat'); lbBtn = $('bmLbBtn'); lbPanel = $('bmLbPanel'); lbBody = $('bmLbBody');
     startBtn.onclick = () => { unlockAudio(); if (!swallow()) send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' }); pauseFloat.onclick = () => send({ t: 'pause' }); modeBtn.onclick = () => send({ t: 'mode' }); genBtn.onclick = () => send({ t: 'gen' }); ffBtn.onclick = () => send({ t: 'ff' });
     if (revBtn) revBtn.onclick = () => send({ t: 'revenge' });
     if (botsBtn) botsBtn.onclick = () => send({ t: 'bots' });
     diffBtn = $('bmDiff'); if (diffBtn) diffBtn.onclick = () => send({ t: 'botdiff' });
+    { const bar = root.querySelector('.bar'); matchBtn = bar ? boutonMatch(bar, send) : null; }   // bouton « 🏆 Manche simple / Premier à N » (GM, lobby / fin seulement)
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('bmHelp'), helpPanel = $('bmHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
     if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && snap.gs !== 'play' && snap.gs !== 'paused' && !swallow()) send({ t: 'start' }); });
@@ -1477,6 +1512,7 @@ export default (function () {
   function onA11y() { applyColors(); }
   function teardown() {
     destroyed = true; music.stop(); music.dispose(); cancelAnimationFrame(rafId);
+    EF.suivre('lobby'); inGamePrev = false; document.body.classList.remove('playing'); document.body.classList.remove('fin');   // la fin en plein écran ne déborde pas sur le jeu suivant
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
     let held = false; for (const k in input) if (input[k]) { input[k] = false; held = true; }
     if (held) { try { pushInput(); } catch (e) {} }   // touches tenues relâchées côté serveur aussi (un « tout relâché » est inoffensif si le hub a déjà changé de jeu)

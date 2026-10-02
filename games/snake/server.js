@@ -9,6 +9,7 @@ function setGrid(n) {
 }
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
+import { creerMatch } from '../match.js';
 
 const GID = 'snake';
 const MAX_SEATS = 10;
@@ -95,11 +96,16 @@ export function createSnake(room) {
   function makePlayers() {
     return Array.from({ length: MAX_SEATS }, (_, seat) => ({
       seat, member: null, mid: null, name: '', team: 0, alive: false, playing: false, bot: false,
-      dir: DIRS.right, pendingDir: null, nextDir: null, cells: [], grow: 0, score: 0, ghostUntil: 0,
+      dir: DIRS.right, pendingDir: null, nextDir: null, cells: [], grow: 0, score: 0, wins: 0, ghostUntil: 0,
       kills: 0, place: 0, elimTick: -1,
     }));
   }
+  // Match en N manches (games/match.js) : ici `p.score` = pommes de la manche (remis à 0 à chaque départ), pas des manches gagnées → compteur
+  // distinct `p.wins`, présenté au module par des vues (même forme que les joueurs : score/playing/team) qui lisent et écrivent `wins`.
+  const match = creerMatch();
+  const mp = () => players.map(p => ({ get score() { return p.wins; }, set score(v) { p.wins = v; }, get playing() { return p.playing; }, get team() { return p.team; } }));
   function fullReset() {
+    match.reinit();
     players = makePlayers(); food = []; rocks = new Set();
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = [];
     mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; variant = 0; rush = false; botCount = 0; botDiff = 1; seatByMid = {};
@@ -177,6 +183,7 @@ export function createSnake(room) {
     for (const p of players) { if (bots <= 0) break; if (!p.member) { p.bot = true; parts.push(p); bots--; } } // complète avec des bots
     parts.forEach((p, i) => { if (p.bot) p.name = '🤖 Bot ' + (i + 1); });
     if (parts.length < 1) return;
+    match.debutManche(mp());                           // match gagné (ou cible changée) : manches gagnées remises à 0 avant cette manche
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
@@ -202,6 +209,7 @@ export function createSnake(room) {
       if (forced != null) winner = forced;
       else { const s = aliveTeams(); winner = s.size === 1 ? [...s][0] : -1; }
     }
+    if (winner >= 0) { players.forEach(p => { if (p.playing && p.team === winner) p.wins++; }); match.apresManche(mp(), winner); }   // manche gagnée (jamais sur une nulle)
     classerManche(players, winner, opts);              // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
     recordRound();
   }
@@ -304,13 +312,13 @@ export function createSnake(room) {
   function snapshot() {
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, variant, rush, rushTarget: RUSH_TARGET, gw: GW, gh: GH, rocks: [...rocks],
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, variant, rush, match: match.cible > 1 ? match.etat(mp()) : null, rushTarget: RUSH_TARGET, gw: GW, gh: GH, rocks: [...rocks],
       food: food.map(f => ({ x: f.x, y: f.y, t: f.t || 'apple' })),
-      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, solo: nParts < 2 } : null,
+      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, solo: nParts < 2, match: match.gagne } : null,
       players: players.map(p => ({
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot,
         head: p.cells.length ? { x: head(p).x, y: head(p).y } : { x: 0, y: 0 },
-        path: corners(p.cells), len: p.cells.length, score: p.score, ghost: p.ghostUntil > tick,
+        path: corners(p.cells), len: p.cells.length, score: p.score, wins: p.wins, ghost: p.ghostUntil > tick,
         kills: p.kills, place: p.place, elimTick: p.elimTick,
       })),
     };
@@ -321,7 +329,7 @@ export function createSnake(room) {
   // fin, victoire, points de match), sinon l'arrivant apparaissait vainqueur d'une manche qu'il n'a pas jouée.
   function repriseSiegeBot(p) {
     p.playing = false; p.alive = false; p.place = 0; p.kills = 0;
-    if ('score' in p) p.score = 0; if ('matchKills' in p) p.matchKills = 0;
+    if ('score' in p) p.score = 0; if ('wins' in p) p.wins = 0; if ('matchKills' in p) p.matchKills = 0;
   }
   function onJoin(member) {
     const cur = seatOf(member); if (cur >= 0) return { role: 'player', seat: cur, hello: { t: 'welcome', seat: cur } }; // déjà assis (reconnexion within grace)
@@ -369,6 +377,7 @@ export function createSnake(room) {
     else if (m.t === 'rush') { if (editable()) rush = !rush; }
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
     else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
+    else if (m.t === 'match') { if (editable()) match.changer(mp()); }   // cycle manche simple → premier à 2 / 3 / 5 (GM_ONLY dans hub.js)
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

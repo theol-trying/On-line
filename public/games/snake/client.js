@@ -16,7 +16,9 @@ import { creerJournal, blocFin } from '../../finpartie.js';
 import { createStreaks, createCallouts, streakText, createHitStop, drawFlash, drawDanger, drawSeatChip, readable, hudK } from '../../exploits.js';   // aides visuelles partagées (séries, arrêt sur image, vignette, pastilles, lisibilité)
 import { createRalenti } from '../../ralenti.js';                    // ralenti du moment décisif : derniers instantanés rejoués au ralenti à la fin de manche
 import { drawPodium, podiumEntries } from '../../podium.js';       // podium de fin dessiné au canvas (têtes de serpent)
-import { creerEcho } from '../../echo-virage.js';                   // chevron immédiat du virage enregistré (file de 2 virages côté serveur)       // écran de fin : longueur au fil de la manche + meilleure action
+import { createEcranFin } from '../../ecran-fin.js';               // fin de manche en plein écran + boutons « Relancer » / « Accueil »
+import { boutonMatch, texteMatch, balleDeMatch, titreFin, pastillesTexte } from '../../match.js';   // match en N manches (bouton GM, chip, balle de match, titre, pastilles)
+import { creerEcho } from '../../echo-virage.js';                 // chevron immédiat du virage enregistré (file de 2 virages côté serveur)       // écran de fin : longueur au fil de la manche + meilleure action
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel();   // Snake annonce déjà son duel final (music.sting + message) : pas de second bandeau
@@ -160,7 +162,11 @@ export default (function () {
   let A, send, root, cv, ctx, togglePanel = () => {}, closePanels = () => {};
   let CC = PAL.normal, TEAMCC = TEAMPAL.normal;
   let mySeat = -1, snap = null, prevGs = 'lobby', teamMode = false, endShown = false, inGamePrev = false, prevRound = -1, lastCount = -1, playSince = 0;
-  let rushAlerted = false, duelAlerted = false;   // messages globaux « une seule fois par manche »
+  let rushAlerted = false, duelAlerted = false, bmRound = -1;   // messages globaux « une seule fois par manche » (bmRound = manche dont la balle de match est annoncée)
+  let matchBtn = null, matchChip = null;            // match en N manches : bouton du game master (barre) et chip du HUD
+  // fin de manche en plein écran (ecran-fin.js) : la page reste en mise en page de partie jusqu'à « ⌂ Accueil »
+  const EF = createEcranFin({ aChange: () => { if (!destroyed && snap) applyPlaying(snap.gs); } });
+  function applyPlaying(gs) { const inGame = EF.enJeu(gs); if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); } }
   let board = [], buf = [];
   const parts = [], waves = [], floats = [];
   const bulges = {};                                // siège → instants des repas : le renflement descend le long du corps
@@ -205,6 +211,9 @@ export default (function () {
   const $ = id => root.querySelector('#' + id);
   const colSeat = s => { if (s < 0 || !snap) return '#fff'; const p = snap.players[s]; return teamMode && p ? TEAMCC[p.team % TEAMCC.length] : CC[s % CC.length]; };   // modulo : jamais de couleur indéfinie si un siège dépasse la palette
   const nameOf = s => { const p = snap && snap.players[s]; return p ? (p.name || ('P' + (s + 1))) : '?'; };
+  const teamSeat = t => { const l = snap && snap.players || []; for (let i = 0; i < l.length; i++) if (l[i] && l[i].playing && l[i].team === t) return i; return -1; };   // un siège de l'équipe (ffa : l'équipe EST le joueur)
+  const teamName = t => teamMode ? 'Équipe ' + (TEAM_LETTER[t] || '?') : (teamSeat(t) >= 0 ? nameOf(teamSeat(t)) : '');
+  const colorOfTeam = t => teamMode ? TEAMCC[t % TEAMCC.length] : colSeat(teamSeat(t));
   const px = c => c * CELL + CELL / 2;
   let tints = {};
   function tint(col) {                              // teintes dérivées d'une couleur de siège (contour, reflet), en cache
@@ -244,7 +253,7 @@ export default (function () {
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const gly = `<span class="sc" title="motif du siège">${SEAT_GLYPH[i % SEAT_GLYPH.length] || ''}</span>`;   // constante : jamais de texte réseau ici
-      const pnHtml = `${(window.__AV && window.__AV(p.name)) || ''}${gly}${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.kills | 0} ⚡</span> ${tags.join('')}`;
+      const pnHtml = `${(window.__AV && window.__AV(p.name)) || ''}${gly}${esc(p.name || ('P' + (i + 1)))} <span class="sc">${p.kills | 0} ⚡</span> ${tags.join('')}${snap.match && p.playing ? ` <span class="sc" title="manches gagnées (premier à ${snap.match.n | 0})">${pastillesTexte(p.wins | 0, snap.match.n)}</span>` : ''}`;   // pastilles de manches gagnées (match) : texte de la couleur de la carte
       if (pnHtml !== cardSig[i]) { cardSig[i] = pnHtml; cardPn[i].innerHTML = pnHtml; }   // innerHTML seulement si la chaîne change (sinon avatars/tooltips recréés à chaque instantané)
       cardLv[i].style.color = col;
       const lvTxt = p.playing ? (p.alive ? `● L${p.len} · 🍎${p.score}${p.ghost ? ' · 👻' : ''}` : '✖ ' + causeTxt(i, false)) : 'prêt';
@@ -266,7 +275,10 @@ export default (function () {
     const parts_ = m.players.filter(p => p.playing && p.place > 0).slice().sort((a, b) => a.place - b.place);
     const champ = m.winner >= 0 ? parts_.find(p => p.team === m.winner) : null;
     const who = champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[m.winner] : esc(champ.name || ('P' + (champ.seat + 1)))) : null;
-    const title = solo ? 'Fin de la balade' : (champ ? who + ' règne sur le jardin !' : 'Égalité — le jardin reste sans roi');
+    const teamWins = l => { const seen = {}, o = []; l.forEach(p => { if (!seen[p.team]) { seen[p.team] = 1; o.push(p.wins | 0); } }); return o; };   // manches gagnées par ÉQUIPE (les coéquipiers ont le même compte)
+    const T = solo ? { titre: '', sous: '' } : titreFin(m.match, champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[m.winner] : (champ.name || ('P' + (champ.seat + 1)))) : '', teamWins(parts_));   // match : « VICTOIRE DU MATCH » / « Manche gagnée » + score en manches
+    const title = solo ? 'Fin de la balade' : (T.titre ? T.titre + (champ ? ' — ' + who : '') : (champ ? who + ' règne sur le jardin !' : 'Égalité — le jardin reste sans roi'));
+    const wonMatch = !!(m.match && m.match.f);
     const medals = ['🥇', '🥈', '🥉'];
     // MVP : le plus de serpents qui se sont cognés contre toi (≥ 1), départage au classement
     let mvp = null; parts_.forEach(p => { if ((p.kills | 0) > 0 && (!mvp || p.kills > mvp.kills || (p.kills === mvp.kills && p.place < mvp.place))) mvp = p; });
@@ -274,13 +286,16 @@ export default (function () {
       const col = colSeat(p.seat), medal = medals[p.place - 1] || ('#' + p.place), sec = Math.round((p.elimTick || 0) / TICK_HZ);
       const res = champ && p.team === champ.team && !solo ? 'vainqueur' : p.alive ? 'survivant·e' : `${causeTxt(p.seat, true)} à ${sec}s`;
       return `<div class="erow ${p.alive ? 'win' : ''}"><span class="eplace">${medal}</span>
-        <span class="ename" style="color:${col}">${esc(p.name || ('P' + (p.seat + 1)))}${teamMode ? ` <small>Éq.${TEAM_LETTER[p.team]}</small>` : ''}${mvp && mvp.seat === p.seat ? ' <small>⭐ MVP</small>' : ''}</span>
+        <span class="ename" style="color:${col}">${esc(p.name || ('P' + (p.seat + 1)))}${teamMode ? ` <small>Éq.${TEAM_LETTER[p.team]}</small>` : ''}${mvp && mvp.seat === p.seat ? ' <small>⭐ MVP</small>' : ''}${m.match ? ' <small title="manches gagnées">' + pastillesTexte(p.wins | 0, m.match.n) + '</small>' : ''}</span>
         <span class="estat" title="longueur">📏 ${p.len | 0}</span><span class="estat" title="pommes">🍎 ${p.score | 0}</span><span class="estat" title="serpents arrêtés">⚡ ${p.kills | 0}</span><span class="eres">${res}</span></div>`;
     }).join('');
     const mvpLine = mvp && !solo ? `<div class="emeta">⭐ MVP : <b style="color:${colSeat(mvp.seat)}">${esc(mvp.name || ('P' + (mvp.seat + 1)))}</b> — ${mvp.kills} serpent${mvp.kills > 1 ? 's' : ''} arrêté${mvp.kills > 1 ? 's' : ''}</div>` : '';
     const fin = blocFin(J, { titre: m.rush ? 'Pommes au fil de la manche' : 'Longueur des serpents', couleur: colSeat, nom: nameOf });   // noms échappés, couleurs filtrées par finpartie.js
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : '#f3ecd2'}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} joueur${m.stats.nParts > 1 ? 's' : ''}</div>${mvpLine}<div class="elist">${rows}</div>${fin}<div class="ehint">${TOUCH ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} joueur${m.stats.nParts > 1 ? 's' : ''}${T.sous ? ' · ' + esc(T.sous) : ''}</div>${mvpLine}<div class="elist">${rows}</div>${fin}<div class="ehint">${TOUCH ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
+    EF.boutons(endEl, { relancer: () => { unlockAudio(); if (replayGuard()) return; send({ t: 'start' }); },      // = l'action Rejouer ; le premier appui du rejeu ne fait que le passer
+      libelle: wonMatch ? 'Nouveau match' : (m.match ? 'Manche suivante' : 'Relancer'),
+      accueil: () => { endEl.classList.add('hidden'); endBox(false); } });                                          // « ⌂ Accueil » : EF.accueil() déjà fait → mise en page d'accueil
   }
 
   // ───────────────────────── état réseau ─────────────────────────
@@ -291,7 +306,7 @@ export default (function () {
     STK.reset(); hsAt = 0; dangerT = dangerK = 0;
     pendingEnd = null; RL.skip();                   // nouvelle manche : plus de rejeu ni de carte de fin en attente (le tampon se vide seul au changement de `round`)
     for (const k in bulges) delete bulges[k];
-    deathCause = {}; foodBorn.clear(); angSet.fill(0);
+    bmRound = -1; deathCause = {}; foodBorn.clear(); angSet.fill(0);
     LUM.vider(); lumPend.length = 0; playMs = 0; corpse.clear();
     eatLast.fill(0); eatRun.fill(0); eatBest.fill(0); feast.fill(0); killsBy.fill(0); lenMax.fill(0);
   }
@@ -328,8 +343,7 @@ export default (function () {
     RL.push(m, performance.now());                   // tampon du ralenti : chaque instantané, avant toute autre chose
     snap = m; teamMode = !!(m.mode && m.mode !== 'ffa');
     if (m.rocks !== rocksRef) { rocksRef = m.rocks; rocksKey = (m.rocks && m.rocks.length) ? m.rocks.join(',') : ''; }   // rochers : figés pendant une manche → cuits dans le décor
-    const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
-    if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
+    EF.suivre(m.gs); applyPlaying(m.gs);               // la fin de manche reste en plein écran (body.playing + body.fin) jusqu'à « ⌂ Accueil »
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
     if (m.round !== prevRound) { prevRound = m.round; resetRound(); }
@@ -344,7 +358,12 @@ export default (function () {
     dangerT = dangerAhead(m);                        // vignette : recalculée à chaque instantané (12 Hz), lissée à l'affichage
     if (m.gs === 'play') jSample(m, performance.now(), crashed);     // une mort : point forcé, la chute tombe au bon instant
     if (overNow) { jRoundEnd(m, performance.now()); if (!pendingEnd) { sound('win'); music.sting('win'); podT0 = performance.now(); } }
-    if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }   // décompte 3·2·1
+    if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }
+    if (m.gs === 'countdown' && bmRound !== m.round) {   // balle de match : annoncée UNE fois par manche, au décompte
+      bmRound = m.round;
+      const bm = balleDeMatch(m.match, teamName);
+      if (bm) { msgGlobal('🏆', bm, { color: '#ffd24a' }); CALL.push('BALLE DE MATCH !', m.match.bm.length === 1 ? colorOfTeam(m.match.bm[0]) : '#ffd24a', performance.now()); }
+    }   // décompte 3·2·1
     if (prevGs === 'countdown' && m.gs === 'play') { music.sting('go'); sound('go'); playSince = performance.now(); }
     lastCount = m.count;
     prevGs = m.gs;
@@ -362,7 +381,9 @@ export default (function () {
     else { endShown = false; pendingEnd = null; RL.skip(); endEl.classList.add('hidden'); endBox(false); }
     const idle = m.gs === 'lobby' || m.gs === 'over';
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1);
-    startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
+    startBtn.textContent = m.gs === 'over' ? (m.match && m.match.f ? '↻ Nouveau match' : (m.match ? '↻ Manche suivante' : '↻ Rejouer')) : '▶ Démarrer';
+    if (matchBtn) matchBtn.maj(m.match, m.gs);       // bouton du game master : grisé hors lobby / fin de manche
+    if (matchChip) { const tx = m.gs === 'lobby' ? '' : texteMatch(m.match); if (matchChip.textContent !== tx) matchChip.textContent = tx; matchChip.style.display = tx ? 'block' : 'none'; }
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused');
     pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
@@ -1309,7 +1330,7 @@ export default (function () {
     ctx.save(); ctx.fillStyle = 'rgba(5,6,14,.86)'; ctx.fillRect(0, 0, ARENA, H + 14); ctx.restore();   // même voile sombre que la carte DOM, qui commence juste dessous
     drawPodium(ctx, { x: ARENA * 0.03, y: ARENA * 0.012, w: ARENA * 0.94, h: H - ARENA * 0.024 }, now, {
       entries: ent, A: A, W: ARENA, nul: m.winner < 0, t0: A.reduceFx ? null : podT0,
-      title: teamMode && m.winner >= 0 ? 'Équipe ' + (TEAM_LETTER[m.winner] || '?') : '',
+      title: m.match && m.match.f ? 'VICTOIRE DU MATCH' + (teamMode && m.winner >= 0 ? ' · Équipe ' + (TEAM_LETTER[m.winner] || '?') : '') : (teamMode && m.winner >= 0 ? 'Équipe ' + (TEAM_LETTER[m.winner] || '?') : ''),
       theme: { step: '#7b5431', edge: '#d8cfb6', text: '#fff4cf', glow: '#ffd24a' },   // planches de bois du jardin, clous clairs
       drawPiece: podPiece });
   }
@@ -1346,11 +1367,15 @@ export default (function () {
     { const wrap = cv.parentElement;                 // bandeaux de message posés sur le cadre du canvas (.canvas-wrap)
       if (wrap && wrap.classList && wrap.classList.contains('canvas-wrap')) initGameMsg(wrap); }
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)
+    matchChip = document.createElement('div');      // chip « Premier à 3 · manche 2 » : pleine largeur de la grille du HUD, masquée hors match
+    matchChip.style.cssText = 'display:none;grid-column:1/-1;-webkit-flex:0 0 auto;flex:0 0 auto;text-align:center;font-size:12px;font-weight:800;padding:5px 8px;border-radius:999px;color:#ffd24a;background:rgba(255,210,74,.12);border:1px solid rgba(255,210,74,.4);';
+    hud.appendChild(matchChip);
     cards = Array.from({ length: MAX_SEATS }, (_, i) => i).map(i => { const el = document.createElement('div'); el.className = 'pc hidden'; el.innerHTML = `<div class="dot"></div><div class="inf"><div class="pn">P${i + 1}</div><div class="lv"></div></div>`; hud.appendChild(el); return el; });
     cardPn = cards.map(el => el.querySelector('.pn')); cardLv = cards.map(el => el.querySelector('.lv'));   // cartes recréées : références et signatures repartent de zéro
     cardSig = new Array(MAX_SEATS).fill(''); cardLvSig = new Array(MAX_SEATS).fill(null);
     startBtn = $('snStart'); pauseBtn = $('snPause'); modeBtn = $('snMode'); variantBtn = $('snVariant'); rushBtn = $('snRush'); botsBtn = $('snBots'); pauseFloat = $('snPauseFloat');
     lbBtn = $('snLbBtn'); lbPanel = $('snLbPanel'); lbBody = $('snLbBody');
+    { const bar = root.querySelector('.bar'); matchBtn = bar ? boutonMatch(bar, send) : null; }   // bouton du game master « 🏆 Premier à N » (clic : t:'match')
     startBtn.onclick = () => { unlockAudio(); if (replayGuard()) return; send({ t: 'start' }); };
     pauseBtn.onclick = () => send({ t: 'pause' });
     pauseFloat.onclick = () => send({ t: 'pause' });
@@ -1373,7 +1398,8 @@ export default (function () {
     rafId = requestAnimationFrame(drawLoop);
   }
   function onA11y() { applyColors(); }
-  function teardown() { destroyed = true; music.stop(); music.dispose(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); parts.length = 0; waves.length = 0; floats.length = 0; flashes.length = 0; LUM.vider(); lumPend.length = 0;
+  function teardown() { destroyed = true; EF.suivre('lobby'); matchBtn = null; matchChip = null;   // le choix « Accueil » et body.fin repartent à zéro (aChange est muet : destroyed)
+     music.stop(); music.dispose(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); parts.length = 0; waves.length = 0; floats.length = 0; flashes.length = 0; LUM.vider(); lumPend.length = 0;
     // Aucune touche « tenue » à relâcher (les virages sont des appuis ponctuels) ; en revanche l'AudioContext doit être libéré : un par visite
     // s'accumulait, et le navigateur en plafonne le nombre. Il est recréé au prochain geste (unlockAudio).
     if (actx) { const c = actx; actx = null; noiseBuf = null; try { const pr = c.close(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }

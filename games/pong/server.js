@@ -3,6 +3,7 @@
 import { W as W0, H as H0, BALL_R, PAD_W, PAD_OFF, PU_R } from '../../public/games/pong/shared.js';
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
+import { creerMatch } from '../match.js';
 
 const GID = 'pong';
 const r1 = x => Math.round(x * 10) / 10;
@@ -107,7 +108,12 @@ export function createPong(room) {
   /* ---- état de la partie (par instance) ---- */
   let players, balls, powerups, bumpers, gameState, winner, fx, tick, nextPuTick, geo, botCount, mode, nteams;
   let preset, cfg, roundBounces, nParts, deaths, endTick, countdownUntil;
-  let rules, sdActive, sdScale, lastConceder, matchWonPending, matchWinner, slowUntil;
+  let rules, sdActive, sdScale, lastConceder, matchWonPending, matchWinner, slowUntil;   // matchWonPending/matchWinner : seulement le mode « premier à K éliminations » (kills)
+  // Match en N manches (games/match.js) DÉRIVÉ des règles : winMode 'rounds' → cible = roundsTarget ; survivor / kills → cible 1 (match = null).
+  // Le message `match` pilote ces règles (cycle 1 → 2 → 3 → 5) : le bouton Match et le menu Options restent synchrones.
+  const match = creerMatch();
+  const MP = { participant: p => p.edge >= 0 };                                   // même critère que le `p.score++` de Pong (sièges avec un bord)
+  const syncMatch = () => match.regler(rules.winMode === 'rounds' ? rules.roundsTarget : 1, players);
   let lastVoteTick = -999;
   let geoVer = 0, geoSent = -1;  // version de la géométrie (delta : émise seulement quand elle change + refresh périodique)
   let seatByMid = {};            // memberId -> dernier siège (reprise après coupure)
@@ -164,7 +170,7 @@ export function createPong(room) {
   }
   function fullReset() {
     preset = 'rapide'; cfg = PRESETS[preset]();
-    rules = defaultRules();
+    rules = defaultRules(); match.reinit();
     sdActive = false; sdScale = 1; lastConceder = -1; matchWonPending = false; matchWinner = null; slowUntil = 0;
     players = makePlayers();
     balls = [makeBall()]; powerups = []; bumpers = [];
@@ -233,7 +239,7 @@ export function createPong(room) {
     if (!editable() || !canStart()) return;
     configure();
     if (!geo) return;
-    if (matchWonPending) { for (const p of players) { p.score = 0; p.matchKills = 0; } matchWonPending = false; matchWinner = null; }
+    if (match.debutManche(players) || matchWonPending) { for (const p of players) { if (matchWonPending) p.score = 0; p.matchKills = 0; } matchWonPending = false; matchWinner = null; }   // nouveau match (gagné / cible changée / mode kills gagné) : scores et éliminations remis à 0
     resetRoundStats();
     sdActive = false; sdScale = 1; lastConceder = -1; slowUntil = 0;
     for (const p of players) {
@@ -478,12 +484,8 @@ export function createPong(room) {
     if (s.size > 1) return false;
     gameState = 'over'; endTick = tick;
     winner = s.size === 1 ? [...s][0] : -1;
-    if (winner >= 0) players.forEach(p => { if (p.edge >= 0 && p.team === winner) p.score++; });
+    if (winner >= 0) { players.forEach(p => { if (p.edge >= 0 && p.team === winner) p.score++; }); match.apresManche(players, winner, MP); }
     classerManche(players, winner);                    // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
-    if (winner >= 0 && rules.winMode === 'rounds') {
-      const champ = players.find(p => p.edge >= 0 && p.team === winner);
-      if (champ && champ.score >= rules.roundsTarget) { matchWonPending = true; matchWinner = winner; }
-    }
     recordRound();
     return true;
   }
@@ -498,7 +500,7 @@ export function createPong(room) {
       const maxLives = alive.length ? Math.max(...alive.map(p => p.lives)) : -1;
       const leadTeams = new Set(alive.filter(p => p.lives === maxLives).map(p => p.team));
       winner = leadTeams.size === 1 ? [...leadTeams][0] : -1;
-      if (winner >= 0) players.forEach(p => { if (p.edge >= 0 && p.team === winner) p.score++; });
+      if (winner >= 0) { players.forEach(p => { if (p.edge >= 0 && p.team === winner) p.score++; }); match.apresManche(players, winner, MP); }
     }
     classerManche(players, winner, { score: p => Math.max(0, p.lives) });   // vies restantes, puis ordre d'élimination
     fx.push({ type: 'timeup' });
@@ -714,7 +716,8 @@ export function createPong(room) {
         sudden: rules.sudden, serve: rules.serve, handicap: rules.handicap,
         negatives: rules.negatives, botDiff: rules.botDiff, botStyle: rules.botStyle, bumpers: rules.bumpers,
       },
-      stats: gameState === 'over' ? { durationSec: Math.round(endTick / 60), bounces: roundBounces, nParts, match: matchWonPending } : null,
+      match: match.etat(players, MP),                  // null hors winMode 'rounds' (survivor : manche simple ; kills : son propre objectif)
+      stats: gameState === 'over' ? { durationSec: Math.round(endTick / 60), bounces: roundBounces, nParts, match: match.gagne || matchWonPending } : null,
       geo: geoOut,
       balls: balls.map(b => {                        // gh / iv : présents seulement s'ils sont vrais (absent = faux, lu par vérité côté client)
         const o = { x: r1(b.x), y: r1(b.y), vx: r1(b.vx), vy: r1(b.vy), o: b.last >= 0 ? geo.edges[b.last].owner : -1 };
@@ -810,17 +813,19 @@ export function createPong(room) {
           else { const s = SPEED_ORDER[(SPEED_ORDER.indexOf(cfg.speedLevel) + 1) % SPEED_ORDER.length]; cfg.speedLevel = s; cfg.init = SPEED[s].init; cfg.max = SPEED[s].max; }
           preset = 'custom';
         }
-        else if (op === 'winmode') rules.winMode = WINMODE_ORDER[(WINMODE_ORDER.indexOf(rules.winMode) + 1) % WINMODE_ORDER.length];
+        else if (op === 'winmode') { rules.winMode = WINMODE_ORDER[(WINMODE_ORDER.indexOf(rules.winMode) + 1) % WINMODE_ORDER.length]; syncMatch(); }
         else if (op === 'sudden') rules.sudden = SUDDEN_ORDER[(SUDDEN_ORDER.indexOf(rules.sudden) + 1) % SUDDEN_ORDER.length];
         else if (op === 'serve') rules.serve = SERVE_ORDER[(SERVE_ORDER.indexOf(rules.serve) + 1) % SERVE_ORDER.length];
         else if (op === 'handicap') rules.handicap = !rules.handicap;
-        else if (op === 'rtar') rules.roundsTarget = Math.max(1, Math.min(9, rules.roundsTarget + (typeof m.d === 'number' && m.d > 0 ? 1 : -1)));
+        else if (op === 'rtar') { rules.roundsTarget = Math.max(1, Math.min(9, rules.roundsTarget + (typeof m.d === 'number' && m.d > 0 ? 1 : -1))); syncMatch(); }
         else if (op === 'ktar') rules.killsTarget = Math.max(3, Math.min(30, rules.killsTarget + (typeof m.d === 'number' && m.d > 0 ? 1 : -1)));
         else if (op === 'negatives') rules.negatives = !rules.negatives;
         else if (op === 'botdiff') rules.botDiff = BOTDIFF_ORDER[(BOTDIFF_ORDER.indexOf(rules.botDiff) + 1) % BOTDIFF_ORDER.length];
         else if (op === 'botstyle') rules.botStyle = BOTSTYLE_ORDER[(BOTSTYLE_ORDER.indexOf(rules.botStyle) + 1) % BOTSTYLE_ORDER.length];
         else if (op === 'bumpers') rules.bumpers = !rules.bumpers;
       }
+    } else if (m.t === 'match') {                      // cycle manche simple → premier à 2 / 3 / 5 (GM_ONLY dans hub.js) : pilote winMode + roundsTarget ; ignoré en mode « éliminations »
+      if (editable() && rules.winMode !== 'kills') { const n = match.changer(players); rules.winMode = n > 1 ? 'rounds' : 'survivor'; if (n > 1) rules.roundsTarget = n; }
     } else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() {

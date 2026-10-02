@@ -484,6 +484,9 @@ async function loadModule(id) {
   loadingId = id; setGameSkin(id);
   xfadeShow(GAME_TITLE[id] || '', false);          // fondu plein écran + balayage aux couleurs du nouveau jeu
   if (mod && mod.teardown) { try { mod.teardown(); } catch {} }
+  // la fin de manche reste en plein écran (ecran-fin.js) : un changement de jeu depuis l'écran de fin ne doit pas
+  // laisser le jeu suivant en mise en page « en jeu » (chaque client ne bascule body.playing que sur un CHANGEMENT d'état)
+  document.body.classList.remove('playing'); document.body.classList.remove('fin');
   mod = null; modId = null; modReady = false;
   document.querySelectorAll('.game-root').forEach(r => r.classList.add('hidden'));
   const rootEl = document.getElementById(id + '-root');

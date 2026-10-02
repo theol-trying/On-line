@@ -380,6 +380,118 @@ for (const id of IDS) {
   if (!bon) for (const k of cles) { const v = rap.problemes[k]; console.log('      [' + v.n + '×] ' + k); for (const ex of v.ex) console.log('           ' + String(ex).slice(0, 380)); }
 }
 
+/* =====================================================================================================
+   4b. Match en N manches branché dans les 8 jeux (games/match.js + message `match`)
+   Une salle (1 humain + bots) joue des manches jusqu'à ce qu'un match soit gagné et on vérifie, à chaque manche :
+   • le message `match` n'agit que dans le lobby / sur l'écran de fin (ignoré en pleine manche) ;
+   • le vainqueur d'une manche gagne exactement +1 (jamais compté deux fois) ; une manche nulle n'avance rien ;
+   • le match est gagné par la PREMIÈRE équipe à la cible, jamais sur une manche nulle ; stats.match le dit aussi ;
+   • la balle de match (bm) = les équipes à cible-1, annoncée dès le décompte de la manche qui suit ;
+   • au match suivant les scores repartent à 0 (manche 1) ; une cible 1 = champ `match` null (pas undefined).
+   ===================================================================================================== */
+async function jouerMatch(id, cible, opt) {
+  opt = opt || {};
+  const mod = await import(pathToFileURL(join(ROOT, 'games', id, 'server.js')).href);
+  const G = mod.default, hz = G.meta.tickHz, champ = id === 'snake' ? 'wins' : 'score';
+  const nTot = Math.min(G.meta.max, Math.max(G.meta.min, id === 'pong' || id === 'foot' ? 2 : 3));
+  const ctx = mkCtx(G), h = mkMember(); rejoindre(ctx, h);
+  const msg = m => ctx.g.onMessage(h, m), tk = () => ctx.g.tick();
+  const pb = [];
+  const echec = (e, st) => { if (pb.length < 4) pb.push(e + (st && st.players ? ' | ' + JSON.stringify(st.match) + ' scores=' + st.players.filter(p => p.playing).map(p => p.team + ':' + p[champ]).join(' ') : '')); };
+  let s = tk();
+  for (let k = 0; k < 25 && s.botCount !== nTot - 1; k++) { msg({ t: 'bots' }); s = tk(); }
+  if (id === 'snake') { msg({ t: 'rush' }); s = tk(); }
+  if (opt.mode) { msg({ t: 'mode' }); s = tk(); }
+  if (s.match !== null) echec('cible 1 : match devrait être null (pas undefined)', s);
+  for (let k = 0; k < 6 && !(s.match && s.match.n === cible); k++) { msg({ t: 'match' }); s = tk(); }
+  if (!s.match || s.match.n !== cible) { echec('le message match n\'a pas amené la cible ' + cible, s); return pb; }
+  if (id === 'pong' && !(s.opts.winMode === 'rounds' && s.opts.roundsTarget === cible)) echec('Pong : match et règles désynchronisés ' + JSON.stringify(s.opts), s);
+  if (id === 'tank' && s.winTarget !== cible) echec('Tanks : winTarget alias ≠ cible ' + s.winTarget, s);
+  let prec = null, matchsFinis = 0, nuls = 0, manches = 0, apresGagne = false;
+  const scores = st => st.players.filter(p => p.playing).map(p => [p.seat, p.team, p[champ] | 0]);
+  for (let r = 0; r < 40 && matchsFinis < (opt.matchs || 1); r++) {
+    const hum = ctx.members.find(m => m.role === 'player') || h;
+    ctx.g.onMessage(hum, { t: 'start' }); s = tk();
+    if (s.gs !== 'countdown') { echec('la manche ne démarre pas (gs=' + s.gs + ')', s); break; }
+    // au décompte : scores de départ, balle de match annoncée, nouveau match remis à 0
+    const base = new Map(scores(s).map(x => [x[0], x[2]]));
+    if (apresGagne) {
+      if ([...base.values()].some(v => v !== 0)) echec('match suivant : les scores ne repartent pas à 0', s);
+      if (!s.match || s.match.f !== 0 || s.match.r !== 1 || s.match.w !== -1) echec('match suivant : état non remis à zéro', s);
+      apresGagne = false;
+    } else if (prec) for (const x of prec) if (base.get(x[0]) !== x[2]) echec('score modifié entre deux manches (seat ' + x[0] + ')', s);
+    const att = new Set(scores(s).filter(x => x[2] === cible - 1).map(x => x[1]));
+    if (!s.match || s.match.bm.slice().sort().join() !== [...att].sort().join()) echec('balle de match au décompte : attendu ' + [...att].sort() + ', obtenu ' + (s.match && s.match.bm), s);
+    msg({ t: 'match' }); const s1 = tk();                                  // en pleine manche : ignoré
+    if (!s1.match || s1.match.n !== cible) echec('le message match a agi en pleine manche', s1);
+    let total = 0, fini = false;
+    while (total++ < hz * 400) {
+      if (chance(0.2)) for (const m of INPUT[id]()) ctx.g.onMessage(h, m);
+      s = tk();
+      if (s.gs === 'over') { fini = true; break; }
+    }
+    if (!fini) { echec('manche trop longue : abandon', s); msg({ t: 'abort' }); s = tk(); prec = null; continue; }
+    manches++;
+    const w = s.winner; if (w === -1) nuls++;
+    const fin = scores(s);
+    for (const x of fin) { const att2 = (base.get(x[0]) | 0) + (x[1] === w ? 1 : 0); if (x[2] !== att2) echec('score ' + x[2] + ' ≠ ' + att2 + ' attendu (seat ' + x[0] + ', équipe ' + x[1] + ', vainqueur ' + w + ') : manche comptée 0 ou 2 fois', s); }
+    const tops = new Map(); for (const x of fin) tops.set(x[1], Math.max(tops.get(x[1]) || 0, x[2]));
+    const atteint = [...tops].filter(x => x[1] >= cible).map(x => x[0]);
+    if (!s.match) { echec('match absent à la fin de manche', s); break; }
+    if (s.match.f === 1) {
+      matchsFinis++; apresGagne = true;
+      if (!(atteint.length === 1 && atteint[0] === w && s.match.w === w)) echec('match gagné par ' + s.match.w + ' ≠ premier à la cible (' + atteint + ', manche ' + w + ')', s);
+      if (!(s.stats && s.stats.match === true)) echec('stats.match absent à la fin du match', s);
+      if (s.match.bm.length) echec('balle de match restante après la victoire', s);
+    } else {
+      if (atteint.length) echec('une équipe a atteint la cible mais le match n\'est pas gagné', s);
+      if (s.stats && s.stats.match) echec('stats.match vrai alors que le match continue', s);
+      const bm = [...tops].filter(x => x[1] === cible - 1).map(x => x[0]).sort();
+      if (s.match.bm.slice().sort().join() !== bm.join() || s.match.w !== -1) echec('balle de match en fin de manche : attendu ' + bm + ', obtenu ' + s.match.bm, s);
+    }
+    if (w === -1 && s.match.f === 1) echec('une manche nulle a gagné le match', s);
+    prec = s.match.f === 1 ? null : fin;
+  }
+  if (matchsFinis < (opt.matchs || 1)) echec('aucun match terminé en 40 manches (' + manches + ' jouées, ' + nuls + ' nulles)', s);
+  if (process.env.FINS_TRACE) console.log('    match ' + id + ' à ' + cible + ' : ' + manches + ' manches (' + nuls + ' nulles), ' + matchsFinis + ' match(s) gagné(s)');
+  // retour à la manche simple : match null (jamais undefined)
+  for (let k = 0; k < 6 && s.match; k++) { msg({ t: 'match' }); s = tk(); }
+  if (s.match !== null) echec('retour à la manche simple : match devrait être null', s);
+  return pb;
+}
+console.log('\nMatch en N manches — branché dans les 8 jeux');
+for (const [id, cible, opt] of [['tron', 2, { matchs: 2 }], ['tron', 3, { mode: 1 }], ['sumo', 2], ['sumo', 3], ['patate', 2], ['pong', 2], ['pong', 3], ['bomb', 2], ['bomb', 3, { matchs: 4 }], ['foot', 2], ['foot', 3, { matchs: 3 }], ['tank', 2], ['snake', 2], ['snake', 3]]) {
+  R = mulberry32(SEED + 31 + IDS.indexOf(id) * 7919 + cible); Math.random = mulberry32(SEED ^ (IDS.indexOf(id) * 104729 + cible));
+  const t = Date.now(); let pb;
+  try { pb = await jouerMatch(id, cible, opt); } catch (e) { pb = ['EXCEPTION ' + String(e.stack).split('\n').slice(0, 3).join(' | ')]; }
+  ok(`match ${id} : premier à ${cible}${opt && opt.mode ? ' (équipes)' : ''} — gagnant, balle de match, remise à 0 (${((Date.now() - t) / 1000).toFixed(1)} s)`, pb.length === 0, pb.join(' || '));
+}
+{ // Pong : « premier à K éliminations » = son propre objectif → match null ; le message match est ignoré ; Options et match restent synchrones
+  const mod = await import(pathToFileURL(join(ROOT, 'games', 'pong', 'server.js')).href);
+  const ctx = mkCtx(mod.default), h = mkMember(); rejoindre(ctx, h);
+  const msg = m => ctx.g.onMessage(h, m);
+  let s = ctx.g.tick();
+  ok('pong : manche simple (survivor) → match null', s.opts.winMode === 'survivor' && s.match === null);
+  msg({ t: 'opt', op: 'winmode' }); s = ctx.g.tick();
+  ok('pong : Options → « manches » (rounds) donne match.n = roundsTarget', s.opts.winMode === 'rounds' && s.match && s.match.n === s.opts.roundsTarget, JSON.stringify(s.match));
+  msg({ t: 'opt', op: 'rtar', d: 1 }); s = ctx.g.tick();
+  ok('pong : Options roundsTarget +1 → match.n suit', s.match && s.match.n === s.opts.roundsTarget, JSON.stringify(s.match) + ' ' + s.opts.roundsTarget);
+  msg({ t: 'match' }); s = ctx.g.tick();
+  ok('pong : message match → roundsTarget et winMode pilotés (les deux interfaces synchrones)', s.opts.winMode === 'rounds' && s.match && s.match.n === s.opts.roundsTarget && s.opts.roundsTarget === 5, JSON.stringify(s.opts.roundsTarget));
+  msg({ t: 'match' }); s = ctx.g.tick();
+  ok('pong : cycle complet → retour à la manche simple (survivor, match null)', s.opts.winMode === 'survivor' && s.match === null, s.opts.winMode);
+  msg({ t: 'opt', op: 'winmode' }); msg({ t: 'opt', op: 'winmode' }); s = ctx.g.tick();
+  ok('pong : mode éliminations (kills) → match null', s.opts.winMode === 'kills' && s.match === null);
+  msg({ t: 'match' }); s = ctx.g.tick();
+  ok('pong : message match ignoré en mode éliminations', s.opts.winMode === 'kills' && s.match === null);
+}
+{ // Tanks : l'ancien message wintarget reste un alias (1 → 3 → 5 → 1) branché sur le même module
+  const mod = await import(pathToFileURL(join(ROOT, 'games', 'tank', 'server.js')).href);
+  const ctx = mkCtx(mod.default), h = mkMember(); rejoindre(ctx, h);
+  const cy = []; for (let i = 0; i < 4; i++) { ctx.g.onMessage(h, { t: 'wintarget' }); const s = ctx.g.tick(); cy.push(s.winTarget + '/' + (s.match ? s.match.n : 'null')); }
+  ok('tank : message wintarget = alias du match (1 → 3 → 5 → 1, winTarget = match.n)', cy.join(' ') === '3/3 5/5 1/null 3/3', cy.join(' '));
+}
+
 const dureeS = ((Date.now() - T0) / 1000).toFixed(1);
 console.log(`\n${tests - echecs}/${tests} vérifications réussies en ${dureeS} s`);
 if (echecs) { console.log(`✗ ${echecs} échec(s)`); process.exit(1); }
