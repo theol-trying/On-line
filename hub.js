@@ -90,7 +90,7 @@ function hostId() {
   return (p || plusAncien(members) || {}).id || null;
 }
 // Réglages de partie réservés au game master (messages routés vers les jeux via {t:'g',m}).
-const GM_ONLY = new Set(['mode', 'preset', 'opt', 'bots', 'botdiff', 'arena', 'wintarget', 'ff', 'gen', 'variant', 'rush', 'revenge', 'fade', 'lbreset', 'lives', 'terrain', 'item', 'fuse', 'bonus']);   // lives : nombre de vies du Foot · fuse/bonus : mèche et bonus de la Patate chaude
+const GM_ONLY = new Set(['mode', 'preset', 'opt', 'bots', 'botdiff', 'arena', 'wintarget', 'ff', 'gen', 'variant', 'rush', 'revenge', 'fade', 'lbreset', 'lives', 'terrain', 'item', 'fuse', 'bonus', 'match']);   // lives : nombre de vies du Foot · fuse/bonus : mèche et bonus de la Patate chaude · match : manches gagnantes du match (games/match.js)
 // …et parmi eux, ceux qui touchent à la mémoire DURABLE du site : réservés au détenteur de la clé admin, jamais à
 // l'hôte de repli (le premier arrivant, quand l'admin est absent, pouvait effacer le classement de Pong).
 const ADMIN_ONLY = new Set(['lbreset']);

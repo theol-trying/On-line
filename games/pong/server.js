@@ -57,7 +57,15 @@ const MAX_BALLS = 8, MAX_FIELD_PU = 2;
 const BUMPER_R = 16, BLOCKER_TICKS = 8 * 60, INVIS_TICKS = 2 * 60, MAGNET_TICKS = 5 * 60, MAX_BUMPERS = 5;
 const GROW_MULT = 1.7, GROW_TICKS = 8 * 60, SHIELD_TICKS = 6 * 60, IMMUNE_TICKS = 3 * 60;
 const INVERT_TICKS = 5 * 60, SHRINKT_TICKS = 6 * 60, SHRINK_MULT = 0.6, SLOW_TICKS = 80, SLOW_FACTOR = 0.5;
-const BOTDIFF = { easy: { spd: 0.52, dz: 34, lead: 0 }, normal: { spd: 0.84, dz: 11, lead: 0 }, hard: { spd: 1.05, dz: 4, lead: 11 }, insane: { spd: 1.25, dz: 1.5, lead: 16 } };
+// Niveaux des bots : spd = vitesse de raquette (× PAD_SPD) · dz = zone morte (px) · ant = part d'anticipation (0 : suit la balle là où elle est ;
+// 1 : vise le point d'arrivée calculé, rebonds sur murs compris) · plan = part de la demi-raquette qu'on accepte de décentrer pour pouvoir
+// aussi parer la balle SUIVANTE en multi-balle (0 : une seule balle à la fois) · mem = confiance dans une balle INVISIBLE (extrapolée de sa
+// dernière position vue ; 0 : on l'ignore et on revient au centre, 1 : on la suit comme si elle était visible) · off = décentrage voulu à chaque
+// renvoi (fraction de la demi-raquette, tiré au hasard par balle) : varie les angles de retour, sinon deux bons bots se renvoient la balle à l'infini ·
+// react = délai de réaction (ticks) avant de se fier à une balle dont la trajectoire vient de changer : sans lui, une balle rapide ne se manque jamais.
+const BOTDIFF = { easy: { spd: 0.52, dz: 34, ant: 0, plan: 0, mem: 0.3, off: 0, react: 14 }, normal: { spd: 0.84, dz: 11, ant: 0.5, plan: 0.45, mem: 0.55, off: 0.6, react: 9 },
+  hard: { spd: 1.05, dz: 4, ant: 1, plan: 0.7, mem: 0.8, off: 0.85, react: 6 }, insane: { spd: 1.25, dz: 1.5, ant: 1, plan: 0.85, mem: 0.92, off: 0.9, react: 4 } };
+const BOT_FACE = PAD_OFF + PAD_W + BALL_R;       // distance centre-de-balle → bord au moment où elle touche la face de la raquette
 const BOTDIFF_ORDER = ['easy', 'normal', 'hard', 'insane'];
 const COUNTDOWN_TICKS = 3 * 60;
 
@@ -258,29 +266,125 @@ export function createPong(room) {
     if (spd > max) { b.vx *= max / spd; b.vy *= max / spd; spd = max; }
     if (spd < MIN_SPD) { const f = MIN_SPD / (spd || 1); b.vx *= f; b.vy *= f; }
   }
+  /* ---- IA des bots ----
+     Ils ne lisent que ce qu'un joueur voit. Une balle INVISIBLE (power-up ∅) n'est plus suivie en direct : le bot en garde une croyance
+     extrapolée de sa dernière position vue (ligne droite + rebonds sur murs, sans savoir si une raquette l'a renvoyée), qui s'éloigne
+     de la réalité et dont il se méfie (BOTDIFF.mem). Dès qu'elle redevient visible, il se recale sur la vraie position. */
+  const TR = { k: 0, t: 0, s: 0, nb: 0, x: 0, y: 0, vx: 0, vy: 0 };         // résultat de traceBall (réutilisé : zéro allocation)
+  const thrT = [], thrS = [], selT = [], selS = [];                           // menaces triées (arrivée, point d'arrivée) et sélection pour le plan
+  let planLo = 0, planHi = 0;
+  // Suit une balle (x, y, v par tick) en la renvoyant en miroir sur les murs / bords sans défenseur / bords sous bouclier.
+  // k=0 : budget de ticks épuisé avant tout bord (état dans TR.x/y/vx/vy) · k=1 : atteint le bord `me` à TR.t ticks, au point TR.s
+  // (le long du bord), après TR.nb rebonds · k=2 : va sur le bord d'un autre défenseur (hors de question pour ce bot) ou se perd.
+  function traceBall(x, y, vx, vy, budget, me) {
+    let T = 0, nb = 0, last = -1;
+    for (let it = 0; it < 5; it++) {
+      let bt = Infinity, be = -1, bs = 0, bk = 0;
+      for (let i = 0; i < geo.edges.length; i++) {
+        if (i === last) continue;
+        const e = geo.edges[i], vn = vx * e.nx + vy * e.ny;
+        if (vn > -1e-6) continue;
+        let kd = 0;                                                            // 0 mur · 1 mon bord · 2 bord d'un autre défenseur
+        if (i === me) kd = 1;
+        else if (e.owner >= 0) { const q = players[e.owner]; if (inPlay(q) && q.shieldUntil <= tick && q.immuneUntil <= tick) kd = 2; }
+        let tt = ((x - e.ax) * e.nx + (y - e.ay) * e.ny - (kd ? BOT_FACE : BALL_R)) / -vn;
+        if (tt < 0) { if (!kd || it) continue; tt = 0; }
+        const s = (x + vx * tt - e.ax) * e.tx + (y + vy * tt - e.ay) * e.ty;
+        if (s < -BALL_R || s > e.len + BALL_R) continue;
+        if (tt < bt) { bt = tt; be = i; bs = s; bk = kd; }
+      }
+      if (be < 0) break;
+      if (T + bt > budget) { const r = budget - T; TR.k = 0; TR.x = x + vx * r; TR.y = y + vy * r; TR.vx = vx; TR.vy = vy; return TR; }
+      T += bt; x += vx * bt; y += vy * bt;
+      if (bk === 1) { TR.k = 1; TR.t = T; TR.s = bs; TR.nb = nb; return TR; }
+      if (bk === 2) break;
+      const e = geo.edges[be], vd = vx * e.nx + vy * e.ny;
+      vx -= 2 * vd * e.nx; vy -= 2 * vd * e.ny; last = be; nb++;
+    }
+    TR.k = 2; return TR;
+  }
+  // Une fois par tick, avant les bots : met à jour ce que le bot « croit » de chaque balle (bx/by/bvx/bvy ; bok = croyance exploitable).
+  function voirBalles() {
+    const sf = slowUntil > tick ? SLOW_FACTOR : 1;
+    for (const b of balls) {
+      if (b.pvx === undefined || b.rt > tick) b.rt = tick;                      // trajectoire déviée (renvoi, mur) → les bots mettent `react` ticks à s'y fier
+      else { const c = b.vx * b.pvy - b.vy * b.pvx; if (c * c > 0.0027 * (b.vx * b.vx + b.vy * b.vy) * (b.pvx * b.pvx + b.pvy * b.pvy)) b.rt = tick; }
+      b.pvx = b.vx; b.pvy = b.vy;
+      if (b.ok !== b.last) { b.ok = b.last; b.oz = Math.random() * 2 - 1; }      // nouveau renvoi → nouveau décentrage (stable pendant tout le vol)
+      if (!(b.invisUntil > tick)) { b.sx = b.bx = b.x; b.sy = b.by = b.y; b.svx = b.bvx = b.vx; b.svy = b.bvy = b.vy; b.age = 0; b.bok = true; continue; }
+      if (b.sx === undefined) { b.bok = false; continue; }
+      b.age = (b.age || 0) + 1;
+      const r = traceBall(b.sx, b.sy, b.svx, b.svy, b.age * sf, -1);
+      b.bok = r.k === 0;
+      if (b.bok) { b.bx = r.x; b.by = r.y; b.bvx = r.vx; b.bvy = r.vy; }
+    }
+  }
+  // Fenêtre de positions de raquette (planLo..planHi) d'où l'on pare la 1re balle ET encore les suivantes (n premières menaces retenues)
+  function planWindow(n, spd, m) {
+    let lo = selS[n - 1] - m, hi = selS[n - 1] + m;
+    for (let j = n - 2; j >= 0; j--) {
+      const rc = spd * (selT[j + 1] - selT[j]);
+      lo = Math.max(selS[j] - m, lo - rc); hi = Math.min(selS[j] + m, hi + rc);
+      if (lo > hi) return false;
+    }
+    planLo = lo; planHi = hi; return true;
+  }
   function botMove(p) {
     const e = geo.edges[p.edge];
     if (!balls.length) return;
     const D = BOTDIFF[rules.botDiff] || BOTDIFF.normal;
-    const px = e.ax + e.tx * p.pos, py = e.ay + e.ty * p.pos;
-    let best = balls[0], bd = Infinity;
-    for (const b of balls) { const d = (b.x - px) ** 2 + (b.y - py) ** 2; if (d < bd) { bd = d; best = b; } }
-    const tx = best.x + best.vx * D.lead, ty = best.y + best.vy * D.lead;
-    const s = (tx - e.ax) * e.tx + (ty - e.ay) * e.ty;
-    const L = padLenOf(p), spd = PAD_SPD * D.spd;
-    const incoming = (best.vx * e.nx + best.vy * e.ny) < 0;   // la balle fonce-t-elle vers ce bord ?
-    let target = incoming ? s : e.len / 2;                    // sinon on revient au centre (évite de rester bloqué dans un coin)
+    const L = padLenOf(p), spd = PAD_SPD * D.spd, mid = e.len / 2, sf = slowUntil > tick ? SLOW_FACTOR : 1;
     const style = rules.botStyle || 'equilibre';
-    if (style === 'agressif') {                               // frappe avec le BORD de la raquette (angles forts) + reste sous la balle pour la pression
-      if (incoming) target = s + (s > e.len / 2 ? -1 : 1) * L * 0.32;
-      else target = Math.max(L / 2, Math.min(e.len - L / 2, s));
-    } else if (style === 'defensif') {                        // suit toujours la balle, mais sans s'éloigner trop du centre (couverture)
-      target = incoming ? s : (s + e.len / 2) / 2;
+    // 1. menaces : les balles (vues, ou crues) qui finissent sur MON bord, avec instant et point d'arrivée
+    let nt = 0, attente = false;
+    for (const b of balls) {
+      if (!b.bok) continue;
+      if (!b.age && tick - b.rt < D.react) { attente = true; continue; }       // vient d'être déviée : pas encore lue
+      const r = traceBall(b.bx, b.by, b.bvx, b.bvy, Infinity, p.edge);
+      if (r.k !== 1) continue;
+      const sNow = (b.bx - e.ax) * e.tx + (b.by - e.ay) * e.ty;
+      let aim = sNow + (r.s - sNow) * D.ant * (r.nb ? 0.6 : 1);               // rebonds = trajectoire moins sûre (jitter des murs)
+      aim += b.oz * L / 2 * D.off * (style === 'defensif' ? 0.5 : 1);
+      if (b.age) aim = mid + (aim - mid) * D.mem;                              // balle invisible : croyance incertaine → plus près du centre
+      let j = nt++; const t = r.t / sf;
+      while (j > 0 && thrT[j - 1] > t) { thrT[j] = thrT[j - 1]; thrS[j] = thrS[j - 1]; j--; }   // tri par arrivée croissante
+      thrT[j] = t; thrS[j] = aim;
     }
-    let dir = target < p.pos - D.dz ? -1 : target > p.pos + D.dz ? 1 : 0;
-    if (p.invertUntil > tick) dir = -dir;
-    if (dir < 0) p.pos = Math.max(L / 2, p.pos - spd);
-    else if (dir > 0) p.pos = Math.min(e.len - L / 2, p.pos + spd);
+    if (!nt && attente) return;                                                 // rien d'autre à parer : on garde la position le temps de réagir
+    let target;
+    if (nt) {
+      // 2. la balle la plus pressante d'abord ; en multi-balle on se décentre au plus de `plan` pour rester en mesure de parer la suivante
+      const m = L / 2 * D.plan;
+      selT[0] = thrT[0]; selS[0] = thrS[0]; let ns = 1, lo = -Infinity, hi = Infinity;
+      if (m > 0) {
+        for (let j = 1; j < nt && ns < 3 && thrT[j] - thrT[0] < 120; j++) {
+          selT[ns] = thrT[j]; selS[ns] = thrS[j];
+          if (planWindow(ns + 1, spd, m)) ns++;
+        }
+        if (ns > 1 || nt > 1) { planWindow(ns, spd, m); lo = planLo; hi = planHi; }
+      }
+      target = thrS[0];
+      if (style === 'agressif') target += (target > mid ? -1 : 1) * L * 0.32;  // frappe avec le BORD de la raquette (angles forts)
+      target = Math.max(lo, Math.min(hi, target));
+    } else {
+      // 3. aucune balle ne vise ce bord : position d'attente selon le style, d'après la balle (vue ou crue) la plus proche
+      target = mid;
+      if (style !== 'equilibre') {
+        const px = e.ax + e.tx * p.pos, py = e.ay + e.ty * p.pos;
+        let nb = null, nd = Infinity;
+        for (const b of balls) { if (!b.bok) continue; const d = (b.bx - px) ** 2 + (b.by - py) ** 2; if (d < nd) { nd = d; nb = b; } }
+        if (nb) {
+          const s = (nb.bx - e.ax) * e.tx + (nb.by - e.ay) * e.ty;
+          target = style === 'agressif' ? s : (s + mid) / 2;                  // agressif : reste sous la balle (pression) · défensif : couvre, sans trop s'éloigner du centre
+        }
+      }
+    }
+    target = Math.max(L / 2, Math.min(e.len - L / 2, target));
+    const diff = target - p.pos;
+    if (Math.abs(diff) <= D.dz) return;
+    let step = Math.min(spd, Math.abs(diff)) * (diff < 0 ? -1 : 1);            // pas borné : plus de tremblement autour de la cible
+    if (p.invertUntil > tick) step = (diff < 0 ? 1 : -1) * spd;                // malus inversion : le bot le subit comme un joueur
+    p.pos = Math.max(L / 2, Math.min(e.len - L / 2, p.pos + step));
   }
   function ownerOf(b) {
     if (b.last >= 0 && geo.edges[b.last].owner >= 0) { const p = players[geo.edges[b.last].owner]; if (inPlay(p)) return p; }
@@ -537,6 +641,7 @@ export function createPong(room) {
     if (!geo) return;
     if (gameState === 'countdown') {
       tick++;
+      voirBalles();
       for (const p of players) { if (!inPlay(p)) continue; if (p.bot) botMove(p); else humanMove(p); }
       if (tick >= countdownUntil) { gameState = 'play'; tick = 0; nextPuTick = cfg.puMin; }
       return;
@@ -551,6 +656,7 @@ export function createPong(room) {
       applyScale(sdScale);
       for (const p of players) if (inPlay(p)) { const e = geo.edges[p.edge], L = padLenOf(p); p.pos = Math.max(L / 2, Math.min(e.len - L / 2, p.pos)); }
     }
+    voirBalles();
     for (const p of players) { if (!inPlay(p)) continue; if (p.bot) botMove(p); else humanMove(p); }
     const sdAccel = sdActive && rules.sudden === 'accel';
     if (cfg.accelEvery && tick % cfg.accelEvery === 0) for (const b of balls) { b.vx *= cfg.accelMul; b.vy *= cfg.accelMul; }

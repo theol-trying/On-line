@@ -26,7 +26,14 @@ const HOMING_T = 8 * TICK_HZ, CAMO_T = 6 * TICK_HZ, RADAR_T = 10 * TICK_HZ, HOMI
 const BARREL_COUNT = 4, BARREL_R = 11, BARREL_DMG_R = BLK * 1.25, BARREL_CHAIN = BLK * 1.6;      // barils explosifs : rayon collision / dégâts de zone / chaînage
 const MUD_COUNT = 10, MUD_MUL = 0.5;               // zones de boue : ralentissent les tanks qui les traversent
 const PU_TYPES = ['rapid', 'triple', 'shield', 'speed', 'pierce', 'mine', 'repair', 'emp', 'homing', 'camo', 'radar'];
-const TKDIFF = [{ skip: 0.45, fireA: 0.14, fireP: 0.5 }, { skip: 0.12, fireA: 0.22, fireP: 0.9 }, { skip: 0, fireA: 0.3, fireP: 1 }];   // IA : Facile / Normale / Difficile (réactivité, fenêtre et probabilité de tir)
+// IA : Facile / Normale / Difficile. skip = réactivité (part de ticks sans réflexion) · fireA/fireP = fenêtre et probabilité de tir (Facile : visée « à l'œil »)
+// nav = chemin autour des murs · lead = part d'anticipation de la cible · dodgeP/dodgeT = chance et préavis (ticks) d'esquive d'un obus · metal = chance de vérifier qu'un mur ne barre pas le tir
+// look = ticks d'avance pour éviter une mine · stand = distance (blocs) à laquelle il s'arrête pour tirer · mineR/mineP = portée (blocs) et chance de poser une mine · rico = rebonds admis pour un tir (-1 : aucun calcul)
+const TKDIFF = [
+  { skip: 0.45, fireA: 0.14, fireP: 0.5, nav: 0, lead: 0, dodgeP: 0.1, dodgeT: 8, metal: 0.65, look: 4, stand: 1.3, mineR: 1.4, mineP: 0.03, rico: -1 },
+  { skip: 0.12, fireA: 0.22, fireP: 0.9, nav: 1, lead: 0.8, dodgeP: 0.55, dodgeT: 16, metal: 1, look: 8, stand: 2, mineR: 2.2, mineP: 0.04, rico: 0 },
+  { skip: 0, fireA: 0.3, fireP: 1, nav: 1, lead: 1, dodgeP: 0.9, dodgeT: 24, metal: 1, look: 12, stand: 3, mineR: 3, mineP: 0.06, rico: 1 },
+];
 const WIN_TARGETS = [1, 3, 5];
 // Positions de départ calculées : 4 coins, puis milieux haut/bas, puis milieux gauche/droite.
 // L'ordre des 6 premières reproduit exactement l'ancien tableau en dur (aucun changement à ≤ 6 joueurs).
@@ -233,28 +240,358 @@ export function createTank(room) {
     }
     fx.push({ type: 'shot', x: p.x, y: p.y, seat: p.seat });
   }
-  function botThink(p) {                              // IA : viser l'ennemi le plus proche, avancer en tournant, tirer ; évitement ENGAGÉ (sinon le bot tremble sur place)
+  /* ---- IA des bots ----
+     Un bot ne voit que ce qu'un joueur voit : tanks (sauf camouflés sans radar), obus, mines, barils, murs. La vitesse d'une cible est
+     déduite de ses positions successives (aiVx/aiVy) : jamais lue dans ses entrées. Il simule les obus avec les VRAIES règles de rebond
+     (aiStep) pour ne tirer que s'il touche (jamais dans le métal), viser devant la cible, esquiver, éviter les mines et contourner les murs. */
+  const AI_H = 26, HIT_R = TANK_R + SHELL_R;                   // horizon d'esquive (ticks) ; distance de touche d'un obus
+  const aiVx = new Array(MAX_SEATS).fill(0), aiVy = new Array(MAX_SEATS).fill(0), aiTm = new Array(MAX_SEATS).fill(0);   // vitesse observée, ticks avant mur
+  const aiPx = new Array(MAX_SEATS).fill(NaN), aiPy = new Array(MAX_SEATS).fill(NaN);
+  let aiTick = -1;
+  const TR = { k: 'none', t: 0, b: 0, cell: -1 };              // résultat de shotTrace (objet réutilisé : aucune allocation)
+  const DODGES = [];                                           // manœuvres d'esquive [rotation, avance, ticks de rotation] : 15 candidates
+  for (const rot of [-1, 1]) for (const mv of [1, -1]) for (const rt of [5, 12, 99]) DODGES.push([rot, mv, rt]);
+  DODGES.push([0, 1, 0], [0, -1, 0], [0, 0, 0]);
+  const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+  const cellOf = (x, y) => bidx(clamp(Math.floor(x / BLK), 0, G - 1), clamp(Math.floor(y / BLK), 0, G - 1));
+  const cellX = k => (k % G + 0.5) * BLK, cellY = k => (((k / G) | 0) + 0.5) * BLK;
+
+  function wallBlockedAt(x, y, r) {                            // un tank de rayon r en (x,y) touche-t-il un mur ou le bord ? (les autres tanks ne comptent pas)
+    if (x < r || y < r || x > ARENA - r || y > ARENA - r) return true;
+    const e = r - 1;
+    return cellSolid(Math.floor((x - e) / BLK), Math.floor((y - e) / BLK)) || cellSolid(Math.floor((x + e) / BLK), Math.floor((y - e) / BLK))
+      || cellSolid(Math.floor((x - e) / BLK), Math.floor((y + e) / BLK)) || cellSolid(Math.floor((x + e) / BLK), Math.floor((y + e) / BLK));
+  }
+  function lineFirst(x0, y0, x1, y1) {                         // premier bloc sur le segment (point, comme un obus) : 0 libre · 1 métal · 2 bois
+    const dx = x1 - x0, dy = y1 - y0, n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 6));
+    for (let i = 1; i <= n; i++) {
+      const gx = Math.floor((x0 + dx * i / n) / BLK), gy = Math.floor((y0 + dy * i / n) / BLK);
+      if (gx < 0 || gy < 0 || gx >= G || gy >= G) return 1;
+      const b = blocks[bidx(gx, gy)]; if (b) return b;
+    }
+    return 0;
+  }
+  function lineSafe(x0, y0, x1, y1, dm) {                      // un TANK (largeur comprise) passe-t-il en ligne droite, sans mur ni mine adverse ?
+    const dx = x1 - x0, dy = y1 - y0, n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 8));
+    for (let i = 1; i <= n; i++) {
+      const x = x0 + dx * i / n, y = y0 + dy * i / n;
+      if (wallBlockedAt(x, y, TANK_R + 2)) return false;
+      for (const m of dm) if ((x - m.x) ** 2 + (y - m.y) ** 2 < (MINE_R + 6) ** 2) return false;
+    }
+    return true;
+  }
+  function minesFor(p) {                                       // mines qui me feraient exploser (celles des autres, hors alliés sans tir allié) : toutes visibles sur le terrain
+    const out = [];
+    for (const mn of mines) if (mn.owner !== p.seat && (mode === 'ffa' || ff || players[mn.owner].team !== p.team)) out.push(mn);
+    return out;
+  }
+  function aiPrep() {                                          // vitesses observées (une fois par tick, par le premier bot qui réfléchit)
+    if (aiTick === tick) return;
+    const cont = aiTick === tick - 1; aiTick = tick;
+    for (const q of players) {
+      const s = q.seat, on = active(q);
+      if (on && cont && aiPx[s] === aiPx[s]) {
+        let dx = q.x - aiPx[s], dy = q.y - aiPy[s];
+        if (dx * dx + dy * dy > 100) { dx = 0; dy = 0; }       // réapparition : pas une vitesse
+        aiVx[s] = aiVx[s] * 0.5 + dx * 0.5; aiVy[s] = aiVy[s] * 0.5 + dy * 0.5;
+      } else { aiVx[s] = 0; aiVy[s] = 0; }
+      aiPx[s] = on ? q.x : NaN; aiPy[s] = q.y;
+      let tm = 0;
+      if (on && aiVx[s] * aiVx[s] + aiVy[s] * aiVy[s] > 0.09) { tm = 28; for (let u = 1; u <= 28; u++) if (wallBlockedAt(q.x + aiVx[s] * u, q.y + aiVy[s] * u, TANK_R)) { tm = u - 1; break; } }
+      aiTm[s] = tm;
+    }
+  }
+  function aiStep(s) {                                         // un pas d'obus simulé (règles de update/shellHitsCell, sans effet de bord) : 0 vivant · 1 mort sur du bois · 2 trop de rebonds
+    s.n++; s.x += s.vx; s.y += s.vy;
+    if (s.x < SHELL_R) { s.x = SHELL_R; s.vx = -s.vx; s.b++; } else if (s.x > ARENA - SHELL_R) { s.x = ARENA - SHELL_R; s.vx = -s.vx; s.b++; }
+    if (s.y < SHELL_R) { s.y = SHELL_R; s.vy = -s.vy; s.b++; } else if (s.y > ARENA - SHELL_R) { s.y = ARENA - SHELL_R; s.vy = -s.vy; s.b++; }
+    const gx = Math.floor(s.x / BLK), gy = Math.floor(s.y / BLK);
+    if (gx >= 0 && gy >= 0 && gx < G && gy < G) {
+      const k = bidx(gx, gy), b = blocks[k];
+      if (b && s.gone.indexOf(k) < 0) {
+        if (s.fc < 0) { s.fc = k; s.ft = s.n; }                  // premier bloc rencontré (et à quel pas)
+        if (b === 2) { if (s.pw > 0) { s.pw--; s.gone.push(k); } else { s.hk = k; return 1; } }
+        else if (s.pm > 0) { s.pm--; s.gone.push(k); }
+        else {
+          const ox = gx * BLK, oy = gy * BLK, nx = clamp(s.x, ox, ox + BLK), ny = clamp(s.y, oy, oy + BLK), dx = s.x - nx, dy = s.y - ny;
+          if (Math.abs(dx) >= Math.abs(dy)) { s.vx = -s.vx; s.x = nx + Math.sign(dx || s.vx) * (SHELL_R + 0.5); }
+          else { s.vy = -s.vy; s.y = ny + Math.sign(dy || s.vy) * (SHELL_R + 0.5); }
+          s.b++;
+        }
+      }
+    }
+    return s.b > MAX_BOUNCE ? 2 : 0;
+  }
+  // Simule un obus tiré par p à l'angle `ang` et dit ce qu'il touchera : TR.k = foe (un ennemi, à TR.t ticks, après TR.b rebonds) · ally (un allié, tir allié actif)
+  // · barrel+ (baril qui souffle un ennemi) · barrel- (baril qui nous souffle ou souffle un allié) · barrel0 · wood (meurt sur une caisse TR.cell) · none (métal / rebonds / rien).
+  function shotTrace(p, ang, foes, allies, ox, oy) {      // (ox,oy) = point de départ (par défaut p)
+    if (ox === undefined) { ox = p.x; oy = p.y; }
+    const c = Math.cos(ang), sn = Math.sin(ang), pr = p.pierceUntil > tick;
+    const s = { x: ox + c * (TANK_R + SHELL_R + 1), y: oy + sn * (TANK_R + SHELL_R + 1), vx: c * SHELL_SPD, vy: sn * SHELL_SPD, b: 0, pw: pr ? 3 : 0, pm: pr ? 1 : 0, gone: [], hk: -1, fc: -1, ft: 0, n: 0 };
+    TR.k = 'none'; TR.t = 0; TR.b = 0; TR.cell = -1; TR.fc = -1; TR.ft = 0;
+    const H2 = (HIT_R - 1) ** 2, BD2 = BARREL_DMG_R ** 2, BR2 = (BARREL_R + SHELL_R) ** 2;
+    for (let t = 1; t <= SHELL_LIFE; t++) {
+      const d = aiStep(s); TR.fc = s.fc; TR.ft = s.ft;
+      if (d) { if (d === 1) { TR.k = 'wood'; TR.t = t; TR.cell = s.hk; } return TR; }
+      for (const b of barrels) if ((s.x - b.x) ** 2 + (s.y - b.y) ** 2 < BR2) {
+        TR.t = t; TR.b = s.b; TR.k = 'barrel0';
+        if ((b.x - ox) ** 2 + (b.y - oy) ** 2 < (BARREL_DMG_R + 6) ** 2) { TR.k = 'barrel-'; return TR; }
+        for (const a of allies) if ((b.x - a.x) ** 2 + (b.y - a.y) ** 2 < BD2) { TR.k = 'barrel-'; return TR; }
+        for (const f of foes) { const u = t < f.tm ? t : f.tm; if ((b.x - f.x - f.vx * u) ** 2 + (b.y - f.y - f.vy * u) ** 2 < (BARREL_DMG_R - 6) ** 2) { TR.k = 'barrel+'; return TR; } }
+        return TR;
+      }
+      for (const f of foes) {
+        if (t < f.iv) continue;                                // tank invulnérable à l'arrivée : l'obus le traverse
+        const u = t < f.tm ? t : f.tm, dx = s.x - f.x - f.vx * u, dy = s.y - f.y - f.vy * u;
+        if (dx * dx + dy * dy < H2) { TR.k = 'foe'; TR.t = t; TR.b = s.b; return TR; }
+      }
+      if (ff) for (const a of allies) if ((s.x - a.x) ** 2 + (s.y - a.y) ** 2 < (HIT_R + 3) ** 2) { TR.k = 'ally'; TR.t = t; TR.b = s.b; return TR; }
+    }
+    return TR;
+  }
+  function shellPath(sh) {                                     // positions futures d'un obus en vol [x1,y1,x2,y2…] sur AI_H ticks (cache par tick)
+    if (sh.pt === tick) return sh.pa;
+    const s = { x: sh.x, y: sh.y, vx: sh.vx, vy: sh.vy, b: sh.bounces, pw: sh.pWood, pm: sh.pMetal, gone: [], hk: -1, fc: -1, ft: 0, n: 0 }, pa = [], n = Math.min(AI_H, sh.life);
+    for (let t = 0; t < n; t++) { if (aiStep(s)) break; pa.push(s.x, s.y); }
+    sh.pt = tick; sh.pa = pa; return pa;
+  }
+  function threatOf(p) {                                       // ticks avant le premier impact prévu sur p (0 = aucun) + trajectoires des obus proches
+    let best = 0, near = null;
+    for (const sh of shells) {
+      if (sh.o === p.seat || (mode !== 'ffa' && !ff && sh.team === p.team)) continue;
+      const pa = shellPath(sh); let hit = 0, close = false;
+      for (let i = 0; i < pa.length; i += 2) { const d2 = (pa[i] - p.x) ** 2 + (pa[i + 1] - p.y) ** 2; if (d2 < 10000) close = true; if (!hit && d2 < (HIT_R + 4) ** 2) hit = i / 2 + 1; }
+      if (close) (near || (near = [])).push(pa);
+      if (hit && (!best || hit < best)) best = hit;
+    }
+    return near ? { t: best, near } : null;
+  }
+  function pickDodge(p, near, dm) {                            // essaie les 15 manœuvres sur AI_H ticks (tank + obus simulés) et garde la plus sûre
+    const boost = p.speedUntil > tick ? SPEED_MUL : 1;
+    let bi = -1, bs = -1e9;
+    for (let ci = 0; ci < DODGES.length; ci++) {
+      const c = DODGES[ci]; let x = p.x, y = p.y, a = p.angle, md = 1e9, hit = 0, mine = false;
+      for (let t = 1; t <= AI_H; t++) {
+        if (t <= c[2]) a += c[0] * ROT * boost;
+        if (c[1]) { const s = c[1] > 0 ? TANK_SPD * boost : -TANK_SPD * boost * REV, nx = x + Math.cos(a) * s, ny = y + Math.sin(a) * s; if (!wallBlockedAt(nx, y, TANK_R)) x = nx; if (!wallBlockedAt(x, ny, TANK_R)) y = ny; }
+        const i = (t - 1) * 2;
+        for (const pa of near) if (i < pa.length) { const d2 = (pa[i] - x) ** 2 + (pa[i + 1] - y) ** 2; if (d2 < md) md = d2; if (!hit && d2 < (HIT_R + 2) ** 2) hit = t; }
+        for (const m of dm) if ((x - m.x) ** 2 + (y - m.y) ** 2 < (MINE_R + 4) ** 2) mine = true;
+      }
+      const sc = (hit ? hit : 100 + Math.min(Math.sqrt(md), 60)) - (mine ? 300 : 0) + (ci === p.botDodgeIdx ? 4 : 0);
+      if (sc > bs) { bs = sc; bi = ci; }
+    }
+    return bi;
+  }
+  function mineGuard(p, inp, dm, look) {                       // ne roule jamais sur une mine visible : sort d'une zone, s'arrête avant d'y entrer
+    if (!dm.length) return;
+    const R2 = (MINE_R + 5) ** 2;
+    let near = null, nd = Infinity;
+    for (const m of dm) { const d2 = (p.x - m.x) ** 2 + (p.y - m.y) ** 2; if (d2 < R2 && d2 < nd) { nd = d2; near = m; } }
+    if (near) {                                                // déjà dans une zone (mine posée à mes pieds, pas encore armée) : on s'en éloigne
+      const away = Math.atan2(p.y - near.y, p.x - near.x), diff = angDiff(away, p.angle);
+      inp.left = inp.right = inp.fwd = inp.back = false;
+      if (Math.abs(diff) > 1.57) inp.back = true; else inp.fwd = true;
+      if (diff > 0.1) inp.right = true; else if (diff < -0.1) inp.left = true;
+      return;
+    }
+    if (!inp.fwd && !inp.back) return;
+    const boost = p.speedUntil > tick ? SPEED_MUL : 1, base = TANK_SPD * boost * (inp.fwd ? 1 : -REV);
+    let x = p.x, y = p.y, a = p.angle, bad = null;
+    for (let t = 1; t <= look && !bad; t++) {
+      if (inp.left) a -= ROT * boost; if (inp.right) a += ROT * boost;
+      x += Math.cos(a) * base; y += Math.sin(a) * base;
+      for (const m of dm) if ((x - m.x) ** 2 + (y - m.y) ** 2 < R2) { bad = m; break; }
+    }
+    if (bad) {                                                 // arrêt, et on se tourne pour contourner
+      inp.fwd = false; inp.back = false;
+      if (!inp.left && !inp.right) { const cr = Math.cos(p.angle) * (bad.y - p.y) - Math.sin(p.angle) * (bad.x - p.x); if (cr > 0) inp.left = true; else inp.right = true; }
+    }
+  }
+  function aiFoes(p, D) {                                      // ennemis visibles, avec leur vitesse observée × part d'anticipation du niveau
+    const out = [];
+    for (const q of players) {
+      if (!active(q) || q === p || (mode !== 'ffa' && q.team === p.team)) continue;
+      if (q.camoUntil > tick && p.radarUntil <= tick) continue;   // camouflé : invisible (sauf radar)
+      const s = q.seat;
+      out.push({ q, x: q.x, y: q.y, vx: aiVx[s] * D.lead, vy: aiVy[s] * D.lead, tm: D.lead ? aiTm[s] : 0, iv: q.invulnUntil - tick, d2: (q.x - p.x) ** 2 + (q.y - p.y) ** 2 });
+    }
+    return out;
+  }
+  function leadPoint(p, f) {                                   // où viser : la position de la cible quand l'obus l'atteindra
+    let x = f.x, y = f.y;
+    for (let i = 0; i < 3; i++) { const t = Math.max(0, Math.hypot(x - p.x, y - p.y) - HIT_R) / SHELL_SPD + 1, u = t < f.tm ? t : f.tm; x = f.x + f.vx * u; y = f.y + f.vy * u; }
+    return [x, y];
+  }
+  function aiField(goals, dm) {                                // coût de chemin jusqu'aux cases-buts : bois +7 (à abattre), métal infranchissable, case de mine adverse +400 (voisines +5), boue +1
+    const n = G * G, f = new Float32Array(n).fill(1e9), extra = new Float32Array(n), inq = new Uint8Array(n), q = [];
+    for (const m of dm) {
+      const gx = Math.floor(m.x / BLK), gy = Math.floor(m.y / BLK); if (gx < 0 || gy < 0 || gx >= G || gy >= G) continue;
+      extra[bidx(gx, gy)] += 400;
+      for (const [dx, dy] of DIRS4) { const nx = gx + dx, ny = gy + dy; if (nx >= 0 && ny >= 0 && nx < G && ny < G) extra[bidx(nx, ny)] += 5; }
+    }
+    for (const k of goals) { f[k] = 0; inq[k] = 1; q.push(k); }
+    for (let qi = 0; qi < q.length; qi++) {
+      const c = q[qi], cx = c % G, cy = (c / G) | 0; inq[c] = 0;
+      const nd = f[c] + 1 + (blocks[c] === 2 ? 7 : 0) + extra[c] + (mudSet.has(c) ? 1 : 0);   // coût d'ENTRER dans c depuis un voisin
+      for (const [dx, dy] of DIRS4) {
+        const nx = cx + dx, ny = cy + dy; if (nx < 0 || ny < 0 || nx >= G || ny >= G) continue;
+        const k = bidx(nx, ny); if (blocks[k] === 1) continue;
+        if (nd < f[k]) { f[k] = nd; if (!inq[k]) { inq[k] = 1; q.push(k); } }
+      }
+    }
+    return f;
+  }
+  function aiWay(p, f, dm) {                                   // prochain point à rejoindre : la case la plus lointaine du chemin atteignable en ligne droite ; wood = caisse à abattre devant
+    const c0 = cellOf(p.x, p.y);
+    if (f[c0] >= 1e8) return null;
+    const cells = []; let cur = c0, wood = -1;
+    for (let i = 0; i < 7 && f[cur] > 0; i++) {
+      const cx = cur % G, cy = (cur / G) | 0; let bk = -1, bv = f[cur];
+      for (const [dx, dy] of DIRS4) { const nx = cx + dx, ny = cy + dy; if (nx < 0 || ny < 0 || nx >= G || ny >= G) continue; const k = bidx(nx, ny); if (f[k] < bv) { bv = f[k]; bk = k; } }
+      if (bk < 0) break;
+      if (blocks[bk] === 2) { wood = bk; break; }
+      cells.push(bk); cur = bk;
+    }
+    let wx = cellX(c0), wy = cellY(c0);
+    if (cells.length) { wx = cellX(cells[0]); wy = cellY(cells[0]); }
+    for (let i = cells.length - 1; i > 0; i--) if (lineSafe(p.x, p.y, cellX(cells[i]), cellY(cells[i]), dm)) { wx = cellX(cells[i]); wy = cellY(cells[i]); break; }
+    return { x: wx, y: wy, wood };
+  }
+  function aiGoals(p, D, foes) {                               // cases à rejoindre : les ennemis visibles, ou un bonus proche, ou (sans rien en vue) un point de patrouille
+    if (D.nav && pickups.length) {
+      let pk = null, pd = Infinity;
+      for (const k of pickups) { const d2 = (k.x - p.x) ** 2 + (k.y - p.y) ** 2; if (d2 < pd && (!foes.length || d2 < (BLK * 5) ** 2)) { pd = d2; pk = k; } }
+      if (pk && foes.every(f => f.d2 > (BLK * 3.5) ** 2)) return [cellOf(pk.x, pk.y)];
+    }
+    if (foes.length) return foes.map(f => cellOf(f.x, f.y));
+    const c0 = cellOf(p.x, p.y);
+    if (!p.botGoal || p.botGoal.until <= tick || p.botGoal.k === c0) {
+      let k = c0;
+      for (let i = 0; i < 12; i++) { const gx = 1 + Math.floor(Math.random() * (G - 2)), gy = 1 + Math.floor(Math.random() * (G - 2)), c = bidx(gx, gy); if (blocks[c] === 0 && Math.abs(gx - (c0 % G)) + Math.abs(gy - ((c0 / G) | 0)) >= 4) { k = c; break; } }
+      p.botGoal = { k, until: tick + 150 };
+    }
+    return [p.botGoal.k];
+  }
+  function layMine(p) { p.mineN--; p.mineCd = tick + MINE_CD; mines.push({ x: p.x, y: p.y, owner: p.seat, arm: tick + MINE_ARM }); fx.push({ type: 'mineset', x: p.x, y: p.y, seat: p.seat }); }
+
+  function botThink(p) {                              // IA : Facile = direct + évitement aléatoire ; Normale/Difficile = chemin, anticipation, esquive (voir TKDIFF)
+    aiPrep();
     const D = TKDIFF[botDiff] || TKDIFF[1];
-    if (D.skip && Math.random() < D.skip) return;     // Facile : réagit moins souvent (garde ses inputs précédents)
+    if (p.botRound !== round) {                       // nouvelle manche : purge de l'état d'IA
+      p.botRound = round; p.botField = null; p.botFieldT = -99; p.botFieldKey = ''; p.botGoal = null; p.botRico = null; p.botRicoT = -99;
+      p.botLastT = tick; p.botLastX = p.x; p.botLastY = p.y; p.botWant = 0; p.botStuck = 0; p.botIdle = 0; p.botPush = 0; p.botFired = false; p.botBrave = 0; p.botThreat = false; p.botDodgeOK = false; p.botDodgeIdx = -1;
+    }
+    if (D.skip && Math.random() < D.skip) { p.inputs.fire = false; return; }   // Facile : réagit moins souvent (garde ses inputs précédents, sauf le tir)
     const inp = { left: false, right: false, fwd: false, back: false, fire: false };
-    let tgt = null, bd = Infinity;
-    for (const q of players) { if (!active(q) || q === p) continue; if (mode !== 'ffa' && q.team === p.team) continue; if (q.camoUntil > tick && p.radarUntil <= tick) continue; const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2; if (d < bd) { bd = d; tgt = q; } } // ne « voit » pas les camouflés (sauf radar)
+    if (p.empUntil > tick) { p.inputs = inp; return; }
+    const brave = p.botBrave > tick, dm = brave ? [] : minesFor(p), foes = aiFoes(p, D);
+    const allies = mode === 'ffa' ? [] : players.filter(q => active(q) && q !== p && q.team === p.team);
+    const boost = p.speedUntil > tick ? SPEED_MUL : 1, band = Math.max(0.03, ROT * boost * 0.55);
+    const steer = (tx, ty, b) => { const diff = angDiff(Math.atan2(ty - p.y, tx - p.x), p.angle); if (diff > b) inp.right = true; else if (diff < -b) inp.left = true; return diff; };
+    let near = null; for (const f of foes) if (!near || f.d2 < near.d2) near = f;
+    // 1. un obus arrive : esquive (prioritaire sur tout déplacement)
+    let dodging = false;
+    if (D.dodgeP && shells.length && p.invulnUntil <= tick) {
+      const th = threatOf(p);
+      if (th && th.t) {
+        if (!p.botThreat) { p.botThreat = true; p.botDodgeOK = Math.random() < D.dodgeP; }
+        if (p.botDodgeOK && th.t <= D.dodgeT) {
+          const ci = pickDodge(p, th.near, dm);
+          if (ci >= 0) { const c = DODGES[ci]; inp.left = c[0] < 0; inp.right = c[0] > 0; inp.fwd = c[1] > 0; inp.back = c[1] < 0; p.botDodgeIdx = ci; dodging = true; }
+        }
+      } else p.botThreat = false;
+    } else p.botThreat = false;
     const ahead = blockedTank(p.x + Math.cos(p.angle) * (TANK_R + 10), p.y + Math.sin(p.angle) * (TANK_R + 10), p);
-    if (p.botAvoidUntil > tick) {                     // manœuvre en cours : on s'y tient quelques ticks
-      inp[p.botAvoidDir] = true; inp.back = !!p.botAvoidBack; if (!ahead && !p.botAvoidBack) inp.fwd = true;
-    } else if (ahead) {                               // bloqué : choisir un côté (et parfois reculer) puis s'y tenir
-      p.botAvoidDir = Math.random() < 0.5 ? 'left' : 'right'; p.botAvoidBack = Math.random() < 0.4; p.botAvoidUntil = tick + 10 + Math.floor(Math.random() * 16);
-      inp[p.botAvoidDir] = true; inp.back = !!p.botAvoidBack;
-    } else if (tgt) {
-      const desired = Math.atan2(tgt.y - p.y, tgt.x - p.x), diff = Math.atan2(Math.sin(desired - p.angle), Math.cos(desired - p.angle));
-      if (diff > 0.07) inp.right = true; else if (diff < -0.07) inp.left = true;
-      if (Math.abs(diff) < 1.1 && bd > (BLK * 1.3) ** 2) inp.fwd = true;                 // avance aussi pendant qu'il tourne, s'approche plus près
-      if (Math.abs(diff) < D.fireA && tick >= p.cool && Math.random() < D.fireP) inp.fire = true;   // aligné : tire (fenêtre/probabilité selon difficulté)
-      if (p.mineN > 0 && tick >= p.mineCd && bd < (BLK * 1.4) ** 2 && Math.random() < 0.03) { p.mineN--; p.mineCd = tick + MINE_CD; mines.push({ x: p.x, y: p.y, owner: p.seat, arm: tick + MINE_ARM }); fx.push({ type: 'mineset', x: p.x, y: p.y, seat: p.seat }); }
-    } else {                                          // pas de cible visible : errance (patrouille)
-      if (!(p.botWanderUntil > tick)) { p.botWanderUntil = tick + 20 + Math.floor(Math.random() * 40); p.botWanderTurn = Math.random() < 0.35 ? (Math.random() < 0.5 ? 'left' : 'right') : null; }
-      if (p.botWanderTurn) inp[p.botWanderTurn] = true;
-      inp.fwd = true;
+    let wc = -1, aimF = null, aimDiff = 9, rico = false;
+    if (!dodging) {
+      if (p.botAvoidUntil > tick) {                   // manœuvre en cours : on s'y tient quelques ticks
+        inp[p.botAvoidDir] = true; inp.back = !!p.botAvoidBack; if (!ahead && !p.botAvoidBack) inp.fwd = true;
+      } else if (!D.nav) {                            // Facile : tout droit vers l'ennemi le plus proche ; bloqué : choisit un côté (et parfois recule) puis s'y tient
+        if (ahead) {
+          p.botAvoidDir = Math.random() < 0.5 ? 'left' : 'right'; p.botAvoidBack = Math.random() < 0.4; p.botAvoidUntil = tick + 10 + Math.floor(Math.random() * 16);
+          inp[p.botAvoidDir] = true; inp.back = !!p.botAvoidBack;
+        } else if (near) {
+          const diff = steer(near.x, near.y, 0.07);
+          if (Math.abs(diff) < 1.1 && near.d2 > (BLK * D.stand) ** 2) inp.fwd = true;       // avance aussi pendant qu'il tourne
+          aimF = near; aimDiff = diff;
+        } else {                                      // pas de cible visible : errance (patrouille)
+          if (!(p.botWanderUntil > tick)) { p.botWanderUntil = tick + 20 + Math.floor(Math.random() * 40); p.botWanderTurn = Math.random() < 0.35 ? (Math.random() < 0.5 ? 'left' : 'right') : null; }
+          if (p.botWanderTurn) inp[p.botWanderTurn] = true;
+          inp.fwd = true;
+        }
+      } else {
+        // Normale / Difficile : on vise en priorité l'ennemi proche dont la ligne de tir (anticipée) est libre de tout bloc
+        for (const f of foes) {
+          const lp = leadPoint(p, f); f.ax = lp[0]; f.ay = lp[1];
+          f.clear = lineFirst(p.x, p.y, f.ax, f.ay) === 0;
+          if (f.clear && (!aimF || f.d2 < aimF.d2)) aimF = f;
+        }
+        let direct = false, dist = 0;
+        if (aimF) { dist = Math.sqrt(aimF.d2); direct = lineSafe(p.x, p.y, aimF.x, aimF.y, dm); }
+        if (!aimF && D.rico > 0 && foes.length) {         // Difficile : pas de tir direct -> cherche un tir par ricochet (balayage d'angles) ; canon prêt, au plus un essai de 12 ticks toutes les 40 ticks
+          if (tick - p.botRicoT >= 40 && tick >= p.cool) {
+            p.botRicoT = tick; p.botRico = null; let bd = 9;
+            for (let i = 0; i < 96; i++) {
+              const a = i / 96 * 6.2832 - Math.PI; shotTrace(p, a, foes, allies);
+              if (TR.k === 'foe' && TR.b >= 1 && TR.b <= D.rico && TR.t <= 45) { const d = Math.abs(angDiff(a, p.angle)); if (d < bd) { bd = d; p.botRico = { a, until: tick + 12 }; } }
+            }
+          }
+          if (p.botRico && p.botRico.until > tick) rico = true;
+        }
+        if (aimF && p.botPush <= tick && (direct || dist <= BLK * 6)) {        // combat : face à l'ennemi (devant lui), on s'arrête à la distance de tir
+          aimDiff = steer(aimF.ax, aimF.ay, band);
+          if (direct && dist > D.stand * BLK && Math.abs(aimDiff) < 1.1) inp.fwd = true;
+          else if (dist < D.stand * BLK * 0.5 && D.rico > 0 && Math.abs(aimDiff) < 0.5) inp.back = true;   // Difficile : garde ses distances
+        } else if (rico) {
+          aimDiff = steer(p.x + Math.cos(p.botRico.a), p.y + Math.sin(p.botRico.a), band);
+        } else {                                      // sinon : on contourne les murs vers l'ennemi, un bonus ou un point de patrouille
+          const goals = aiGoals(p, D, foes), key = goals.join(',');
+          if (!p.botField || (key !== p.botFieldKey && tick - p.botFieldT >= 4) || tick - p.botFieldT >= 12) { p.botField = aiField(goals, dm); p.botFieldKey = key; p.botFieldT = tick; }
+          const way = aiWay(p, p.botField, dm);
+          if (way) {
+            if (way.wood >= 0 && Math.hypot(way.x - p.x, way.y - p.y) < 14) { wc = way.wood; steer(cellX(wc), cellY(wc), band); }   // devant une caisse qui barre la route : face à elle, on l'abat
+            else if (Math.abs(steer(way.x, way.y, 0.07)) < 0.8) inp.fwd = true;
+          } else { p.botGoal = null; inp.fwd = true; inp.left = true; }
+        }
+        if (inp.fwd && ahead) { inp.fwd = false; if (ahead !== true && ahead.team !== undefined) { p.botAvoidDir = Math.random() < 0.5 ? 'left' : 'right'; p.botAvoidBack = false; p.botAvoidUntil = tick + 8 + Math.floor(Math.random() * 10); } }   // un tank en travers : on le contourne
+      }
+    }
+    // 2. tir : seulement si l'obus touchera (ou ouvre la route) ; jamais dans le métal
+    if (tick >= p.cool) {
+      if (!D.nav) {                                   // Facile : « à l'œil » dans la fenêtre fireA ; vérifie parfois (D.metal) qu'un métal ne barre pas le tir
+        if (aimF && Math.abs(aimDiff) < D.fireA && Math.random() < D.fireP && (Math.random() >= D.metal || lineFirst(p.x, p.y, aimF.x, aimF.y) !== 1)) inp.fire = true;
+      } else {
+        let ok = false, bad = false;
+        const fa = p.angle + (inp.right ? ROT * boost : inp.left ? -ROT * boost : 0), fspd = inp.fwd ? TANK_SPD * boost : inp.back ? -TANK_SPD * boost * REV : 0;   // pose au moment du tir : moveTank passe avant fire
+        const fx0 = p.x + Math.cos(fa) * fspd, fy0 = p.y + Math.sin(fa) * fspd;
+        for (const da of (p.tripleUntil > tick ? [0, -0.18, 0.18] : [0])) {
+          shotTrace(p, fa + da, foes, allies, fx0, fy0);
+          if ((TR.k === 'foe' && TR.b <= D.rico) || TR.k === 'barrel+' || (TR.k === 'barrel0' && aimF)) ok = true;   // (baril sans victime sur la ligne de tir : on le fait sauter)
+          else if (TR.k === 'ally' || TR.k === 'barrel-') bad = true;
+          else if (wc >= 0 && TR.fc === wc && TR.ft <= 14) ok = true;                                      // la caisse qui nous barre la route
+        }
+        if (!ok && p.homingUntil > tick && aimF && Math.abs(aimDiff) < 0.5) ok = true;                     // missile guidé : il se corrige tout seul…
+        if (p.homingUntil > tick && ff && near && allies.some(a => (a.x - p.x) ** 2 + (a.y - p.y) ** 2 < near.d2 * 1.2)) bad = true;   // …vers le tank le plus proche : si c'est un allié (tir allié actif), on ne tire pas
+        if (ok && !bad && Math.random() < D.fireP) inp.fire = true;
+        if (bad && aimF && Math.random() < 0.15) { p.botAvoidDir = Math.random() < 0.5 ? 'left' : 'right'; p.botAvoidBack = Math.random() < 0.5; p.botAvoidUntil = tick + 8 + Math.floor(Math.random() * 10); }   // ligne de tir barrée par un baril trop proche : on se décale
+      }
+    }
+    // 3. mine : posée quand un ennemi est proche
+    if (p.mineN > 0 && tick >= p.mineCd && !dodging && near && near.d2 < (BLK * D.mineR) ** 2 && Math.random() < D.mineP) { layMine(p); }
+    // 4. ne jamais rouler sur une mine visible (l'intention de bouger compte pour la détection de blocage, même si la garde l'annule)
+    if (inp.fwd || inp.back) p.botWant++;
+    if (inp.fire) p.botFired = true;
+    if (!dodging && !brave) mineGuard(p, inp, dm, D.look);
+    // 5. bloqué trop longtemps (tank en travers, recoin) : manœuvre aléatoire, puis on accepte les risques de mines
+    if (tick - p.botLastT >= 20) {
+      const moved = Math.hypot(p.x - p.botLastX, p.y - p.botLastY);
+      p.botStuck = (p.botWant >= 12 && moved < 8) ? p.botStuck + 1 : 0;
+      p.botIdle = (moved < 8 && !p.botFired) ? p.botIdle + 1 : 0; p.botFired = false;
+      if (p.botIdle >= 5) { p.botPush = tick + 100; p.botIdle = 0; }   // 100 ticks sans bouger ni tirer (impasse à distance) : plus d'attente, il fonce
+      p.botLastT = tick; p.botLastX = p.x; p.botLastY = p.y; p.botWant = 0;
+      if (p.botStuck >= 2) { p.botAvoidDir = Math.random() < 0.5 ? 'left' : 'right'; p.botAvoidBack = Math.random() < 0.4; p.botAvoidUntil = tick + 10 + Math.floor(Math.random() * 16); }
+      if (p.botStuck >= 5) { p.botBrave = tick + 150; p.botStuck = 0; p.botField = null; }
     }
     p.inputs = inp;
   }

@@ -16,7 +16,16 @@ const TICK_HZ = 15;
 const COUNTDOWN_TICKS = 3 * TICK_HZ;
 const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
 const key = (x, y) => y * GW + x;
-const WALL = -2;                          // cellule "mur" (rétrécissement)
+const WALL = -2, FREE = -1;               // cellule "mur" (rétrécissement) ; FREE = case libre du tableau d'occupation
+// Occupation de la grille : mêmes get/set/has/delete qu'une Map (valeur = siège, WALL, ou undefined si libre) mais sur un Int8Array,
+// que les bots lisent directement (`.a`) : 10 bots × 3 remplissages par tick ne passent pas par 100 000 Map.get.
+class Occ {
+  constructor() { this.a = new Int8Array(GW * GH).fill(FREE); }
+  get(k) { const v = this.a[k]; return v === FREE ? undefined : v; }
+  has(k) { const v = this.a[k]; return v !== undefined && v !== FREE; }
+  set(k, v) { this.a[k] = v; return this; }
+  delete(k) { this.a[k] = FREE; }
+}
 // bonus
 const PU_TYPES = ['speed', 'ghost', 'cut', 'blink', 'breaker', 'invert'];
 const PU_EVERY = 3 * TICK_HZ, MAX_PU = 4, SPEED_TICKS = 4 * TICK_HZ, GHOST_TICKS = 2 * TICK_HZ;
@@ -27,7 +36,11 @@ const BOOST_MAX = 100, BOOST_REGEN = 0.7, BOOST_COST = 2.6;
 const SHRINK_START = 22 * TICK_HZ, SHRINK_EVERY = 2 * TICK_HZ;
 // traînée qui s'efface (mode "fade")
 const TRAIL_LIFE = 130;
-const TRDIFF = [{ look: 4, err: 0.14 }, { look: 8, err: 0.04 }, { look: 12, err: 0 }];   // IA : Facile / Normale / Difficile (profondeur de vision, taux d'inattention)
+const TRDIFF = [   // IA : Facile / Normale / Difficile (cf. bloc « IA des bots » : inattention, taille du remplissage, poids du terrain adverse, rayon, rétrécissement, boost, risque de choc, bruit)
+  { err: 0.02, cap: 80, vs: 0, rr: 0, shr: 0, bst: 0, dg: 160, nz: 3, sb: 1, hug: 1.2, hugAll: 0 },
+  { err: 0.01, cap: 120, vs: 0.2, rr: 16, shr: 1, bst: 0, dg: 300, nz: 4, sb: 1, hug: 1.2, hugAll: 0 },
+  { err: 0, cap: 240, vs: 0.5, rr: 28, shr: 1, bst: 8, dg: 400, nz: 0.6, sb: 1, hug: 1.2, hugAll: 0 },
+];
 const TEAM_COUNT = { ffa: 0, '2v2': 2, '2v2v2': 3, '3v3': 2, '4v4': 2, '2v2v2v2': 4, '3v3v3': 3, '5v5': 2, '2v2v2v2v2': 5 };
 const numTeamsFor = (m, N) => (m === 'ffa' ? N : TEAM_COUNT[m]);
 // modes d'équipe proposés selon le nombre EXACT de participants (humains + bots) ; 5 équipes au maximum
@@ -91,7 +104,7 @@ export function createTron(room) {
     }));
   }
   function fullReset() {
-    players = makePlayers(); occupied = new Map(); pickups = [];
+    players = makePlayers(); occupied = new Occ(); pickups = [];
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = [];
     mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; shrinkLevel = 0; fadeMode = false; botCount = 0; botDiff = 1; seatByMid = {};
   }
@@ -107,7 +120,7 @@ export function createTron(room) {
   const head = p => p.cells[p.cells.length - 1];
 
   function spawnPlayers(parts) {
-    occupied = new Map(); pickups = [];
+    occupied = new Occ(); pickups = [];
     const cx = GW / 2, cy = GH / 2, R = Math.min(GW, GH) * 0.3, N = parts.length;
     parts.forEach((p, i) => {
       const ang = i * 2 * Math.PI / N;
@@ -145,7 +158,7 @@ export function createTron(room) {
   }
   function backToLobby() {            // abandon : retour au lobby en pleine partie
     if (gameState !== 'play' && gameState !== 'countdown' && gameState !== 'paused') return;
-    gameState = 'lobby'; winner = null; fx = []; occupied = new Map(); pickups = []; shrinkLevel = 0;
+    gameState = 'lobby'; winner = null; fx = []; occupied = new Occ(); pickups = []; shrinkLevel = 0;
     for (const p of players) { p.playing = false; p.alive = false; p.cells = []; p.boostHeld = false; p.pendingDir = null; p.nextDir = null; }
   }
   function endRound() {
@@ -195,41 +208,125 @@ export function createTron(room) {
       }
     }
   }
-  function botThink(p) {                              // IA : mesure l'espace libre tout droit / à gauche / à droite, choisit le plus dégagé (+ attrait des bonus)
-    const h = head(p);
-    const cellFree = (x, y) => x >= 0 && y >= 0 && x < GW && y < GH && occupied.get(key(x, y)) === undefined;
-    const ray = d => { let n = 0; for (let i = 1; i <= 12; i++) { const x = h.x + d.x * i, y = h.y + d.y * i; if (!cellFree(x, y)) break; n++; } return n; };
-    const left = { x: p.dir.y, y: -p.dir.x }, right = { x: -p.dir.y, y: p.dir.x };
-    const cand = [{ d: p.dir, sc: ray(p.dir) + 1.5 }, { d: left, sc: ray(left) }, { d: right, sc: ray(right) }];   // léger biais : garder sa direction
-    for (const c of cand) { for (const pk of pickups) { const dx = pk.gx - h.x, dy = pk.gy - h.y; if (c.d.x && Math.sign(dx) === c.d.x && Math.abs(dy) <= 2) c.sc += 2; if (c.d.y && Math.sign(dy) === c.d.y && Math.abs(dx) <= 2) c.sc += 2; } }   // attiré par les bonus devant
-    cand.sort((a, b) => b.sc - a.sc);
-    const best = (cand[0].sc === cand[1].sc && Math.random() < 0.5) ? cand[1] : cand[0];
-    if (best.sc <= 0.5 + 1.5 * (best.d === p.dir ? 1 : 0)) { const alt = cand.find(c => c.sc > 1.5); if (alt) { p.pendingDir = alt.d; return; } }   // cul-de-sac : prend ce qui reste
-    p.pendingDir = best.d;
+  /* ---- IA des bots (01/10) ----
+     Chaque tick, pour chacune des 3 directions possibles (tout droit / gauche / droite), le bot simule le coup puis mesure
+     l'ESPACE qu'il garderait : remplissage en largeur BORNÉ (fill) mené en même temps depuis les têtes adverses proches
+     (« à la Voronoï » : une case est à nous si on l'atteint STRICTEMENT avant tout adversaire). Il choisit la direction qui
+     garde le plus d'espace — donc ni cul-de-sac, ni couloir qui se referme — avec : malus pour la case qu'une tête voisine
+     va viser (choc frontal = mort des deux), prise en compte du rétrécissement à venir (une case dont l'anneau devient mur
+     avant qu'on l'ait quittée est fermée), de la vitesse (double pas : les 2 cases doivent être libres), attrait des
+     bonus, et boost (sauf cul-de-sac) seulement quand 2 cases d'avance gagnent du terrain disputé.
+     ⇄ : la commande d'un bot est inversée à la consommation (update) ; il écrit donc l'INVERSE de la direction voulue.
+     Niveaux (TRDIFF) : err = taux d'inattention (le tick est sauté) · cap = taille du remplissage · vs = poids du terrain
+     adverse · rr = rayon des adversaires pris en compte · shr = anticipe le rétrécissement · bst = utilise le boost ·
+     dg = poids du risque de choc · nz = bruit sur les scores. Coût mesuré : ~35 µs/bot/tick en Difficile à 10 bots (~0,35 ms/tick pour les 10), ~12 µs en Normale. */
+  const PK_W = { speed: 10, ghost: 8, cut: 4, blink: 5, breaker: 9, invert: 7 };   // attrait des bonus (×10)
+  let bfN = 0, bfStamp = 0, bfVis, bfOwn, bfTm, bfQx, bfQy, pkMark, pkSig = -1, pkList = [];
+  const rivX = new Int16Array(MAX_SEATS), rivY = new Int16Array(MAX_SEATS), hdX = new Int16Array(MAX_SEATS), hdY = new Int16Array(MAX_SEATS), hdU = new Int8Array(MAX_SEATS), hdV = new Int8Array(MAX_SEATS), hdF = new Uint8Array(MAX_SEATS);
+  let nRiv = 0, nHd = 0, bfOurs = 0, bfTheirs = 0, bfPk = 0, cShr = false, cWall0 = 0, cEv = 1;
+  const shrinkEvery = () => Math.max(6, Math.round(SHRINK_EVERY * GW0 / GW));   // intervalle entre deux anneaux (cf. update)
+  function botPrep() {                              // tampons du remplissage (réalloués si la grille change) + carte des bonus du tick
+    const n = GW * GH;
+    if (bfN !== n) { bfN = n; bfVis = new Int32Array(n); bfOwn = new Int8Array(n); bfTm = new Int16Array(n); bfQx = new Int16Array(n); bfQy = new Int16Array(n); pkMark = new Uint8Array(n); bfStamp = 0; pkList = []; pkSig = -1; }
+    const sig = round * 100000 + tick;
+    if (sig === pkSig) return;
+    pkSig = sig;
+    for (const k of pkList) pkMark[k] = 0;
+    pkList = [];
+    for (const pk of pickups) { const k = key(pk.gx, pk.gy); pkMark[k] = PK_W[pk.type] || 5; pkList.push(k); }
   }
-  function rayFree(x, y, d, max) {                  // IA : distance libre devant (profondeur selon difficulté), murs de rétrécissement inclus
-    let n = 0;
-    for (let i = 1; i <= (max || 12); i++) {
-      const cx = x + d.x * i, cy = y + d.y * i;
-      if (cx < 0 || cy < 0 || cx >= GW || cy >= GH) break;
-      if (cx < shrinkLevel || cy < shrinkLevel || cx >= GW - shrinkLevel || cy >= GH - shrinkLevel) break;
-      if (occupied.get(key(cx, cy)) !== undefined) break;
-      n++;
+  // Case jouable à l'instant t (1 = la case que le coup en cours va occuper) : dans l'arène, libre, et pas fermée par un anneau
+  // du rétrécissement avant le tick suivant (la tête qui s'y trouve alors est tuée par applyShrink).
+  const cellOK = (x, y) => x >= 0 && y >= 0 && x < GW && y < GH && occupied.a[y * GW + x] === FREE && !(cShr && cWall0 + Math.min(x, y, GW - 1 - x, GH - 1 - y) * cEv <= 1);
+  // Remplissage borné depuis (sx,sy) [notre case, temps 1] contre les têtes adverses rivX/rivY [temps 0] ; blk = case déjà prise
+  // (1er pas d'un double pas), -1 sinon. Résultat : bfOurs (cases à nous), bfTheirs (à eux), bfPk (meilleur bonus que nous atteignons le premier).
+  const DX = [1, -1, 0, 0], DY = [0, 0, 1, -1];
+  function fill(sx, sy, blk, cap) {
+    const a = occupied.a, vis = bfVis, own = bfOwn, tm = bfTm, qx = bfQx, qy = bfQy, W = GW, H = GH, st = ++bfStamp, lim = cap * 4;
+    let qh = 0, qt = 0, ours = 1, theirs = 0, pk = 0;
+    for (let i = 0; i < nRiv; i++) { const k = rivY[i] * W + rivX[i]; vis[k] = st; own[k] = 1; tm[k] = 0; qx[qt] = rivX[i]; qy[qt++] = rivY[i]; }
+    const k0 = sy * W + sx;
+    vis[k0] = st; own[k0] = 0; tm[k0] = 1; qx[qt] = sx; qy[qt++] = sy;
+    if (blk >= 0) { vis[blk] = st; own[blk] = 2; tm[blk] = 0; }
+    while (qh < qt && ours < cap && qt < lim) {
+      const x = qx[qh], y = qy[qh++], k = y * W + x, o = own[k];
+      if (o === 2) continue;                         // case disputée au même instant : personne n'y passe
+      const t = tm[k] + 1;
+      for (let d = 0; d < 4; d++) {
+        const nx = x + DX[d], ny = y + DY[d];
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const nk = ny * W + nx;
+        if (vis[nk] === st) { if (tm[nk] === t && own[nk] !== o && own[nk] !== 2 && nk !== k0) { if (own[nk] === 0) ours--; else theirs--; own[nk] = 2; } continue; }
+        if (a[nk] !== FREE) continue;
+        if (cShr && cWall0 + Math.min(nx, ny, W - 1 - nx, H - 1 - ny) * cEv <= t) continue;   // l'anneau de cette case sera un mur avant qu'on y soit
+        vis[nk] = st; own[nk] = o; tm[nk] = t; qx[qt] = nx; qy[qt++] = ny;
+        if (o === 0) { ours++; const w = pkMark[nk]; if (w && w / t > pk) pk = w / t; } else theirs++;
+      }
     }
-    return n;
+    bfOurs = ours; bfTheirs = theirs; bfPk = pk;
   }
-  function botThink(p) {                            // IA : tout droit si c'est sûr, sinon tourner du côté le plus dégagé
+  // Probabilité (0..~1) qu'une tête adverse occupe (x,y) ce tick : devant elle (elle continue) ≫ à côté (elle vire) ; ×2 cases si elle est rapide.
+  function headRisk(x, y) {
+    let r = 0;
+    for (let i = 0; i < nHd; i++) {
+      const dx = hdX[i] - x, dy = hdY[i] - y, m = Math.abs(dx) + Math.abs(dy);
+      if (m === 1) r += (hdX[i] + hdU[i] === x && hdY[i] + hdV[i] === y) ? 0.85 : 0.1;
+      else if (m === 2 && hdF[i] && hdX[i] + 2 * hdU[i] === x && hdY[i] + 2 * hdV[i] === y) r += 0.4;
+    }
+    return r;
+  }
+  function steer(p, best) {                         // ⇄ : update() inverse la commande d'un bot inversé → on écrit l'inverse de la direction voulue
+    if (best === p.dir) { p.pendingDir = null; return; }
+    p.pendingDir = p.invertUntil > tick ? { x: -best.x, y: -best.y } : best;
+  }
+  function botThink(p) {
     const D = TRDIFF[botDiff] || TRDIFF[1];
-    if (D.err && Math.random() < D.err) return;                            // Facile : moments d'inattention (continue tout droit)
-    const h = head(p), d = p.dir;
-    const left = { x: d.y, y: -d.x }, right = { x: -d.y, y: d.x };
-    const fS = rayFree(h.x, h.y, d, D.look), lS = rayFree(h.x, h.y, left, D.look), rS = rayFree(h.x, h.y, right, D.look);
-    let turn = null;
-    if (fS >= 4 && Math.random() < 0.93) turn = null;                      // voie libre : on continue (7 % de fantaisie)
-    else if (fS >= lS && fS >= rS && fS > 0) turn = null;                  // tout droit reste le meilleur choix
-    else turn = lS >= rS ? left : right;                                   // sinon : côté le plus dégagé
-    if (turn && rayFree(h.x, h.y, turn, D.look) === 0) turn = (turn === left ? right : left);
-    if (turn) p.pendingDir = turn;
+    if (D.err && Math.random() < D.err) return;     // Facile : moments d'inattention (continue tout droit)
+    botPrep();
+    const h = head(p), d = p.dir, W = GW, a = occupied.a;
+    const left = { x: d.y, y: -d.x }, right = { x: -d.y, y: d.x }, ev = shrinkEvery();
+    cShr = !!D.shr && tick + 3 * D.cap >= SHRINK_START; cWall0 = SHRINK_START - tick; cEv = ev;
+    nRiv = 0; nHd = 0;
+    for (const q of players) {
+      if (!q.alive || q === p) continue;
+      const qh = head(q), q2 = q.dir;
+      hdX[nHd] = qh.x; hdY[nHd] = qh.y; hdU[nHd] = q2.x; hdV[nHd] = q2.y; hdF[nHd++] = (q.speedUntil > tick || (q.boostHeld && q.boost > 0)) ? 1 : 0;
+      if (D.vs && q.team !== p.team && Math.abs(qh.x - h.x) + Math.abs(qh.y - h.y) <= D.rr) { rivX[nRiv] = qh.x; rivY[nRiv++] = qh.y; }
+    }
+    const two = p.speedUntil > tick;                // vitesse : 2 cases dans le même sens, la 2e à l'aveugle → elles doivent être libres toutes les deux
+    let bi = -1, bs = -Infinity, bBase = 0, bTheirs = 0;
+    const opts = [d, left, right];
+    for (let i = 0; i < 3; i++) {
+      const o = opts[i], x1 = h.x + o.x, y1 = h.y + o.y;
+      if (!cellOK(x1, y1)) continue;
+      let sx = x1, sy = y1, blk = -1, risk = headRisk(x1, y1);
+      if (two) { sx = x1 + o.x; sy = y1 + o.y; if (!cellOK(sx, sy)) continue; blk = y1 * W + x1; risk += headRisk(sx, sy); }
+      fill(sx, sy, blk, D.cap);
+      const base = bfOurs - D.vs * bfTheirs, ours = bfOurs;
+      let sc = base + bfPk * 4 - D.dg * risk + (i === 0 ? D.sb : 0) + Math.random() * D.nz;
+      if (D.hug && (D.hugAll || ours < D.cap * 0.7)) {   // épouse les murs : remplit l'espace sans le gaspiller (pas de trous)
+        let nb = 0; for (let k = 0; k < 4; k++) { const nx = sx + DX[k], ny = sy + DY[k]; if (nx < 0 || ny < 0 || nx >= W || ny >= GH || a[ny * W + nx] !== FREE) nb++; }
+        sc += nb * D.hug;
+      }
+      if (sc > bs) { bs = sc; bi = i; bBase = base; bTheirs = bfTheirs; }
+    }
+    if (bi < 0) {                                   // tout est fermé : un fantôme / casse-mur traverse une traînée (jamais un mur ni le bord)
+      if (p.ghostUntil > tick || p.breaker) for (let i = 0; i < 3 && bi < 0; i++) { const x = h.x + opts[i].x, y = h.y + opts[i].y; if (x >= 0 && y >= 0 && x < W && y < GH && a[y * W + x] >= 0) bi = i; }
+      if (bi < 0) { p.boostHeld = false; return; }  // condamné : rien à tenter
+      p.boostHeld = false; steer(p, opts[bi]); return;
+    }
+    const o = opts[bi];
+    steer(p, o);
+    // boost : 2 cases d'avance seulement s'il y a un terrain DISPUTÉ à prendre (jamais dans un espace clos : il se consommerait plus vite)
+    let boost = false;
+    if (D.bst && !two && bTheirs > 0 && p.boost >= (p.boostHeld ? 5 : 40)) {
+      const x1 = h.x + o.x, y1 = h.y + o.y, x2 = x1 + o.x, y2 = y1 + o.y;
+      if (cellOK(x2, y2) && headRisk(x1, y1) + headRisk(x2, y2) === 0) {
+        fill(x2, y2, y1 * W + x1, D.cap);
+        if (bfOurs - D.vs * bfTheirs >= bBase + D.bst) boost = true;
+      }
+    }
+    p.boostHeld = boost;
   }
   function applyShrink() {
     const L = shrinkLevel;
@@ -256,7 +353,7 @@ export function createTron(room) {
     if (gameState !== 'play') return;
     tick++;
     // sur une grande grille il faut plus d'anneaux : on resserre l'intervalle pour que la manche dure autant
-    const shrinkEv = Math.max(6, Math.round(SHRINK_EVERY * GW0 / GW));
+    const shrinkEv = shrinkEvery();
     if (tick >= SHRINK_START && (tick - SHRINK_START) % shrinkEv === 0) { shrinkLevel++; applyShrink(); }
     const alive = players.filter(p => p.alive);
     for (const p of alive) if (p.bot) botThink(p);
