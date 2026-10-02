@@ -18,6 +18,8 @@ import { createStreaks, createCallouts, streakText, createHitStop, drawFlash, dr
 import { createRalenti } from '../../ralenti.js';
 import { drawPodium, podiumEntries } from '../../podium.js';
 import { createDuelCam } from '../../camera-duel.js';
+import { createEcranFin } from '../../ecran-fin.js';                  // fin de manche en plein écran : boutons « Relancer » / « Accueil »
+import { boutonMatch, texteMatch, balleDeMatch, titreFin, pastillesTexte } from '../../match.js';   // match en N manches (bouton GM, chip, balle de match, titre de fin, pastilles)
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
@@ -158,6 +160,14 @@ export default (function () {
   let music = NOMUSIC;                                  // recréé à chaque init() : dispose() au teardown est définitif pour l'instance
   const input = { left: false, right: false, fwd: false, back: false, fire: false };
   let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, diffBtn, arenaBtn, winBtn, ffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
+  let matchBtn = null, chipEl = null, bmRound = -1;     // match : bouton .gm partagé (remplace tkWin) ; chip du HUD ; manche dont la balle de match a déjà été annoncée
+  // Fin de manche EN PLEIN ÉCRAN (ecran-fin.js) : `body.playing` reste posé en 'over' tant que le joueur n'a pas choisi « Accueil »
+  const EF = createEcranFin({ aChange: () => { if (destroyed) return; applyPlaying(snap ? snap.gs : 'lobby'); resizeCanvas(); } });
+  function applyPlaying(gs) {
+    const inGame = EF.enJeu(gs);
+    if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); }
+    return inGame;
+  }
   const DIFF_NAMES = ['Facile', 'Normale', 'Difficile'];
 
   const $ = id => root.querySelector('#' + id);
@@ -184,6 +194,7 @@ export default (function () {
   // ───────────────────────── HUD, classement, écran de fin ─────────────────────────
   function refreshHUD() {
     if (!snap) return;
+    if (chipEl) { const t = texteMatch(snap.match); if (chipEl.textContent !== t) chipEl.textContent = t; chipEl.style.display = t ? 'block' : 'none'; }   // chip « Premier à 3 · manche 2 » (texte brut)
     snap.players.forEach((p, i) => {
       if (!cards[i]) return;
       const shown = p.connected || p.playing;
@@ -196,7 +207,7 @@ export default (function () {
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const gly = `<span style="opacity:.7;font-size:.9em" title="motif du siège">${SEAT_GLYPH[i % SEAT_GLYPH.length]}</span>`;   // rappel du motif peint sur la caisse (constante : aucune donnée réseau injectée)
-      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}${esc(p.name || ('P' + (i + 1)))} ${gly} <span class="sc">🏆${p.score | 0} · ${p.kills | 0}⚡</span> ${tags.join('')}`;
+      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}${esc(p.name || ('P' + (i + 1)))} ${gly} <span class="sc">${snap.match ? `<span title="manches gagnées (premier à ${snap.match.n})" style="white-space:nowrap">${pastillesTexte(p.score, snap.match.n)}</span>` : '🏆' + (p.score | 0)} · ${p.kills | 0}⚡</span> ${tags.join('')}`;   // match en cours : pastilles de manches gagnées (●●○) à la place du compteur
       if (cards[i].__pn !== pnH) { cards[i].__pn = pnH; cards[i].querySelector('.pn').innerHTML = pnH; }   // innerHTML seulement si le texte change (pas de re-décodage d'avatar à chaque état)
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       const counts = [p.shield ? '⛉' + p.shield : '', p.mineN ? '◈' + p.mineN : ''].filter(Boolean).join(' ');
@@ -217,11 +228,12 @@ export default (function () {
   function showEndscreen(m) {
     if (m.gs !== 'over' || !m.stats) { endEl.classList.add('hidden'); return; }
     endEl.classList.remove('hidden');
-    const isMatch = m.stats.match;
+    const isMatch = m.match ? !!m.match.f : !!m.stats.match;   // match gagné → titre et podium « du match »
     const ps = m.players.filter(p => p.playing && p.place > 0).slice().sort((a, b) => a.place - b.place);
     const champ = m.winner >= 0 ? ps.find(p => p.team === m.winner) : null;
     const who = champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[m.winner] : esc(nameOf(champ))) : null;
-    const title = champ ? (isMatch ? '🏆 ' + who + ' REMPORTE LE MATCH' : who + ' gagne la manche') : 'Égalité — aucun survivant';
+    const T = titreFin(m.match, champ ? (teamMode ? 'Équipe ' + TEAM_LETTER[m.winner] : nameOf(champ)) : '', scoresEquipes(m));   // titre de match (VICTOIRE DU MATCH / Manche gagnée / nulle) : '' hors match
+    const title = T.titre ? (isMatch ? '🏆 ' : '') + esc(T.titre) + (who ? ' — ' + who : '') : champ ? (isMatch ? '🏆 ' + who + ' REMPORTE LE MATCH' : who + ' gagne la manche') : 'Égalité — aucun survivant';
     const medals = ['🥇', '🥈', '🥉'];
     // As du canon : le plus de chars détruits, départage aux touches puis au classement (≥ 1 destruction)
     let mvp = null; ps.forEach(p => { if ((p.kills | 0) > 0 && (!mvp || p.kills > mvp.kills || (p.kills === mvp.kills && ((p.dmg | 0) > (mvp.dmg | 0) || ((p.dmg | 0) === (mvp.dmg | 0) && p.place < mvp.place))))) mvp = p; });
@@ -234,8 +246,26 @@ export default (function () {
     }).join('');
     const mvpLine = mvp ? `<div class="emeta">⭐ As du canon : <b style="color:${colSeat(mvp.seat)}">${esc(nameOf(mvp))}</b> — ${mvp.kills} char${mvp.kills > 1 ? 's' : ''} détruit${mvp.kills > 1 ? 's' : ''}, ${mvp.dmg | 0} touche${(mvp.dmg | 0) > 1 ? 's' : ''}</div>` : '';
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : K.sand}">${title}</div>
-      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} équipages · objectif ${m.winTarget} manche(s)</div>${mvpLine}
+      <div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} équipages · ${m.match ? esc(T.sous) : 'manche simple'}</div>${mvpLine}
       <div class="elist">${rows}</div>${finBloc(m)}<div class="ehint">${touch ? 'Touchez pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
+    // « ↻ Relancer » (= Rejouer) et « ⌂ Accueil » : la carte reste plein écran, le ralenti et le podium restent au-dessus
+    EF.boutons(endEl, {
+      relancer: () => { unlockAudio(); send({ t: 'start' }); },
+      libelle: m.match && m.match.f ? 'Nouveau match' : (m.match ? 'Manche suivante' : 'Relancer'),
+      accueil: () => { endEl.classList.add('hidden'); podT0 = 0; },      // mise en page d'accueil : plus de carte ni de podium par-dessus l'arène
+    });
+  }
+  // scores de manches gagnées, une valeur par équipe (en FFA : par pilote) — pour le sous-titre « 2 – 1 · premier à 3 »
+  function scoresEquipes(m) { const o = {}; for (const p of m.players) if (p.playing) o[p.team] = p.score | 0; return Object.keys(o).map(k => o[k]); }
+  // nom d'une équipe pour l'annonce de balle de match (texte brut : msgGlobal / canvas)
+  function nomEquipe(t) { if (teamMode) return 'Équipe ' + (TEAM_LETTER[t] || (t + 1)); const p = snap && snap.players.find(q => q.playing && q.team === t); return p ? nameOf(p) : ''; }
+  // Podium du MATCH gagné : l'équipe victorieuse d'abord, puis le plus de manches gagnées, puis la place de la dernière manche (une même équipe partage sa marche)
+  function podiumJoueurs(m) {
+    if (!(m.match && m.match.f)) return m.players;
+    const eq = {};
+    for (const p of m.players) if (p.playing && p.place > 0) { const e = eq[p.team] || (eq[p.team] = { t: p.team, sc: 0, pl: 99 }); e.sc = Math.max(e.sc, p.score | 0); e.pl = Math.min(e.pl, p.place); }
+    const rang = Object.keys(eq).map(k => eq[k]).sort((a, b) => (b.t === m.match.w) - (a.t === m.match.w) || b.sc - a.sc || a.pl - b.pl);
+    return m.players.map(p => { const i = p.playing && p.place > 0 ? rang.findIndex(e => e.t === p.team) : -1; return i >= 0 ? Object.assign({}, p, { place: i + 1 }) : p; });
   }
   // courbe des vies de la manche + meilleure action (finpartie.js échappe les noms et filtre les couleurs)
   function finBloc(m) {
@@ -308,8 +338,9 @@ export default (function () {
     snap = m; teamMode = !!(m.mode && m.mode !== 'ffa');
     if (m.round !== prevRound) { prevRound = m.round; resetRound(); }   // nouvelle manche : terrain propre
     RL.push(m, performance.now());                           // tampon du ralenti : chaque état (grille déjà reconstituée ci-dessus), avant tout le reste
-    const inGame = m.gs === 'play' || m.gs === 'countdown' || m.gs === 'paused';
-    if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); }
+    const inGamePrevAvant = inGamePrev;
+    EF.suivre(m.gs); applyPlaying(m.gs);                     // plein écran aussi à la fin de manche (ralenti, podium, carte) jusqu'à « Accueil »
+    if (inGamePrev !== inGamePrevAvant) resizeCanvas();
     document.body.classList.toggle('paused', m.gs === 'paused');
     if (m.gs === 'play' || m.gs === 'countdown') closePanels();
     buf.push({ t: performance.now(), s: m }); if (buf.length > 10) buf.shift();
@@ -326,6 +357,11 @@ export default (function () {
       const s = p.seat, pl = prevLv[s], inv = !!p.invuln;
       if (m.gs === 'countdown' || (p.alive && (pl === undefined || pl === 0 || p.lives < pl)) || (inv && !prevInv[s])) spawnAt[s] = tNow;
       prevLv[s] = p.alive ? (p.lives | 0) : 0; prevInv[s] = inv;
+    }
+    if (m.gs === 'countdown' && m.round !== bmRound) {         // balle de match : annoncée UNE fois par manche, au décompte (bande globale + annonce plein écran)
+      bmRound = m.round;
+      const bm = balleDeMatch(m.match, nomEquipe);
+      if (bm) { msgGlobal('🏆', bm, { color: '#ffd24a' }); CALL.push('BALLE DE MATCH !', '#ffd24a', tNow); }
     }
     msgKilled = {}; msgBarrels = [];
     (m.fx || []).forEach(playFx);                            // (jamais rejoués pendant le ralenti : ils sont consommés ici, à l'arrivée de l'état)
@@ -373,7 +409,7 @@ export default (function () {
     if (diffBtn) { diffBtn.disabled = !idle; diffBtn.textContent = '🎯 IA : ' + (DIFF_NAMES[m.botDiff] || 'Normale'); }
     modeBtn.disabled = !(idle && (total === 4 || total === 6 || total === 8)); modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode); modeBtn.classList.toggle('on', teamMode);
     arenaBtn.disabled = !idle; arenaBtn.textContent = '🧱 ' + (GEN_NAMES[m.gen] || 'Arène');
-    winBtn.disabled = !idle; winBtn.textContent = '🏁 ' + (m.winTarget === 1 ? '1 manche' : m.winTarget + ' manches');
+    if (matchBtn) matchBtn.maj(m.match, m.gs);               // bouton « 🏆 Premier à N » partagé (remplace l'ancien objectif tkWin)
     ffBtn.disabled = !(idle && teamMode); ffBtn.textContent = '🤝 Tir allié : ' + (m.ff ? 'ON' : 'OFF'); ffBtn.classList.toggle('on', !!m.ff);
   }
 
@@ -1491,7 +1527,7 @@ export default (function () {
         ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         const f1 = readable(15, cv, ARENA), f2 = readable(13, cv, ARENA), mw = ARENA * 0.92;   // ≥ 9 px CSS ; les lignes se replient au lieu de déborder
         ctx.fillStyle = teamMode ? '#9fd0ff' : 'rgba(230,207,152,.9)'; ctx.font = f1 + 'px system-ui,sans-serif';
-        const n1 = wrapText(ctx, `${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''} · ${snap.winTarget === 1 ? '1 manche' : snap.winTarget + ' manches'}`, c, c + 6, mw, f1 * 1.2);
+        const n1 = wrapText(ctx, `${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''} · ${snap.match ? 'premier à ' + snap.match.n : '1 manche'}`, c, c + 6, mw, f1 * 1.2);
         const y2 = c + 6 + (n1 - 1) * f1 * 1.2 + (f1 + f2) / 2 + 8;
         ctx.fillStyle = 'rgba(230,207,152,.82)'; ctx.font = 'bold ' + f2 + 'px system-ui,sans-serif';
         const n2 = wrapText(ctx, tot >= 2 ? (touch ? '▶ Touchez pour lancer l\'assaut' : '▶ Espace / clic pour lancer l\'assaut') : 'En attente d\'un 2ᵉ pilote… (ou ajoute un bot 🤖)', c, y2, mw, f2 * 1.2);
@@ -1516,7 +1552,7 @@ export default (function () {
     drawTank(spr, 0, R * 0.29, -Math.PI / 2, TO, now);             // canon vers le haut, centré (la boîte englobante du char déborde côté canon)
   }
   function drawPodiumBand(now) {
-    const entries = podiumEntries(snap.players, colSeat);
+    const entries = podiumEntries(podiumJoueurs(snap), colSeat);
     if (!entries.length) return;
     const sc = cv.width / ARENA, cw = cv.clientWidth || ARENA, bh = ARENA * (cw < 340 ? 0.44 : cw < 460 ? 0.36 : 0.4), strong = !!A.contrast;
     const top = Math.round((cv.clientHeight || cw) * (bh / ARENA));
@@ -1590,8 +1626,13 @@ export default (function () {
     lbBtn = $('tkLbBtn'); lbPanel = $('tkLbPanel'); lbBody = $('tkLbBody');
     startBtn.onclick = () => { unlockAudio(); if (RL.active(performance.now())) { RL.skip(); return; } send({ t: 'start' }); };   // pendant le rejeu : passe le rejeu, ne relance pas
     pauseBtn.onclick = () => send({ t: 'pause' }); pauseFloat.onclick = () => send({ t: 'pause' });
-    modeBtn.onclick = () => send({ t: 'mode' }); arenaBtn.onclick = () => send({ t: 'arena' }); winBtn.onclick = () => send({ t: 'wintarget' }); ffBtn.onclick = () => send({ t: 'ff' });
+    modeBtn.onclick = () => send({ t: 'mode' }); arenaBtn.onclick = () => send({ t: 'arena' }); ffBtn.onclick = () => send({ t: 'ff' });
     if (botsBtn) botsBtn.onclick = () => send({ t: 'bots' });
+    if (winBtn) { winBtn.style.display = 'none'; winBtn.disabled = true; }   // l'ancien bouton d'objectif cède la place au bouton de match partagé (pas de doublon)
+    matchBtn = boutonMatch(root.querySelector('.bar'), send);
+    chipEl = document.createElement('div');                              // chip du HUD pendant un match (inline : style.css hors lot)
+    chipEl.style.cssText = 'display:none;grid-column:1/-1;text-align:center;font-weight:800;font-size:12px;padding:4px 10px;border-radius:999px;color:#ffd24a;background:rgba(255,210,74,.12);border:1px solid rgba(255,210,74,.45);-webkit-user-select:none;user-select:none;';
+    hud.insertBefore(chipEl, hud.firstChild);
     diffBtn = $('tkDiff'); if (diffBtn) diffBtn.onclick = () => send({ t: 'botdiff' });
     lbBtn.onclick = () => { togglePanel(lbPanel); renderLB(); };
     const helpBtn = $('tkHelp'), helpPanel = $('tkHelpPanel'); if (helpBtn && helpPanel) helpBtn.onclick = () => togglePanel(helpPanel);
@@ -1614,6 +1655,7 @@ export default (function () {
   function onA11y() { applyColors(); }
   function teardown() {
     destroyed = true; cancelAnimationFrame(rafId);
+    EF.suivre('lobby');                                // body.fin retiré (aChange est muet une fois destroyed) ; le choix « Accueil » est remis à zéro
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
     let held = false; for (const k in input) if (input[k]) { input[k] = false; held = true; }
     if (held && send) { try { pushInput(); } catch {} }   // touche tenue au moment de quitter : on envoie l'état « relâché » (sinon le char continue seul). Inoffensif si le hub a déjà changé de jeu : tout à faux

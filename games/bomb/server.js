@@ -13,6 +13,7 @@ function setGridB(n) {
 }
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
+import { creerMatch } from '../match.js';
 import { dailyRng } from '../../dayseed.js';
 
 const GID = 'bomb';
@@ -120,7 +121,9 @@ export function createBomb(room) {
       kills: 0, score: 0, place: 0, elimTick: -1, spawn: { gx: 1, gy: 1 },
     }));
   }
+  const match = creerMatch();                         // match en N manches (games/match.js) : cible 1 = manche simple, comportement historique
   function fullReset() {
+    match.reinit();
     players = makePlayers(); cells = new Array(GW * GH).fill(0); bombs = []; blasts = []; pickups = [];
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; sdIndex = 0; sd = false; genStyle = 0; ff = false; warpOf = {}; revenge = false; botCount = 0; botDiff = 1; seatByMid = {};
   }
@@ -167,6 +170,7 @@ export function createBomb(room) {
     for (const p of players) { if (bots <= 0) break; if (!p.member) { p.bot = true; parts.push(p); bots--; } } // complète avec des bots
     parts.forEach((p, i) => { if (p.bot) p.name = '🤖 Bot ' + (i + 1); });
     if (parts.length < 1) return;
+    match.debutManche(players);                        // match gagné (ou cible changée) : scores remis à 0 avant cette manche
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
@@ -196,14 +200,14 @@ export function createBomb(room) {
       const byTeam = {};                               // kills par équipe : départage la manche quand plusieurs camps restent (revenants compris)
       if (present.length === 1) winner = present[0];
       else { for (const p of players) if (p.playing) byTeam[p.team] = (byTeam[p.team] || 0) + p.kills; let bt = -1, bv = -1, tie = false; for (const k in byTeam) { const v = byTeam[k]; if (v > bv) { bv = v; bt = +k; tie = false; } else if (v === bv) tie = true; } winner = tie ? -1 : bt; }
-      if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
+      if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; }); match.apresManche(players, winner);
       // équipe gagnante = place 1 (même si encore « revenant », pas alive, à l'instant du décompte) ; un seul camp restant : le reste par survie/ordre d'élimination, à la suite
       classerManche(players, winner, present.length === 1 ? undefined : { score: p => byTeam[p.team] || 0 });   // kills d'équipe : les ex æquo en tête partagent la place 1
       recordRound(); return;
     }
     const s = aliveTeams();
     winner = s.size === 1 ? [...s][0] : -1;
-    if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
+    if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; }); match.apresManche(players, winner);
     classerManche(players, winner);                    // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
     recordRound();
   }
@@ -541,7 +545,8 @@ export function createBomb(room) {
       bombs: bombs.map(b => { const o = { x: b.gx, y: b.gy, f: b.fuse, p: b.power }; if (b.remote) o.r = true; return o; }),   // r : présent seulement s'il est vrai
       blasts: blasts.map(bl => ({ x: bl.gx, y: bl.gy })),
       pickups: pickups.map(pk => ({ x: pk.gx, y: pk.gy, t: pk.type, b: !!pk.bad })),
-      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, solo: nParts < 2 } : null,
+      match: match.etat(players),
+      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, solo: nParts < 2, match: match.gagne } : null,
       players: players.map(p => ({
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot,
         x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10,
@@ -598,6 +603,7 @@ export function createBomb(room) {
     else if (m.t === 'revenge') { if (editable()) revenge = !revenge; }
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
     else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
+    else if (m.t === 'match') { if (editable()) match.changer(players); }   // cycle manche simple → premier à 2 / 3 / 5 (GM_ONLY dans hub.js)
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

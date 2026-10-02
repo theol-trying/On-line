@@ -5,6 +5,7 @@
 import { AR0, MARGE, PR, TICK_HZ, FUSE_MIN, FUSE_MAX, IMMUNE_S, ITEMS, scaleFor } from '../../public/games/patate/shared.js';
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
+import { creerMatch } from '../match.js';
 
 const GID = 'patate';
 const MAX_SEATS = 10;
@@ -96,7 +97,9 @@ export function createPatate(room) {
     pillars = [];
     for (let i = 0; i < np; i++) { const a = -Math.PI / 2 + i * 2 * Math.PI / np; pillars.push({ x: c + R0 * PIL_RING * Math.cos(a), y: c + R0 * PIL_RING * Math.sin(a), r: PIL_R }); }
   }
+  const match = creerMatch();                         // match en N manches (games/match.js) : cible 1 = manche simple, comportement historique
   function fullReset() {
+    match.reinit();
     players = makePlayers(); pots = []; spawns = []; pickups = [];
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; pend = [];
     mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0; botCount = 0; botDiff = 1; seatByMid = {};
@@ -139,6 +142,7 @@ export function createPatate(room) {
     for (const p of players) { if (bots <= 0) break; if (!p.member) { p.bot = true; parts.push(p); bots--; } } // complète avec des bots
     parts.forEach((p, i) => { if (p.bot) p.name = '🤖 Bot ' + (i + 1); });
     if (parts.length < 2) return;
+    match.debutManche(players);                        // match gagné (ou cible changée) : scores remis à 0 avant cette manche
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
@@ -159,7 +163,7 @@ export function createPatate(room) {
     gameState = 'over'; endTick = tick; clearPots(); pickups = [];
     const s = aliveTeams();
     winner = s.size === 1 ? [...s][0] : -1;
-    if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
+    if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; }); match.apresManche(players, winner);
     classerManche(players, winner);                    // places : une seule vérité, commune aux jeux (games/fin-manche.js)
     recordRound();
   }
@@ -405,7 +409,8 @@ export function createPatate(room) {
       pt: pots.map(o => { const e = { o: o.o, lv: lvOf(o) }; if (fuseVis) e.f = r1(o.fuse / TICK_HZ); return e; }),   // f : UNIQUEMENT en mèche visible
       pk: pickups.map(k => [r1(k.x), r1(k.y), k.k]),
       opt: { fuse: fuseVis ? 'visible' : 'cache', bonus: bonusOn ? 1 : 0 },
-      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, passes: nPass, booms: nBoom } : null,
+      match: match.etat(players),
+      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, passes: nPass, booms: nBoom, match: match.gagne } : null,
       players: players.map(p => ({
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot,
         x: r1(p.x), y: r1(p.y), a: r2(p.a), sta: Math.round(p.sta * 20) / 20, spr: p.sprinting, ess: p.winded,
@@ -474,6 +479,7 @@ export function createPatate(room) {
     else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
     else if (m.t === 'fuse') { if (editable()) fuseVis = !fuseVis; }     // mèche cachée (défaut) ↔ visible
     else if (m.t === 'bonus') { if (editable()) bonusOn = !bonusOn; }
+    else if (m.t === 'match') { if (editable()) match.changer(players); }   // cycle manche simple → premier à 2 / 3 / 5 (GM_ONLY dans hub.js)
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

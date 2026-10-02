@@ -9,6 +9,7 @@ function setGridT(n) {
 }
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
+import { creerMatch } from '../match.js';
 import { dailyRng } from '../../dayseed.js';
 
 const GID = 'tank';
@@ -79,7 +80,8 @@ function tankConnected(solid, spawns) {                 // BFS sur l'espace libr
 
 export function createTank(room) {
   let players, shells, mines, pickups, blocks, gameState, tick, round, countdownUntil, winner, fx, mode, nteams, nParts, deaths, endTick;
-  let arenaStyle, winTarget, matchWon, matchWinner, ff, botCount, botDiff;   // ff = tir allié autorisé ; botCount = nb de bots IA ; botDiff = 0/1/2
+  let arenaStyle, ff, botCount, botDiff;   // ff = tir allié autorisé ; botCount = nb de bots IA ; botDiff = 0/1/2
+  const match = creerMatch();                                       // match en N manches (games/match.js) : remplace winTarget/matchWon/matchWinner
   let lastGrid = '';                                                // dernière grille émise (delta : on n'émet que si changement)
   let barrels, mudSet;                                              // barils explosifs ; ensemble d'indices de cases boueuses
   let seatByMid = {};
@@ -121,7 +123,7 @@ export function createTank(room) {
   function fullReset() {
     players = makePlayers(); shells = []; mines = []; pickups = []; blocks = new Array(G * G).fill(0);
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; mode = 'ffa'; nteams = 0; nParts = 0; deaths = 0; endTick = 0;
-    arenaStyle = 0; winTarget = 1; matchWon = false; matchWinner = null; ff = false; botCount = 0; botDiff = 1; barrels = []; mudSet = new Set(); seatByMid = {};
+    arenaStyle = 0; match.reinit(); ff = false; botCount = 0; botDiff = 1; barrels = []; mudSet = new Set(); seatByMid = {};
   }
 
   const connectedCount = () => players.filter(p => p.member).length;
@@ -169,7 +171,7 @@ export function createTank(room) {
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
-    if (matchWon) { players.forEach(p => p.score = 0); matchWon = false; matchWinner = null; }
+    match.debutManche(players);                        // match gagné (ou cible changée) : scores remis à 0 avant cette manche
     setGridT(N); SPAWNS = spawnsFor(N);          // arène + départs dimensionnés AVANT la génération (buildArena réalloue `blocks`)
     buildArena(parts);
     nParts = N; deaths = 0; endTick = 0; winner = null; fx = []; shells = []; mines = []; pickups = [];
@@ -195,11 +197,7 @@ export function createTank(room) {
     const s = aliveTeams();
     winner = s.size === 1 ? [...s][0] : -1;
     classerManche(players, winner);                    // places : une seule vérité, commune aux 7 jeux (games/fin-manche.js)
-    if (winner >= 0) {
-      players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
-      const champ = players.find(p => p.playing && p.team === winner);
-      if (champ && champ.score >= winTarget) { matchWon = true; matchWinner = winner; }
-    }
+    if (winner >= 0) { players.forEach(p => { if (p.playing && p.team === winner) p.score++; }); match.apresManche(players, winner); }   // match en N manches : games/match.js
     recordRound();
   }
 
@@ -715,7 +713,7 @@ export function createTank(room) {
     if (sendGrid) lastGrid = g;
     return {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
-      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, winTarget, gen: arenaStyle, ff,
+      round, winner, fx, connected: connectedCount(), botCount, maxBots: maxBots(), botDiff, mode, nteams, winTarget: match.cible, match: match.etat(players), gen: arenaStyle, ff,
       ag: G,                                                                       // côté de la grille : le client recale ARENA = ag × BLK
       grid: sendGrid ? g : undefined,
       shells: shells.map(s => {                      // p / h : présents seulement s'ils sont vrais (absent = faux, lu par vérité côté client)
@@ -727,7 +725,7 @@ export function createTank(room) {
       pickups: pickups.map(k => ({ x: k.x, y: k.y, t: k.type })),
       barrels: barrels.map(b => ({ x: Math.round(b.x), y: Math.round(b.y) })),
       mud: [...mudSet],
-      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, match: matchWon } : null,
+      stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, match: match.gagne } : null,
       players: players.map(p => ({
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot,
         x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, angle: Math.round(p.angle * 100) / 100,
@@ -787,7 +785,8 @@ export function createTank(room) {
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
     else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
     else if (m.t === 'arena') { if (editable()) arenaStyle = (arenaStyle + 1) % 3; }
-    else if (m.t === 'wintarget') { if (editable()) winTarget = WIN_TARGETS[(WIN_TARGETS.indexOf(winTarget) + 1) % WIN_TARGETS.length]; }
+    else if (m.t === 'match') { if (editable()) match.changer(players); }   // cycle manche simple → premier à 2 / 3 / 5 (GM_ONLY dans hub.js)
+    else if (m.t === 'wintarget') { if (editable()) match.regler(WIN_TARGETS.find(c => c > match.cible) || WIN_TARGETS[0], players); }   // alias historique (ancien bouton d'objectif : 1 → 3 → 5)
     else if (m.t === 'ff') { if (editable()) ff = !ff; }
     else if (m.t === 'daily') daily = !!m.on;                       // poussé par le hub (réglage de plateforme, pas de gate `editable`)
     else if (m.t === 'lbreset') reset(GID);

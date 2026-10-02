@@ -405,6 +405,31 @@ async function complements() {
     lu ? JSON.stringify(lu).slice(0, 80) : 'fichier absent');
 }
 
+/* ---------- Match en N manches : message `match` (cycle), réservé au game master, ignoré en pleine manche ---------- */
+async function matchEnN() {
+  console.log('\n▶ match en N manches : aller-retour du message match');
+  const h = client('HoteM'); await h.ouvert; await wait(300);
+  h.envoie({ t: 'pick', id: 'tron' }); await attendre(() => h.dernier && h.dernier.gs === 'lobby', 2000);
+  const cible = () => (h.dernier && h.dernier.match ? h.dernier.match.n : 1);
+  ok('match : manche simple par défaut (champ match null, pas absent)', h.dernier && h.dernier.match === null, JSON.stringify(h.dernier && h.dernier.match));
+  const cyc = [];
+  for (let i = 0; i < 4; i++) { const avant = JSON.stringify(h.dernier.match); h.jeu({ t: 'match' }); await attendre(() => JSON.stringify(h.dernier.match) !== avant, 1500); cyc.push(cible()); }
+  ok('match : le message cycle 2 → 3 → 5 → manche simple', cyc.join(',') === '2,3,5,1' && h.dernier.match === null, cyc.join(','));
+  h.jeu({ t: 'match' }); await attendre(() => cible() === 2, 1500);
+  const sp = client('SpectaM'); await sp.ouvert; await wait(500);
+  sp.jeu({ t: 'match' }); await wait(400);
+  ok('match : refusé à un non-game-master (denied, cible inchangée)', sp.refus >= 1 && cible() === 2, 'refus ' + sp.refus + ', cible ' + cible());
+  sp.ws.close();
+  h.jeu({ t: 'bots' }); await wait(200);
+  h.jeu({ t: 'start' }); await attendre(() => h.dernier.gs === 'countdown', 2500);
+  h.jeu({ t: 'match' }); await wait(400);
+  ok('match : ignoré en pleine manche (la cible ne bouge pas)', h.dernier.gs !== 'lobby' && cible() === 2 && h.dernier.match && h.dernier.match.f === 0, JSON.stringify(h.dernier.match));
+  h.jeu({ t: 'abort' }); await attendre(() => h.dernier.gs === 'lobby', 2000);
+  h.jeu({ t: 'match' }); await attendre(() => cible() === 3, 1500);
+  ok('match : de nouveau modifiable au lobby', cible() === 3, String(cible()));
+  h.ws.close(); await wait(300);
+}
+
 /* ---------- Foot : les 5 terrains (effets, zones, bumpers, vent, objets) ---------- */
 async function terrainsFoot() {
   console.log('\n▶ Foot : les 5 terrains');
@@ -447,6 +472,7 @@ await robustesse();
 await httpStatique();
 await complements();
 await terrainsFoot();
+await matchEnN();
 
 console.log('\n▶ état final du serveur');
 ok('le serveur a survécu à tous les jeux', serveurVivant(), srvSorti !== null ? 'sorti avec le code ' + srvSorti : '');
