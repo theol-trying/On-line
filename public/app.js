@@ -2,6 +2,7 @@
 // gestion des panneaux modaux, et délégation du rendu/inputs au module du jeu actif (games/<id>/client.js).
 import { initJoystick, joystickPour } from './joystick.js';   // manette tactile des 5 jeux (téléphone)
 import { creerVitrine } from './vitrine.js';                  // accueil : les 6 jeux en cartes animées
+import { quitterFin } from './ecran-fin.js';                  // ✕ pendant la fin plein écran = « ⌂ Accueil » (même module que les jeux)
 
 let ws = null;
 // Jeton PROPRE À L'ONGLET (sessionStorage : survit au F5, pas partagé avec un autre onglet). En localStorage, deux
@@ -141,8 +142,10 @@ setBtn.onclick = () => togglePanel(settingsPanel);
 setFloat.onclick = () => togglePanel(settingsPanel);
 
 /* ---------- quitter / abandonner la partie en cours (visible seulement en jeu) ---------- */
+// Pendant la fin de manche plein écran, `abort` ne fait plus rien côté serveur (la manche est finie) : le ✕ y vaut « ⌂ Accueil »
+// pour ce joueur seulement, les autres restent sur l'écran de fin.
 const quitFloat = document.getElementById('quitFloat');
-if (quitFloat) quitFloat.onclick = () => { closePanels(); gameSend({ t: 'abort' }); };
+if (quitFloat) quitFloat.onclick = () => { closePanels(); if (quitterFin()) return; gameSend({ t: 'abort' }); };
 
 /* ---------- émotes (flottant, broadcast à tous) ---------- */
 const EMOTES = ['👍', '😂', '😮', '😡', '🎉', '🔥', '😎', '🤝', '💀', '🫡'];
@@ -346,7 +349,7 @@ function majHorsJeu() {
   // ni éliminé ni en jeu, il se retrouvait sans chat jusqu'à la fin. On lit donc aussi l'état de la partie.
   const st = stateCache[activeId], pj = st && st.players && monSiege >= 0 ? st.players[monSiege] : null;
   const pasDansLaManche = !pj || pj.playing === false;
-  const out = !moi || moi.classList.contains('dead') || pasDansLaManche;
+  const out = b.classList.contains('fin') || !moi || moi.classList.contains('dead') || pasDansLaManche;   // fin de manche plein écran : chat de nouveau là
   if (out === b.classList.contains('out')) return;
   b.classList.toggle('out', out);
   // De retour en jeu (nouvelle manche, résurrection en revanche) : on libère l'écran sur-le-champ.
@@ -610,7 +613,7 @@ function armerVeille() {
   clearTimeout(veilleT);
   veilleT = setTimeout(() => {
     if (!document.hidden) return;
-    if (document.body.classList.contains('playing')) { armerVeille(); return; }
+    if (document.body.classList.contains('playing') && !document.body.classList.contains('fin')) { armerVeille(); return; }   // fin plein écran = hors partie (sinon l'absent bloquait la relance des autres)
     enVeille = true;
     if (ws) { try { ws.close(); } catch (e) {} }
   }, VEILLE_MS);

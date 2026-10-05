@@ -417,7 +417,7 @@ export default (function () {
     });
     // la carte de Pong est haute (classement, courbe, podium cumulé) et défile : les boutons restent collés en bas du cadre
     bt.el.style.position = 'sticky'; bt.el.style.bottom = '0'; bt.el.style.zIndex = '2'; bt.el.style.padding = '8px 0'; bt.el.style.background = 'rgba(5,6,14,.92)'; bt.el.style.borderRadius = '14px';
-    podLayout(m);
+    podLayout(m); EF.caler(es);                    // solo : carte sans podium plus haute que le plateau → lue depuis le haut
   }
 
   /* ---- podium canvas : bande du haut du plateau ------------------------------------------------

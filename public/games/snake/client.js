@@ -165,7 +165,7 @@ export default (function () {
   let rushAlerted = false, duelAlerted = false, bmRound = -1;   // messages globaux « une seule fois par manche » (bmRound = manche dont la balle de match est annoncée)
   let matchBtn = null, matchChip = null;            // match en N manches : bouton du game master (barre) et chip du HUD
   // fin de manche en plein écran (ecran-fin.js) : la page reste en mise en page de partie jusqu'à « ⌂ Accueil »
-  const EF = createEcranFin({ aChange: () => { if (!destroyed && snap) applyPlaying(snap.gs); } });
+  const EF = createEcranFin({ aChange: () => { if (!destroyed && snap && cv) { applyPlaying(snap.gs); resizeCanvas(); } } });
   function applyPlaying(gs) { const inGame = EF.enJeu(gs); if (inGame !== inGamePrev) { inGamePrev = inGame; document.body.classList.toggle('playing', inGame); resizeCanvas(); } }
   let board = [], buf = [];
   const parts = [], waves = [], floats = [];

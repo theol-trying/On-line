@@ -158,6 +158,7 @@ export default (function () {
   // et la carte DOM de fin attend (pendingEnd). rpOn : rejeu à l'écran pour cette image ; swapBack : vrai snapshot pendant l'échange ;
   // rpCrash : instant de jeu (ms) où chaque moto tombe dans le rejeu ; pod* : entrées du podium mises en cache.
   const RL = createRalenti({ keepMs: 3000, windowMs: 1400, slow: 0.4 });
+  let endGrace = -1e9;                              // fin du ralenti (passé ou écoulé) : 350 ms où un appui de plus ne relance pas (double tape)
   let pendingEnd = false, overT0 = 0, rpOn = false, swapBack = null, podSnap = null, podPal = '', podList = null;
   const rpCrash = {};
   let occ = null;                                        // occupation de la grille (reconstruite à 15 Hz) : alerte « mur devant »
@@ -262,18 +263,19 @@ export default (function () {
     endEl.innerHTML = `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : '#fff'}">${title}</div>
       ${T.sous ? `<div class="emeta"><b>${esc(T.sous)}</b></div>` : ''}<div class="emeta">⏱ ${m.stats.durationSec}s · ${m.stats.nParts} pilotes</div>${mvpLine}<div class="elist">${rows}</div>${blocFin(J, { titre: 'Distance parcourue (cases)', couleur: s => colSeat(s), nom: pname })}<div class="ehint">${touch ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>`;
     // 2 grands boutons : « ↻ Relancer » (= Rejouer ; « Manche suivante » entre deux manches d'un match, « Nouveau match » après un match gagné) et « ⌂ Accueil »
-    EF.boutons(endEl, { relancer: () => { unlockAudio(); send({ t: 'start' }); }, libelle: m.match && m.match.f ? 'Nouveau match' : (m.match ? 'Manche suivante' : 'Relancer'), accueil: hideEnd });
+    EF.boutons(endEl, { relancer: () => { unlockAudio(); if (skipReplay()) return; send({ t: 'start' }); }, libelle: m.match && m.match.f ? 'Nouveau match' : (m.match ? 'Manche suivante' : 'Relancer'), accueil: hideEnd });
   }
 
   // Fin du rejeu (durée écoulée ou passé) : la carte DOM de fin, le jingle de victoire et le podium arrivent alors
   function flushEnd() {
-    if (!pendingEnd) return; pendingEnd = false;
+    if (!pendingEnd) return; pendingEnd = false; endGrace = performance.now();
     if (snap && snap.gs === 'over') { showEndscreen(snap); overT0 = performance.now(); sound('win'); music.sting('win'); }
   }
   // Premier Espace / clic / tap pendant le rejeu : il le passe SEUL (renvoie true = l'appui est consommé, ni « Rejouer » ni autre action)
-  function skipReplay() {
-    if (A.reduceFx || !RL.active(performance.now())) return false;
-    RL.skip(); flushEnd(); return true;
+  function skipReplay() {                           // …et un appui qui suit de trop près la fin du ralenti est ignoré aussi (comme Snake)
+    const t = performance.now();
+    if (!A.reduceFx && RL.active(t)) { RL.skip(); flushEnd(); endGrace = t; return true; }
+    return t - endGrace < 350;
   }
 
   // ───────────────────────── état réseau ─────────────────────────
@@ -332,6 +334,7 @@ export default (function () {
     const idle = m.gs === 'lobby' || m.gs === 'over';
     const total = (m.connected || 0) + (m.botCount || 0);
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1 && total >= 2);
+    EF.relancable(total >= 2, 'Il faut 2 joueurs');   // carte de fin : le serveur refuserait la relance sans rien dire (canStart : 2 participants)
     startBtn.textContent = m.gs === 'over' ? (m.match ? (m.match.f ? '↻ Nouveau match' : '↻ Manche suivante') : '↻ Rejouer') : '▶ Démarrer';
     if (matchBtn) matchBtn.maj(m.match, m.gs);          // bouton du game master (cycle manche simple → premier à 2 / 3 / 5), grisé hors lobby / fin
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused');
@@ -1388,7 +1391,7 @@ export default (function () {
     boostHeld = false; boostBtnHeld = false; pnLast.length = 0; dangK = 0;
     if (ctx0.togglePanel) togglePanel = ctx0.togglePanel; if (ctx0.closePanels) closePanels = ctx0.closePanels;
     cv = $('trc'); ctx = cv.getContext('2d'); hud = $('trHud'); endEl = $('trEnd');
-    RL.clear(); pendingEnd = false; overT0 = 0; rpOn = false; swapBack = null; podSnap = null; podList = null; hideEnd();   // module singleton : repartir sans rejeu ni carte de fin héritée
+    RL.clear(); pendingEnd = false; endGrace = -1e9; overT0 = 0; rpOn = false; swapBack = null; podSnap = null; podList = null; hideEnd();   // module singleton : repartir sans rejeu ni carte de fin héritée
     const wrap = cv.parentElement;                                                  // cadre du canvas : support des bandeaux bonus/malus
     initGameMsg(wrap && wrap.classList.contains('canvas-wrap') ? wrap : null);
     hud.innerHTML = '';             // module réutilisé : repartir d'un HUD vide (sinon les cartes P1.. se cumulent à chaque retour)

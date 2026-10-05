@@ -1171,6 +1171,20 @@ Corrigé ensuite en 2 vagues (commits « Audit 28/09, vague 1 / vague 2 ») :
 - Vérifié : `npm test` 113/113 + 68/68 ; navigateur (téléphone) : fin en plein écran et 2 boutons dans les 8 jeux, match à
   2 au Sumo (balle de match, victoire, nouveau match), Accueil, changement de jeu depuis l'écran de fin.
   **À juger à plusieurs humains** : difficulté réelle des nouveaux bots (Normale/Difficile nettement plus forts).
+- **Fin bloquée à deux (Snake, signalé le 05/10)** — corrigé dans les 8 jeux :
+  - sur téléphone la carte de fin (sous la bande du podium, ~200 px) est plus courte que son contenu : les boutons
+    Relancer / Accueil restaient sous le bas visible → `.efBtns` est **collé en bas** de la carte (`position:sticky`, ombre
+    décalée qui masque la marge basse ; version compacte sous 480 px de haut) ;
+  - le **✕ Quitter** restait affiché à la fin mais envoyait `abort`, que les 8 serveurs ignorent hors partie → il vaut
+    maintenant « ⌂ Accueil » pour ce joueur (`quitterFin()` d'`ecran-fin.js`, y compris pendant le ralenti : la carte construite
+    ensuite reste masquée) ;
+  - autres pièges trouvés à la relecture : Relancer grisé pendant les 2 s de `GARDE_FIN` du hub ; `EF.relancable()` grise
+    Relancer avec « Il faut 2 joueurs » (Tron, Tanks, Foot, Sumo, Patate refusaient sans rien dire) ; `EF.caler()` cale en haut
+    une carte qui déborde (titre coupé en solo sur téléphone : Snake, Pong, Bomberman) ; Tron ignore 350 ms d'appuis après le
+    ralenti (double tape) ; un onglet caché sur l'écran de fin repasse en veille au bout d'une minute (il bloquait la relance des
+    autres) ; à la fin tout le monde est « hors jeu » (chat de nouveau là sur téléphone) ; la barre « Prêt » est masquée en
+    mode docké pendant la fin (elle restait à moitié sous le plateau). Tests : 11 vérifications « écran de fin » dans
+    `test/fins-de-manche.mjs`.
 
 ## Limites connues (assumées)
 - ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».

@@ -283,6 +283,7 @@ export default (function () {
     const idle = m.gs === 'lobby' || m.gs === 'over';
     const total = (m.connected || 0) + (m.botCount || 0);
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1 && total >= 2);
+    EF.relancable(total >= 2, 'Il faut 2 joueurs');   // carte de fin : le serveur refuserait la relance sans rien dire (canStart : 2 participants)
     startBtn.textContent = m.gs === 'over' ? '↻ ' + relanceLabel(m, 'Rejouer') : '▶ Démarrer';
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused');
     pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
