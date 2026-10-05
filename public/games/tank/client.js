@@ -397,12 +397,13 @@ export default (function () {
       music.setIntensity(inten); }
     refreshHUD();
     if (m.gs === 'over') {
-      if (!endShown) { endShown = true; if (!replayed) { showEndscreen(m); podT0 = performance.now(); } }   // rejeu lancé : showEndscreen + podium sont déclenchés par draw() à sa fin
+      if (!endShown) { endShown = true; if (!replayed) { podT0 = performance.now(); showEndscreen(m); } }   // rejeu lancé : showEndscreen + podium sont déclenchés par draw() à sa fin
       else if (pendingEnd) pendingEnd = m;                                                                  // rejeu en cours : la carte utilisera le dernier état reçu
     } else { endShown = false; pendingEnd = null; podT0 = 0; endEl.classList.add('hidden'); resetEndCard(); }
     const idle = m.gs === 'lobby' || m.gs === 'over';
     const total = (m.connected || 0) + (m.botCount || 0);
     startBtn.disabled = !(mySeat >= 0 && idle && m.connected >= 1 && total >= 2); startBtn.textContent = m.gs === 'over' ? '↻ Rejouer' : '▶ Démarrer';
+    EF.relancable(total >= 2, 'Il faut 2 joueurs');   // carte de fin : le serveur refuserait la relance sans rien dire (canStart : 2 participants)
     pauseBtn.disabled = !(m.gs === 'play' || m.gs === 'paused'); pauseBtn.textContent = m.gs === 'paused' ? '▶ Reprendre' : '⏸ Pause';
     pauseFloat.textContent = m.gs === 'paused' ? '▶' : '⏸';
     if (botsBtn) { botsBtn.disabled = !idle; botsBtn.textContent = '🤖 Bots : ' + (m.botCount || 0); botsBtn.classList.toggle('on', (m.botCount || 0) > 0); }
@@ -1583,7 +1584,7 @@ export default (function () {
     }
     if (pendingEnd) {                                   // le rejeu est fini (ou passé, ou réduire les effets activé) : carte de fin, fanfare, podium
       const m = pendingEnd; pendingEnd = null;
-      if (snap && snap.gs === 'over') { showEndscreen(m); podT0 = now; sound('win'); music.sting('win'); overAt = now; }
+      if (snap && snap.gs === 'over') { podT0 = now; showEndscreen(m); sound('win'); music.sting('win'); overAt = now; }
     }
     if (drawFrame(now, null) !== false && snap && snap.gs === 'over' && podT0 > 0) drawPodiumBand(now);
   }

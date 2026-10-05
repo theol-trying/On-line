@@ -492,6 +492,37 @@ for (const [id, cible, opt] of [['tron', 2, { matchs: 2 }], ['tron', 3, { mode: 
   ok('tank : message wintarget = alias du match (1 → 3 → 5 → 1, winTarget = match.n)', cy.join(' ') === '3/3 5/5 1/null 3/3', cy.join(' '));
 }
 
+{ // Écran de fin (brique CLIENT, testée sans navigateur) : le ✕ de la coque vaut « Accueil » pendant la fin plein écran, et là
+  // seulement. Avant (02/10) il envoyait `abort`, que les 8 serveurs ignorent hors partie : à deux, on restait bloqué à la fin.
+  const fauxEl = () => ({ enfants: [], appendChild(c) { this.enfants.push(c); }, addEventListener() {}, querySelectorAll() { return []; } });
+  globalThis.document = { body: { classList: { toggle() {} } }, createElement: fauxEl };
+  const { createEcranFin, quitterFin } = await import(pathToFileURL(join(ROOT, 'public', 'ecran-fin.js')).href);
+  let changes = 0, masquee = 0;
+  const EF = createEcranFin({ aChange: () => { changes++; } });
+  const carte = () => EF.boutons(fauxEl(), { relancer() {}, accueil: () => { masquee++; } });
+  EF.suivre('play');
+  ok('écran de fin : ✕ en partie → abort habituel (quitterFin faux)', quitterFin() === false && EF.enJeu('play'));
+  EF.suivre('over');
+  ok('écran de fin : fin de manche → reste en plein écran', EF.enJeu('over') === true && changes === 1);
+  ok('écran de fin : ✕ pendant le ralenti (pas encore de carte) → Accueil', quitterFin() === true && EF.enJeu('over') === false && changes === 2);
+  carte();
+  ok('écran de fin : carte construite après ce ✕ → masquée aussitôt', masquee === 1);
+  ok('écran de fin : second ✕ → plus rien à quitter', quitterFin() === false);
+  EF.suivre('countdown');
+  ok('écran de fin : manche suivante → plein écran pour tous, ✕ = abort', EF.enJeu('countdown') && quitterFin() === false);
+  EF.suivre('over');
+  const c = fauxEl(), h = EF.boutons(c, { relancer() {}, accueil: () => { masquee++; } }), rel = c.enfants[0].enfants[0];
+  ok('écran de fin : fin suivante → carte affichée normalement', masquee === 1 && EF.enJeu('over'));
+  ok('écran de fin : « Relancer » grisé pendant la garde du hub (2 s après la fin)', rel.disabled === true && rel.textContent === '↻ Relancer');
+  EF.relancable(false, 'Il faut 2 joueurs');
+  ok('écran de fin : relance impossible → grisé + raison affichée', rel.disabled === true && rel.textContent === 'Il faut 2 joueurs');
+  EF.relancable(true); h.libelle('Manche suivante');
+  await new Promise(r => setTimeout(r, 2250));
+  ok('écran de fin : garde écoulée → « ↻ Manche suivante » actif', rel.disabled === false && rel.textContent === '↻ Manche suivante', rel.disabled + ' ' + rel.textContent);
+  ok('écran de fin : ✕ sur la carte affichée → accueil du jeu appelé', quitterFin() === true && masquee === 2 && !EF.enJeu('over'));
+  delete globalThis.document;
+}
+
 const dureeS = ((Date.now() - T0) / 1000).toFixed(1);
 console.log(`\n${tests - echecs}/${tests} vérifications réussies en ${dureeS} s`);
 if (echecs) { console.log(`✗ ${echecs} échec(s)`); process.exit(1); }
