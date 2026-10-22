@@ -354,6 +354,10 @@ body.flat.playing.dock.game-foot .stage{ background-image:none; }   /* « Rédui
 body.playing.dock.game-patate .stage{ --amb:#13230f;           /* pelouse de pique-nique : halo de soleil + vichy à peine visible */
   background-image:radial-gradient(60% 45% at 50% 50%, rgba(255,236,170,.08), transparent 70%), repeating-linear-gradient(0deg, rgba(216,72,58,.045) 0 28px, transparent 28px 56px), repeating-linear-gradient(90deg, rgba(216,72,58,.045) 0 28px, transparent 28px 56px); }
 body.flat.playing.dock.game-patate .stage{ background-image:none; }
+body.playing.dock.game-micro .stage{ --amb:#0d1020;            /* damier de drapeau d'arrivée à peine visible + lueur de projecteur jaune */
+  background-image:radial-gradient(60% 45% at 50% 50%, rgba(255,210,58,.07), transparent 70%), linear-gradient(45deg, rgba(255,255,255,.028) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.028) 75%), linear-gradient(45deg, rgba(255,255,255,.028) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.028) 75%);
+  background-size:auto, 64px 64px, 64px 64px; background-position:0 0, 0 0, 32px 32px; }
+body.flat.playing.dock.game-micro .stage{ background-image:none; }
 body.flat.playing.dock .stage{ -webkit-animation:none; animation:none; }
 body.flat.playing.dock.game-pong .stage{ background-image:none; }   /* Pong ne dessine pas non plus d'étoiles en effets réduits */
 @media (prefers-reduced-motion:reduce){ body.playing.dock .stage{ -webkit-animation:none; animation:none; } }
@@ -687,6 +691,28 @@ body.game-patate .logo{ letter-spacing:.06em; background:linear-gradient(92deg,#
 body.game-patate .shead{ border-bottom-color:rgba(232,86,63,.36); }
 body.game-patate:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.6),0 0 0 3px #7d2a1c inset,0 0 46px -6px rgba(255,236,170,.2); }
 
+/* ---------- 🏁 MICRO MACHINES — salle de jeux (voitures-jouets, damier d'arrivée, jaune et rouge de boîte de jouets) ---------- */
+body.game-micro{ --bg0:#0b0d1a; --bg1:#141832; --panel:rgba(20,24,46,.88); --panel2:rgba(34,40,74,.6);
+  --border:rgba(255,246,224,.14); --border2:rgba(255,246,224,.3); --txt:#fff6e0; --txt2:#b9bfd8; --accent:#ffd23a;
+  --display-font:'Racing Sans One','Russo One','Impact',sans-serif; --display-ls:.02em; }
+/* Nuit de salle de jeux : deux projecteurs (jaune, rouge) et des bandes de vitesse en biais. */
+body.game-micro::before{ background:
+  radial-gradient(40vw 30vw at 8% 0%, rgba(255,210,58,.16), transparent 64%),
+  radial-gradient(36vw 28vw at 95% 4%, rgba(232,50,42,.16), transparent 64%),
+  repeating-linear-gradient(-45deg, rgba(255,255,255,.03) 0 3vw, transparent 3vw 6vw),
+  linear-gradient(180deg,#151a36,#0e1126 60%,#0a0c1b); }
+/* Racing Sans One n'existe qu'en graisse 400 : pas de faux gras sur les titres. */
+body.game-micro .logo, body.game-micro .shead h3, body.game-micro .etitle, body.game-micro .bann, body.game-micro .champ,
+body.game-micro button.primary, body.game-micro #tourBar, body.game-micro #readyBar .rbtn, body.game-micro .settings h4,
+body.game-micro .gtab, body.game-micro .ghosttab, body.game-micro #xfade{ font-weight:400; }
+body.game-micro button, body.game-micro #gamemenu, body.game-micro .bar, body.game-micro #msg,
+body.game-micro .pc, body.game-micro .settings, body.game-micro .touch, body.game-micro .readybar{ border-radius:8px; }
+body.game-micro button.primary, body.game-micro .bar>button.primary{ background:linear-gradient(180deg,#ffd23a,#ff9a1e); color:#1a1206; border-color:#a85a00;
+  box-shadow:0 2px 0 #7a3f00,0 8px 18px -8px rgba(255,160,30,.85); }
+body.game-micro .logo{ letter-spacing:.04em; background:linear-gradient(92deg,#ffd23a,#ff9a1e 45%,#e8322a); -webkit-background-clip:text; background-clip:text; filter:drop-shadow(0 2px 1px rgba(0,0,0,.6)); }
+body.game-micro .shead{ border-bottom-color:rgba(255,210,58,.36); }
+body.game-micro:not(.flat) canvas{ box-shadow:0 16px 50px rgba(0,0,0,.65),0 0 0 3px #1b1d2a inset,0 0 46px -6px rgba(255,210,58,.22); }
+
 /* ============================================================================
    ERGONOMIE MOBILE — manette à 2 zones (croix directionnelle ⟷ actions),
    flèches Pong sous l'écran, boutons flottants discrets hors de l'aire de jeu.
@@ -820,6 +846,7 @@ body.flat .joyknob{ -webkit-box-shadow:none; box-shadow:none; }
 #gamemenu .gtab[data-id="sumo"]{ font-family:'Dela Gothic One','Impact',sans-serif; font-weight:400; letter-spacing:.04em; color:#f08a6e; border-radius:6px; }
 #gamemenu .gtab[data-id="foot"]{ font-family:'Russo One','Impact',sans-serif; font-weight:400; letter-spacing:.03em; color:#7ee08f; border-radius:4px; }
 #gamemenu .gtab[data-id="patate"]{ font-family:'Lilita One','Fredoka','Impact',sans-serif; font-weight:400; letter-spacing:.03em; color:#f5b35a; border-radius:12px; }
+#gamemenu .gtab[data-id="micro"]{ font-family:'Racing Sans One','Russo One','Impact',sans-serif; font-weight:400; letter-spacing:.02em; color:#ffd23a; border-radius:8px; }
 #gamemenu .gtab.on[data-id="pong"]{ background:linear-gradient(92deg,#ff5db4,#7c3cff); color:#fff; }
 #gamemenu .gtab.on[data-id="tron"]{ background:linear-gradient(92deg,#1fe0ff,#0a86ff); color:#021018; }
 #gamemenu .gtab.on[data-id="tank"]{ background:linear-gradient(180deg,#8a7a2e,#5e4a1c); color:#fff6dc; box-shadow:0 2px 0 #2a2010; }
@@ -828,6 +855,7 @@ body.flat .joyknob{ -webkit-box-shadow:none; box-shadow:none; }
 #gamemenu .gtab.on[data-id="sumo"]{ background:linear-gradient(180deg,#ea5a3f,#b8321f); color:#fff4e6; box-shadow:0 2px 0 #5a160c; }
 #gamemenu .gtab.on[data-id="foot"]{ background:repeating-linear-gradient(90deg,#2e8b3e 0 14px,#34994a 14px 28px); color:#f2f6ee; box-shadow:0 2px 0 #0a3314; text-shadow:0 1px 0 rgba(0,0,0,.4); }
 #gamemenu .gtab.on[data-id="patate"]{ background:linear-gradient(180deg,#f06a4f,#c2392a); color:#fff6e6; box-shadow:0 2px 0 #5d160e; }
+#gamemenu .gtab.on[data-id="micro"]{ background:linear-gradient(180deg,#ffd23a,#ff9a1e); color:#1a1206; box-shadow:0 2px 0 #7a3f00; }
 
 /* ---- C. États « ON » par identité ---- */
 body.game-pong{ --ok:#ff5db4; --okTxt:#ffb3dd; }
@@ -838,6 +866,7 @@ body.game-bomb{ --ok:#ff7ac0; --okTxt:#ffd3ea; }
 body.game-sumo{ --ok:#e0b23c; --okTxt:#ffe6a6; }
 body.game-foot{ --ok:#ffc24a; --okTxt:#ffe6a6; }   /* ambre du tableau d'affichage */   /* or, pas vermillon : un état ON rouge se lirait comme une erreur */
 body.game-patate{ --ok:#f0c768; --okTxt:#ffe9b0; }   /* or, pas rouge : un état ON rouge se lirait comme une erreur */
+body.game-micro{ --ok:#ffd23a; --okTxt:#fff0b0; }
 
 /* ---- D. Fonds de page — au niveau du Sumo (23/09) ----
    Même recette que le dohyō : une MATIÈRE (pas un simple dégradé), des SOURCES DE LUMIÈRE, un BANDEAU
@@ -1027,6 +1056,10 @@ body.game-foot .pc.me{ box-shadow:0 0 0 1.5px currentColor inset,0 0 22px -6px c
 body.game-patate .pc{ background:linear-gradient(180deg,rgba(44,62,30,.94),rgba(24,38,17,.94)); border-color:rgba(250,240,214,.2);
   border-top:3px solid #e8563f; box-shadow:0 2px 0 rgba(0,0,0,.42); }                        /* étiquette de pique-nique : liseré tomate */
 body.game-patate .pc.me{ box-shadow:0 0 0 1.5px currentColor inset,0 0 22px -6px currentColor,0 2px 0 rgba(0,0,0,.42); }
+body.game-micro .pc{ background:linear-gradient(180deg,rgba(28,32,60,.94),rgba(14,16,32,.94)); border-color:rgba(255,246,224,.16);
+  border-top:3px solid #ffd23a; box-shadow:0 2px 0 rgba(0,0,0,.42); }                        /* plaque de course : liseré jaune */
+body.game-micro .pc.me{ box-shadow:0 0 0 1.5px currentColor inset,0 0 22px -6px currentColor,0 2px 0 rgba(0,0,0,.42); }
+body.game-micro .pc.lead{ border-top-color:#ffffff; border-top-style:dashed; }   /* en tête de la course */
 body.game-patate .pc.hot{ border-top-color:#ff3b2a; box-shadow:0 0 0 1.5px #ff3b2a inset,0 0 18px -4px #ff3b2a,0 2px 0 rgba(0,0,0,.42); }   /* porte la patate */
 /* Foot : panneau Terrain & bonus (grille de 3, pas de gap flex : vieux iOS) et troisième bouton tactile (sprint) */
 .ftTer{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); grid-gap:6px; margin:4px 0 6px; }
@@ -1054,10 +1087,10 @@ body.flat #xfade{ text-shadow:none; }
    Chaque carte reste un .gtab : police, couleur, rayon et état .on par jeu viennent
    des règles « A. Onglets multi-identités » ci-dessus ; le grisage non-game-master
    (body.not-gm) aussi. Grille avec grid-gap (pas de gap en flex : vieux iOS).
-   PC : 8 en ligne · fenêtre étroite : 4 + 4 · téléphone : 4 + 4 compact.
+   PC : 9 en ligne · fenêtre étroite : 5 + 4 · téléphone : 3 × 3 compact.
    ============================================================================ */
-.shellrow.avitrine{ width:100%; max-width:1080px; }
-#gamemenu.vitrine{ display:grid; grid-template-columns:repeat(8, minmax(0,1fr)); grid-gap:8px; gap:8px;
+.shellrow.avitrine{ width:100%; max-width:1180px; }
+#gamemenu.vitrine{ display:grid; grid-template-columns:repeat(9, minmax(0,1fr)); grid-gap:8px; gap:8px;
   -webkit-box-flex:1; -ms-flex:1 1 100%; flex:1 1 100%; width:100%; padding:8px; }
 #gamemenu .vcard{ display:block; position:relative; min-width:0; padding:5px 5px 7px; text-align:center; line-height:1.15;
   background:rgba(8,10,22,.5); border:1px solid var(--border2); overflow:hidden;
@@ -1072,7 +1105,8 @@ body.flat #gamemenu .vcard{ -webkit-transition:none; transition:none; }
 #gamemenu .vcard[data-id="tron"] .vscene{ border-radius:1px; }
 #gamemenu .vcard[data-id="tank"] .vscene, #gamemenu .vcard[data-id="sumo"] .vscene, #gamemenu .vcard[data-id="foot"] .vscene{ border-radius:3px; }
 #gamemenu .vcard[data-id="snake"] .vscene, #gamemenu .vcard[data-id="bomb"] .vscene, #gamemenu .vcard[data-id="patate"] .vscene{ border-radius:11px; }
-@media (min-width:901px) and (max-width:1100px){ #gamemenu.vitrine{ grid-template-columns:repeat(4, minmax(0,1fr)); } }   /* 8 cartes : en dessous de ~1100 px, 4 + 4 plutôt que des noms tronqués */
+#gamemenu .vcard[data-id="micro"] .vscene{ border-radius:5px; }
+@media (min-width:601px) and (max-width:1100px){ #gamemenu.vitrine{ grid-template-columns:repeat(5, minmax(0,1fr)); } }   /* 9 cartes : en dessous de ~1100 px, 5 + 4 plutôt que des noms tronqués */
 .vname{ display:block; margin-top:6px; font-size:15px; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .vsub{ display:block; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; min-height:2.5em; margin-top:3px;
   font:500 10.5px/1.25 system-ui,-apple-system,"Segoe UI",sans-serif; letter-spacing:normal; text-transform:none; opacity:.8; }
@@ -1080,11 +1114,10 @@ body.flat #gamemenu .vcard{ -webkit-transition:none; transition:none; }
   font:600 10px/1 system-ui,-apple-system,"Segoe UI",sans-serif; letter-spacing:normal; text-transform:none; }
 @media (max-width:900px){
   .shellrow.avitrine{ max-width:760px; }
-  #gamemenu.vitrine{ grid-template-columns:repeat(4, minmax(0,1fr)); }
   .vscene{ height:74px; }
 }
-@media (max-width:600px){                          /* téléphone : 4 + 4 compact, l'accroche passe dans le title */
-  #gamemenu.vitrine{ grid-gap:6px; gap:6px; padding:6px; }
+@media (max-width:600px){                          /* téléphone : 3 × 3 compact, l'accroche passe dans le title */
+  #gamemenu.vitrine{ grid-template-columns:repeat(3, minmax(0,1fr)); grid-gap:6px; gap:6px; padding:6px; }
   #gamemenu .vcard{ padding:4px 4px 5px; }
   .vscene{ height:48px; }
   .vname{ margin-top:4px; font-size:12.5px; }
@@ -1092,6 +1125,7 @@ body.flat #gamemenu .vcard{ -webkit-transition:none; transition:none; }
   .vnb{ margin-top:3px; padding:2px 6px; font-size:9px; }
 }
 @media (max-width:370px){ .vscene{ height:40px; } .vname{ font-size:11.5px; } }
-@media (max-width:600px){ #gamemenu .vcard[data-id="patate"] .vname{ font-size:11px; } }   /* « Patate chaude » : le nom le plus long, il doit tenir dans une carte de téléphone */
-@media (max-width:370px){ #gamemenu .vcard[data-id="patate"] .vname{ font-size:10px; } }
+@media (max-width:600px){ #gamemenu .vcard[data-id="patate"] .vname, #gamemenu .vcard[data-id="micro"] .vname{ font-size:11px; } }   /* « Patate chaude » : le nom le plus long, il doit tenir dans une carte de téléphone */
+@media (max-width:370px){ #gamemenu .vcard[data-id="patate"] .vname, #gamemenu .vcard[data-id="micro"] .vname{ font-size:10px; } }
+@media (min-width:1101px){ #gamemenu .vcard[data-id="micro"] .vname{ font-size:14px; } }   /* 9 cartes en ligne : « Micro Machines » tient sans être tronqué */
 @media (prefers-reduced-motion:reduce){ #gamemenu .vcard{ -webkit-transition:none; transition:none; } }
