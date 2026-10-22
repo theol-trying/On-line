@@ -499,7 +499,7 @@ async function loadModule(id) {
     if (loadingId !== id) return;                 // un chargement plus récent a pris le relais
     mod = m.default;
     mod.init({ root: rootEl || document.body, send: gameSend, a11y, togglePanel, closePanels: closeGamePanels });
-    joystickPour(id, mod.joy);                    // table de boutons du jeu (Pong fournit sa propre projection)
+    joystickPour(id, mod.joy, mod.joyAna);                    // table de boutons du jeu (Pong fournit sa propre projection)
     modId = id; modReady = true; loadingId = null;
     if (mod.onA11y) mod.onA11y();
     const p = pend[id];                           // vider le tampon de ce jeu

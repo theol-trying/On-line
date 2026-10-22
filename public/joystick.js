@@ -31,6 +31,7 @@ const CARTES = {
 };
 
 let jeu = null, projeteur = null;                      // projeteur(dx, dy) → id | null (Pong : dépend du bord)
+let analogique = null;                                 // analogique(dx, dy, fin) : le jeu lit le stick tel quel (Micro Machines : cap absolu)
 let doigt = null, ox = 0, oy = 0, axe = '';            // doigt suivi, origine du stick, axe retenu (mode 4)
 let appuyes = [];                                      // ids actuellement « enfoncés »
 let zoneActive = null;
@@ -85,11 +86,12 @@ function dessiner(zone, x, y, visible) {
 function suivre(zone, t, fin) {
   const r = zone.getBoundingClientRect();
   const x = t.clientX - r.left, y = t.clientY - r.top;
-  if (fin) { doigt = null; axe = ''; actionner([]); dessiner(zone, 0, 0, false); return; }
+  if (fin) { doigt = null; axe = ''; actionner([]); if (analogique) analogique(0, 0, true); dessiner(zone, 0, 0, false); return; }
   const R = TAILLE * 0.85 * 0.9;
   let dx = x - ox, dy = y - oy, d = Math.sqrt(dx * dx + dy * dy);
   if (d > R) { dx = dx / d * R; dy = dy / d * R; }
   dessiner(zone, ox + dx, oy + dy, true);
+  if (analogique) { const k = Math.sqrt(dx * dx + dy * dy) / R; analogique(k < ZONE_MORTE ? 0 : dx / R, k < ZONE_MORTE ? 0 : dy / R, false); return; }   // aucun bouton : le jeu reçoit le vecteur
   actionner(cibles(dx / R, dy / R));
 }
 
@@ -138,13 +140,14 @@ export function initJoystick() {
   window.addEventListener('blur', relacherJoystick);
 }
 
-/** Jeu affiché : choisit la table de boutons (ou le projeteur propre au jeu, cf. Pong). */
-export function joystickPour(id, proj) {
+/** Jeu affiché : choisit la table de boutons (ou le projeteur propre au jeu, cf. Pong ; ou la lecture analogique, cf. Micro Machines). */
+export function joystickPour(id, proj, ana) {
   relacherJoystick();
-  jeu = id; projeteur = typeof proj === 'function' ? proj : null;
+  jeu = id; projeteur = typeof proj === 'function' ? proj : null; analogique = typeof ana === 'function' ? ana : null;
 }
 
 export function relacherJoystick() {
   if (zoneActive) dessiner(zoneActive, 0, 0, false);
+  if (analogique && doigt !== null) analogique(0, 0, true);
   doigt = null; axe = ''; actionner([]);
 }
