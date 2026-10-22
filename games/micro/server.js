@@ -7,7 +7,7 @@
 // glisser), chocs entre voitures (on se bouscule, on se fait tourner), murs et obstacles, CHUTE quand on quitte la table
 // (ou dans une poche du billard) → réapparition à la dernière porte de contrôle franchie, fantôme 1,2 s.
 // Les tours se comptent par portes de contrôle franchies DANS L'ORDRE : couper à travers la table ne fait rien gagner.
-import { TICK_HZ, CAR_R, CAR_L, CAR_W, FALL_T, GHOST_T, LAPS, FORMULES, ELIM_HW0, ELIM_HW1, CIRCUITS, circuitParId, proche, surTable, dansTrou, zoneA, grilleDepart } from '../../public/games/micro/shared.js';
+import { TICK_HZ, CAR_R, CAR_L, CAR_W, FALL_T, GHOST_T, LAPS, FORMULES, ELIM_HW0, ELIM_HW1, CIRCUITS, BUMPERS, circuitParId, proche, surTable, dansTrou, zoneA, grilleDepart, mobile } from '../../public/games/micro/shared.js';
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
 import { creerMatch } from '../match.js';
@@ -24,7 +24,10 @@ const SURF = [
   { vmax: 1, acc: 0.5, grip: 0.035, drag: 0.006 },       // 2 glisse (lait, encre)
   { vmax: 0.45, acc: 0.6, grip: 0.42, drag: 0.08 },      // 3 freine (sucre, gomme, craie)
 ];
-const ZONE_SURF = { lait: 2, encre: 2, sucre: 3, gomme: 3, craie: 3 };
+const ZONE_SURF = { lait: 2, encre: 2, huile: 2, sucre: 3, gomme: 3, craie: 3, sciure: 3 };
+const SENS = ['normal', 'inverse', 'hasard'];          // sens de course (« hasard » : tiré à chaque manche)
+const MOB_E = 0.3, MOB_KICK = 0.8;                       // obstacles mobiles : rebond mou + petite poussée (ils ne s'arrêtent pas pour vous)
+const HIT_GRACE = 75;                                    // 2,5 s après un choc violent, revenir « plus loin » sur la piste n'est pas un raccourci
 const BOOST_V = 1.42, BOOST_CD = 30;                     // flèche turbo (circuit-jouet) : +42 % d'un coup, une fois par passage
 const REST = { bande: 0.6, plinthe: 0.35, rail: 0.25 };  // rebond des murs (défaut 0.3) : les bandes du billard renvoient fort
 const GRACE_S = 12;                                      // Course : temps laissé aux autres après le premier à l'arrivée
@@ -37,7 +40,7 @@ const BUMP_CREDIT = 3 * TICK_HZ;                         // une chute dans les 3
 // B : porte franchie après plus de CUT_OFF de l'intervalle roulé loin hors piste (> CUT_MARGE u du bord) ET un trajet plus
 // court que CUT_B × l'espacement : la corde a été coupée par la table → vitesse plafonnée à PEN_V pendant PEN_T.
 const CUT_A = 0.72, CUT_B = 0.75, CUT_OFF = 0.5, CUT_MARGE = 20, PEN_T = 36, PEN_V = 0.45, CUT_FALL = 18;
-const BUMPER_KICK = 7.5;                                 // bumper de flipper : coup de pied (u/tick) en plus du rebond
+const BUMPER_KICK = 5.5;                                 // bumper de flipper : coup de pied (u/tick) en plus du rebond
 // IA : vitesse de pointe, marge en virage, regard (u), bruit de volant, part de la ligne idéale, erreur (proba. par tick)
 const MMDIFF = [
   { v: 0.8, lat: 0.78, look: 52, noise: 0.22, line: 0.45, err: 0.004 },
@@ -64,6 +67,8 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 export function createMicro(room) {
   let players, gameState, tick, round, countdownUntil, winner, fx, pend, mode, nteams, nParts, endTick, botCount, botDiff;
   let circuit, C, laps, formule, finCount, finDeadline, leader, leadT, cam, lastBest;
+  let circChoix = CIRCUITS[0].id, sensChoix = 'normal', inverse = false;   // choix du game master (« hasard » possible) / circuit et sens joués
+  const MOBP = [];                                       // positions des obstacles mobiles au tick courant
   let seatByMid = {}, clk = 0;                          // clk : horloge continue (le tick repart de 0 au départ)
 
   /* ---------- classement durable ---------- */
@@ -104,18 +109,23 @@ export function createMicro(room) {
       fall: 0, fallHole: 0, ghost: 0, outT: 0, wrong: false, surf: 0, drift: 0, boostCd: 0, inZone: null, bumpFx: 0, honkT: -1e9,
       bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
       lane: 0, forme: 1, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0,
-      gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0,
+      gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
       rs: 0, place: 0, elimTick: -1, score: 0,
     }));
   }
   const match = creerMatch();
-  function setCircuit(id) { circuit = id; C = circuitParId(id); }
+  function setCircuit(id, inv) { circuit = id; inverse = !!inv; C = circuitParId(id, inverse); MOBP.length = 0; for (const m of C.mobs) MOBP.push(mobile(m, 0, {})); }
+  // circuit et sens de la manche : le choix du game master, ou un tirage quand il a choisi « 🎲 Hasard »
+  function tirerCircuit() {
+    const id = circChoix === 'hasard' ? CIRCUITS[Math.floor(Math.random() * CIRCUITS.length)].id : circChoix;
+    setCircuit(id, sensChoix === 'hasard' ? Math.random() < 0.5 : sensChoix === 'inverse');
+  }
   function fullReset() {
     match.reinit();
     players = makePlayers();
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; pend = [];
     mode = 'ffa'; nteams = 0; nParts = 0; endTick = 0; botCount = 0; botDiff = 1; seatByMid = {};
-    setCircuit(CIRCUITS[0].id); laps = 3; formule = 'course';
+    circChoix = CIRCUITS[0].id; sensChoix = 'normal'; setCircuit(CIRCUITS[0].id, false); laps = 3; formule = 'course';
     finCount = 0; finDeadline = 0; leader = -1; leadT = -1e9; cam = null; lastBest = null;
   }
 
@@ -140,6 +150,7 @@ export function createMicro(room) {
     parts.forEach((p, i) => { if (p.bot) p.name = '🤖 Bot ' + (i + 1); });
     if (!parts.length) return;
     match.debutManche(players);
+    tirerCircuit();                                    // « Hasard » : un nouveau circuit / sens à chaque manche
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
@@ -153,7 +164,7 @@ export function createMicro(room) {
       Object.assign(p, { x: s.x, y: s.y, px: s.x, py: s.y, a: s.a, vx: 0, vy: 0, steer: 0, thr: 0, si: s.i, ana: null,
         pg: 0, lap: 0, lapStart: 0, best: 0, last: 0, fin: 0, ftick: 0, pos: k + 1, fall: 0, fallHole: 0, ghost: 0, outT: 0,
         wrong: false, surf: 0, drift: 0, boostCd: 0, inZone: null, bumpFx: 0, bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
-        lane: ((k * 37) % 9 - 4) / 4 * 0.22, forme: 1 + (Math.random() * 2 - 1) * 0.022, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0, rs: 0, place: 0, elimTick: -1, alive: true, gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0 });
+        lane: ((k * 37) % 9 - 4) / 4 * 0.22, forme: 1 + (Math.random() * 2 - 1) * 0.022, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0, rs: 0, place: 0, elimTick: -1, alive: true, gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1 });
       p.inp = { up: false, down: false, left: false, right: false };
     });
     nParts = N; endTick = 0; winner = null; finCount = 0; finDeadline = 0; leader = -1; leadT = -1e9; lastBest = null;
@@ -235,6 +246,7 @@ export function createMicro(room) {
       if (id >= 10000) { const r = C.rocks[id - 10000]; if ((x - r[0]) * (x - r[0]) + (y - r[1]) * (y - r[1]) < (r[2] + rr) * (r[2] + rr)) return true; }
     }
     for (let k = 0; k < C.holes.length; k++) { const h = C.holes[k]; if (Math.hypot(x - h[0], y - h[1]) < h[2] + rr) return true; }
+    for (let k = 0; k < MOBP.length; k++) { const o = MOBP[k], r = C.mobs[k].r + rr + 16; if (Math.abs(x - o.x - o.vx * 12) < r && Math.abs(y - o.y - o.vy * 12) < r) return true; }   // mobile (et là où il sera dans 0,4 s)
     return false;
   }
   function botControl(p, cruise) {
@@ -264,7 +276,13 @@ export function createMicro(room) {
     const tx = C.sx[ti] + C.nx[ti] * off, ty = C.sy[ti] + C.ny[ti] * off;
     let d = wrapA(Math.atan2(ty - p.y, tx - p.x) - p.a);
     const ta = Math.atan2(C.ty[p.si], C.tx[p.si]);
-    if (Math.cos(p.a - ta) < -0.2) d = wrapA(ta - p.a);   // à contresens : demi-tour vers le sens de course
+    if (Math.cos(p.a - ta) < -0.2) {                     // à contresens : demi-tour vers le sens de course…
+      d = wrapA(ta - p.a);
+      if (Math.abs(d) > 2.2) {                           // …du côté où il y a de la place (vers l'axe de la piste), pas contre le rail
+        const rx = -Math.sin(p.a), ry = Math.cos(p.a), side = (C.sx[p.si] - p.x) * rx + (C.sy[p.si] - p.y) * ry;
+        d = (side >= 0 ? 1 : -1) * Math.abs(d);
+      }
+    }
     if (D.noise) { if (tick >= p.noiseT) { p.noiseT = tick + 8 + Math.floor(Math.random() * 10); p.noise = (Math.random() * 2 - 1) * D.noise; } }
     if (D.err && Math.random() < D.err) p.errT = tick + 6 + Math.floor(Math.random() * 10);   // Facile / Normale : un coup de volant de trop
     p.steer = clamp(d * 3.2 + (D.noise ? p.noise : 0) + (p.errT > tick ? 0.9 : 0), -1, 1);
@@ -340,6 +358,7 @@ export function createMicro(room) {
     p.w = clamp(p.w + clamp((rx * ny - ry * nx) * j / INERTIE * ROT_K, -W_MAX, W_MAX), -W_MAX, W_MAX);
     const sl = Math.min(SLIP_MAX, Math.round(Math.abs(j) * slipK));
     if (sl > p.slip) p.slip = sl;
+    if (Math.abs(j) > 3) p.hitT = tick;               // choc violent : voir porteSautee
   }
   // obstacle fixe (mur, objet, bumper) : chaque disque de la voiture est repoussé ; rebond `e`, frottement, petit couple
   function pousser(p, cx, cy, nx, ny, pen, e, kick) {
@@ -361,7 +380,7 @@ export function createMicro(room) {
         if (id >= 10000) {
           const r = C.rocks[id - 10000], dx = px - r[0], dy = py - r[1], dd = Math.hypot(dx, dy), rr = r[2] + CC_R;
           if (dd < rr && dd > 1e-6) {
-            const bump = r[3] === 'bumper';                // bumper de flipper : il RENVOIE (coup de pied en plus du rebond)
+            const bump = Object.hasOwn(BUMPERS, r[3]);     // bumper (punaise, pion, tampon…) : il RENVOIE (coup de pied en plus du rebond)
             pousser(p, px - dx / dd * CC_R, py - dy / dd * CC_R, dx / dd, dy / dd, rr - dd, bump ? 0.6 : 0.35, bump ? BUMPER_KICK : 0);
             disques(p, CA);
           }
@@ -371,6 +390,15 @@ export function createMicro(room) {
           const dx = px - qx, dy = py - qy, dd = Math.hypot(dx, dy), rr = w[4] + CC_R;
           if (dd < rr && dd > 1e-6) { pousser(p, qx + dx / dd * w[4], qy + dy / dd * w[4], dx / dd, dy / dd, rr - dd, Object.hasOwn(REST, w[5]) ? REST[w[5]] : 0.3, 0); disques(p, CA); }
         }
+      }
+      for (let k = 0; k < MOBP.length; k++) {           // obstacles mobiles : masse « infinie », ils emportent la voiture
+        const o = MOBP[k], rr = C.mobs[k].r + CC_R, dx = CA[d][0] - o.x, dy = CA[d][1] - o.y, dd = Math.hypot(dx, dy);
+        if (dd >= rr || dd < 1e-6) continue;
+        const nx = dx / dd, ny = dy / dd;
+        p.x += nx * (rr - dd); p.y += ny * (rr - dd);
+        const vn = (p.vx - o.vx) * nx + (p.vy - o.vy) * ny;
+        if (vn < 0.5) { const j = -(1 + MOB_E) * Math.min(0, vn) + MOB_KICK; impulsion(p, o.x + nx * C.mobs[k].r, o.y + ny * C.mobs[k].r, nx, ny, j, 1.2); if (tick >= p.bumpFx) { p.bumpFx = tick + 6; fx.push({ type: 'bump', a: p.seat, b: -1, x: r1(o.x + nx * C.mobs[k].r), y: r1(o.y + ny * C.mobs[k].r), i: r2(Math.min(1, j / 8)), k: 1 }); } }
+        disques(p, CA);
       }
     }
   }
@@ -407,8 +435,9 @@ export function createMicro(room) {
     p.bumpBy = -1;
     fx.push({ type: 'fall', seat: p.seat, x: r1(p.x), y: r1(p.y), by, hole: p.fallHole });
   }
-  function reapparaitre(p) {                             // à la dernière porte franchie (ou sur la grille avant la ligne)
-    const k = K(), g = p.pg > 0 ? C.gates[(p.pg - 1) % k] : null, n = C.n;
+  function reapparaitre(p) {                             // à la dernière porte franchie (ou sur la grille avant la ligne) ; replacement : à la porte sautée
+    const k = K(), n = C.n, g = p.fallGate >= 0 ? C.gates[p.fallGate] : p.pg > 0 ? C.gates[(p.pg - 1) % k] : null;
+    p.fallGate = -1;
     let i = g ? (g.i - 2 + n) % n : (n - 6) % n, o = 0;
     for (const lat of [0, 0.42, -0.42, 0.7, -0.7]) {   // case libre : pas sur une autre voiture
       const x = C.sx[i] + C.nx[i] * lat * C.W, y = C.sy[i] + C.ny[i] * lat * C.W;
@@ -433,7 +462,11 @@ export function createMicro(room) {
     const esp = C.L / k;                                 // espacement réel des portes
     if (ahead >= n / 2 || ahead * C.step < esp * 0.9) return;
     const gp = C.gates[(ng - 1 + k) % k].i, dist = (((p.si - gp) % n + n) % n) * C.step;
-    if (p.gLen < CUT_A * dist) { raccourci(p); return; }
+    if (p.gLen < CUT_A * dist) {
+      if (tick - p.hitT > HIT_GRACE) { raccourci(p); return; }
+      // projeté par un choc : ni pénalité ni gain — la voiture est replacée juste avant la porte qu'elle a sautée
+      p.fall = 8; p.fallHole = 3; p.fallGate = ng; fx.push({ type: 'replace', seat: p.seat }); return;
+    }
     for (let guard = 0; guard < k && ahead < n / 2 && ahead * C.step >= esp * 0.5; guard++) {   // grand détour : portes créditées
       passerPorte(p, true);
       if (p.fin) return;
@@ -497,6 +530,7 @@ export function createMicro(room) {
     }
     if (gameState !== 'play') return;
     tick++;
+    for (let k = 0; k < C.mobs.length; k++) mobile(C.mobs[k], tick / TICK_HZ, MOBP[k]);   // le temps de course décide de leur place : le client les recalcule
     const racers = players.filter(p => p.alive && p.playing);
     for (const p of racers) {
       if (p.fall) continue;
@@ -552,8 +586,8 @@ export function createMicro(room) {
       gs: gameState, count: gameState === 'countdown' ? Math.max(0, Math.ceil((countdownUntil - tick) / TICK_HZ)) : 0,
       round, winner, fx, connected: connectedCount(), botCount, bots: botCount, maxBots: maxBots(), botDiff, nteams,
       mode: gameState === 'lobby' && !validModes(Math.max(1, partCount())).includes(mode) ? 'ffa' : mode,
-      circuit, laps, formule, K: C.gates.length,
-      rt: live || gameState === 'over' ? r1((gameState === 'over' ? endTick : tick) / TICK_HZ) : 0,   // chrono de course (s) — surtout pas « t » : le hub l'utilise pour le type du message
+      circuit, inv: inverse, choix: circChoix, sens: sensChoix, laps, formule, K: C.gates.length,
+      rt: live || gameState === 'over' ? r2((gameState === 'over' ? endTick : tick) / TICK_HZ) : 0,   // chrono de course (s) — surtout pas « t » : le hub l'utilise pour le type du message
       lead: leader, finT: formule === 'course' && finDeadline && live ? Math.max(0, Math.ceil((finDeadline - tick) / TICK_HZ)) : null,
       cam: cam && gameState !== 'lobby' ? [r1(cam.x), r1(cam.y), Math.round(cam.hw)] : null,
       rec: lastBest ? [lastBest.seat, r2(lastBest.t / TICK_HZ)] : null,
@@ -618,7 +652,14 @@ export function createMicro(room) {
     else if (m.t === 'mode') { if (editable()) { const v = validModes(partCount()); mode = v[(v.indexOf(mode) + 1) % v.length] || 'ffa'; } }
     else if (m.t === 'bots') { if (editable()) { const mx = maxBots(); botCount = mx <= 0 ? 0 : (botCount + 1) % (mx + 1); } }
     else if (m.t === 'botdiff') { if (editable()) botDiff = (botDiff + 1) % 3; }
-    else if (m.t === 'circuit') { if (editable()) { const ids = CIRCUITS.map(c => c.id); setCircuit(typeof m.id === 'string' && ids.includes(m.id) ? m.id : cycle(ids, circuit)); } }
+    else if (m.t === 'circuit') {                      // cycle des circuits, puis « 🎲 Hasard » (un circuit tiré à chaque manche)
+      if (editable()) {
+        const ids = CIRCUITS.map(c => c.id).concat(['hasard']);
+        circChoix = typeof m.id === 'string' && ids.includes(m.id) ? m.id : cycle(ids, circChoix);
+        if (circChoix !== 'hasard') setCircuit(circChoix, sensChoix === 'hasard' ? inverse : sensChoix === 'inverse');
+      }
+    }
+    else if (m.t === 'sens') { if (editable()) { sensChoix = cycle(SENS, sensChoix); if (sensChoix !== 'hasard') setCircuit(circuit, sensChoix === 'inverse'); } }
     else if (m.t === 'laps') { if (editable()) laps = cycle(LAPS, laps); }
     else if (m.t === 'formule') { if (editable()) formule = cycle(FORMULES, formule); }
     else if (m.t === 'match') { if (editable()) match.changer(players); }
