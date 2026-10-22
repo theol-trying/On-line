@@ -316,6 +316,50 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
 - Vérifié : `npm test` 108/108 + 22/22 ; navigateur (bureau, téléphone 375 px à 2, 3 et 10 joueurs, « Réduire les
   effets »), sans erreur. **Pas encore joué à plusieurs humains.**
 
+## Jeu : MICRO MACHINES  (`micro`, 1–10, tickHz 30) — ajouté le 22/10
+- **Principe** : course de voitures-jouets vue de dessus, sur des tables et un circuit-jouet. Géométrie PARTAGÉE
+  (`public/games/micro/shared.js`) : ligne médiane Catmull-Rom rééchantillonnée tous les 10 u, demi-largeur `W`, murs
+  (capsules), obstacles ronds, trous, zones, décor, grille de collision (cellules 120 u). Rien de la géométrie ne voyage :
+  le snapshot ne porte que `circuit` (id) et `K` (nombre de portes).
+- **4 circuits** : Petit-déjeuner (bois, bord de table = chute, bol de céréales, lait qui glisse, sucre qui freine),
+  Bureau d'écolier (cahier quadrillé, crayons et règle en bordure, encre, gomme), Billard (bandes qui renvoient fort,
+  billes en chicane, 6 poches = chute), Circuit-jouet (piste orange à rails continus, flèches turbo ×1,42, pas de chute).
+  Vérifiés en Node (dégagement entre tronçons ≥ 2W + 70, rayon ≥ 70, obstacles hors piste sauf billes de chicane).
+- **Formules** (`formule`) : **Course** (`laps` 1 / 3 / 5 ; places à l'arrivée ; 12 s après le premier, les autres sont
+  classés à leur progression ; plafond 30 + 75 s par tour) et **Élimination** (le « head to head » d'origine : fenêtre
+  commune `cam [x, y, demi-côté]` centrée sur le meneur, 520 → 340 u en 1 min puis → 170 u ; 0,2 s dehors = éliminé ;
+  plafond 150 s, le meneur gagne). Équipes comme la Patate (points de place cumulés). Places : `classerManche` avec
+  `score` = progression (Course) ou « en vie d'abord » (Élimination). Match en N manches : `creerMatch()`.
+- **Physique** : lacet puis décomposition de la vitesse dans le nouveau repère (la part latérale = dérapage, amortie
+  selon l'adhérence de la surface : piste 0,36, hors piste 0,3 et ×0,6 de vitesse, lait/encre 0,035, sucre/gomme/craie
+  ×0,45) ; chocs voiture/voiture qui poussent ET font pivoter ; chute (table, poche) 1 s → réapparition à la dernière
+  porte franchie, fantôme 1,2 s ; une chute dans les 3 s qui suivent un choc est créditée au cogneur (`kos`).
+- **Portes de contrôle** (~150 u) franchies DANS L'ORDRE et dans le sens de la course : couper à travers la table ne
+  rapporte rien. Porte 0 = ligne d'arrivée (premier passage = départ du tour 1).
+- **Commandes** : `input {up,down,left,right}` (↑ gaz, ↓ frein puis marche arrière, ← → volant progressif) ou
+  `input {mx,my}` = joystick ANALOGIQUE à cap absolu (la voiture tourne vers le stick ; vers l'arrière presque à
+  l'arrêt : marche arrière) ; `klaxon`. `joystick.js` a gagné un 3e argument : `joystickPour(id, proj, ana)` →
+  le module expose `joyAna(dx, dy, fin)` ; le client quantifie (64 caps × 3 forces, ≤ 1 envoi / 60 ms).
+- **Bots** : ligne idéale (corde des virages), voie personnelle, doublement par le côté libre, évitement des obstacles et
+  trous, vitesse de virage selon le rayon devant et la distance de freinage, marche arrière si coincés ; « forme du jour »
+  ±2 % par manche (sinon deux bots du même niveau ne se départagent jamais en Élimination). Tours simulés : Facile
+  ~25 s, Normale ~22 s, Difficile ~20 s (Petit-déjeuner) ; course de 3 tours ≈ 65-90 s.
+- **Snapshot** : `circuit, laps, formule, K, rt` (chrono — surtout pas `t`, le hub s'en sert pour le type du message),
+  `lead, finT, cam, rec, match, stats` ; joueurs `x, y, a, sp, dr, st, th, su, fa, fh, gh, ww, lap, pos, fin, ft, bl, ll, pg,
+  bumps, kos, falls` (arrondis grossiers : ~370 o par delta à 10, 11 Ko/s). fx `bump{a,b,x,y,i}`, `fall{seat,x,y,by,hole}`,
+  `respawn`, `lap{seat,lap,sec,best,rec,last}`, `finish{seat,pos,sec,lap}`, `out`, `boost`, `splash{k}`, `honk`, `lead`,
+  `quit`, `go`.
+- **Client** : décor de chaque circuit pré-rendu une fois (≤ 5,2 Mpx), traces de pneus sur une couche à part effacée à
+  chaque manche, caméra qui suit SA voiture (champ `VIEW` = 580 u pour tous, nord en haut), vue commune en Élimination,
+  zoom d'ouverture au décompte, feux de départ, 5 silhouettes de voitures (proto, mini, pick-up, formule, fourgon) au
+  motif du siège + numéro, mini-carte, HUD position / tour / chrono / meilleur tour, « mauvais sens », phares au
+  crépuscule du duel, ralenti (dernière élimination, ou arrivée qui clôt la course), podium de voitures, journal de fin
+  (positions au fil de la course), moteur et crissement WebAudio, musique « rock'n'roll de salle de jeux », police
+  Racing Sans One, confettis à damier.
+- **Classement** : `{games, wins, podiums, kos, falls, bestLap, bl{circuit: s}}` (meilleur tour global et par circuit).
+- Vérifié : `npm test` 120/120 + 82/82 ; navigateur (bureau et téléphone 375 px) : 4 circuits, Course et Élimination,
+  clavier, joystick analogique, écran de fin et podium, sans erreur. **Pas encore joué à plusieurs humains.**
+
 ## ZQSD / WASD dans tous les jeux (25/09)
 Les 7 jeux lisent le clavier par `e.code` (position PHYSIQUE) : `KeyW`/`KeyA` sont les touches Z/Q d'un clavier
 AZERTY, donc ZQSD marchait déjà en AZERTY. `KeyZ`/`KeyQ` ajoutés partout : Z Q S D marche aussi sur un clavier réglé

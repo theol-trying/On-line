@@ -24,7 +24,7 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
   mémoire** → une seule instance Render.
 - **Ajouter un jeu** = `games/<id>/server.js` + `public/games/<id>/{client.js,shared.js}`,
   puis l'enregistrer dans l'objet `GAMES` de `hub.js` — c'est le minimum pour qu'il tourne.
-  Pour une identité complète comme les 8 jeux actuels (le Sumo sert de modèle ; le Foot, ajouté le 25/09, et la Patate chaude, le 30/09, l'ont suivi) :
+  Pour une identité complète comme les 9 jeux actuels (le Sumo sert de modèle ; le Foot, ajouté le 25/09, la Patate chaude, le 30/09, et Micro Machines, le 22/10, l'ont suivi) :
   racine `#<id>-root` dans `index.html` (canvas dans un `.stage`), `body.game-<id>` + onglet + fond
   plein écran dans `style.css`, `setGameSkin`/`GAME_SUB`/`GAME_TITLE`/`CELEB` dans `app.js`, `CARTES`
   dans `joystick.js`, un `jouer('<id>', …)` dans `test/smoke.mjs`, une fiche dans `PROJECT_STATE.md`.
@@ -52,12 +52,16 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
   `Object.hasOwn` côté serveur (`Object.prototype.hasOwnProperty.call` côté client) ou `Object.create(null)`.
   Un simple `{t:'pick', id:'constructor'}` tuait le serveur (corrigé le 24/09). Tout appel au code d'un jeu hors
   tick/onMessage passe par `garde()` de `hub.js`.
-- Le snapshot renvoyé par `tick()` **doit** contenir `gs` (utilisé par le throttle du hub).
+- Le snapshot renvoyé par `tick()` **doit** contenir `gs` (utilisé par le throttle du hub). Il ne doit **jamais** avoir de clé
+  `t`, `g`, `fx`, `shz` ou `pd` à lui : le hub les pose sur le message (un chrono nommé `t` écrasait `t: 'state'` — Micro Machines,
+  22/10 ; seul le test de fumée le voit, `fins-de-manche.mjs` appelle `tick()` en direct).
+- **Joystick analogique** : un jeu qui veut le vecteur du stick (et non des boutons) exporte `joyAna(dx, dy, fin)` dans son
+  module ; `app.js` le passe à `joystickPour(id, mod.joy, mod.joyAna)` (Micro Machines : cap absolu).
 
 ## Lancer et tester
 
 ```
-npm test                      # smoke.mjs (8 jeux, vrais clients WebSocket) puis fins-de-manche.mjs — AVANT CHAQUE PUSH
+npm test                      # smoke.mjs (9 jeux, vrais clients WebSocket) puis fins-de-manche.mjs — AVANT CHAQUE PUSH
 node server.js                # :3000, ou preview_start via .claude/launch.json
 HUB_TRACE=1 node server.js    # journalise chaque diffusion
 ```

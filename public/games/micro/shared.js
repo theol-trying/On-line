@@ -19,7 +19,7 @@ export const TICK_HZ = 30;
 export const CAR_L = 34, CAR_W = 18, CAR_R = 12;        // voiture-jouet (u) ; collisions : un disque de rayon CAR_R
 export const STEP = 10;                                 // pas d'échantillonnage de la ligne médiane (u)
 export const GATE = 150;                                // espacement visé des portes de contrôle (u)
-export const VIEW = 660;                                // côté de la vue d'un joueur (u) : identique pour tous les écrans (équité)
+export const VIEW = 580;                                // côté de la vue d'un joueur (u) : identique pour tous les écrans (équité)
 export const FALL_T = 30, GHOST_T = 36;                 // chute (ticks) puis fantôme (ticks) à la réapparition
 export const LAPS = [1, 3, 5];
 export const FORMULES = ['course', 'elim'];
