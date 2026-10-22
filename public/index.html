@@ -7,7 +7,7 @@
 <title>Plateforme LAN</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Black+Ops+One&family=Dela+Gothic+One&family=Fredoka:wght@500;600;700&family=Lilita+One&family=Orbitron:wght@600;800&family=Russo+One&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Black+Ops+One&family=Dela+Gothic+One&family=Fredoka:wght@500;600;700&family=Lilita+One&family=Racing+Sans+One&family=Orbitron:wght@600;800&family=Russo+One&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body class="game-pong">
@@ -575,6 +575,66 @@
         <h4>Options du game master</h4>
         <div class="legrow"><span>🧨</span><b>Mèche</b> — <b>cachée</b> (défaut) ou <b>visible</b> : le temps restant s'affiche sur la patate</div>
         <div class="note">L'explosion est créditée au dernier adversaire qui t'a passé la patate. Une passe lancée dans la dernière seconde avant l'explosion : « IN EXTREMIS ! ».</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== racine du jeu MICRO MACHINES ===== -->
+  <div id="micro-root" class="game-root hidden">
+    <div class="stage"><div class="canvas-wrap">
+      <canvas id="mmc" width="600" height="600"></canvas>
+      <div id="mmBanner" class="banner-mid"></div>
+      <div id="mmEnd" class="endscreen hidden"></div>
+    </div></div>
+    <div id="mmHud" class="hud"></div>
+    <div class="bar">
+      <button id="mmStart" class="primary" disabled>▶ Démarrer</button>
+      <button id="mmPause" disabled>⏸ Pause</button>
+      <span class="sep"></span>
+      <button class="gm" id="mmCircuit">🥣 Petit-déjeuner</button>
+      <button class="gm" id="mmFormule">🏁 Course</button>
+      <button class="gm" id="mmLaps">🔁 3 tours</button>
+      <button class="gm" id="mmBots">🤖 Bots : 0</button>
+      <button class="gm" id="mmDiff">🎯 IA : Normale</button>
+      <button class="gm" id="mmMode" disabled>⚔ FFA</button>
+      <button id="mmHelp">❔ Règles</button>
+      <button id="mmLbBtn">🏆 Classement</button>
+    </div>
+    <div class="help">
+      <b>↑</b> / <b>Z</b> (W) accélère · <b>↓</b> / <b>S</b> freine et recule · <b>← →</b> / <b>Q D</b> (A D) tournent · <b>Espace</b> ou <b>H</b> = klaxon 📯 · <b>P / Échap</b> = pause.
+      Attention au bord de la table : on tombe !
+    </div>
+    <div class="gpad">
+      <div class="dirs">
+        <button id="mmUp" class="touch" aria-label="accélérer">▲</button>
+        <div class="drow"><button id="mmLeft" class="touch" aria-label="tourner à gauche">◀</button><button id="mmDown" class="touch" aria-label="freiner">▼</button><button id="mmRight" class="touch" aria-label="tourner à droite">▶</button></div>
+      </div>
+      <div class="acts">
+        <button id="mmHorn" class="touch fire" aria-label="klaxon">📯</button>
+      </div>
+    </div>
+    <button id="mmPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
+    <div id="mmLbPanel" class="settings hidden" style="width:94vw;max-width:460px;">
+      <div class="shead"><h3>🏆 Classement — Micro Machines</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody"><div id="mmLbBody"></div></div>
+    </div>
+    <div id="mmHelpPanel" class="settings hidden" style="width:94vw;max-width:440px;">
+      <div class="shead"><h3>Règles — Micro Machines</h3><button class="sclose" aria-label="fermer">✕</button></div>
+      <div class="sbody">
+        <h4>Piloter</h4>
+        <div class="legrow"><span>🕹</span><b>Clavier</b> — ↑ accélère, ↓ freine puis recule, ← → tournent. <b>Sur téléphone</b>, le joystick donne la <b>direction</b> : la voiture tourne vers le stick et accélère (stick vers l'arrière, presque à l'arrêt : marche arrière)</div>
+        <div class="legrow"><span>💨</span><b>Glisse</b> — en virage serré la voiture dérape (traces de pneus). Le lait et l'encre font glisser, le sucre, la gomme et la craie freinent, hors de la piste on va moins vite</div>
+        <div class="legrow"><span>😵</span><b>Chute</b> — quitter la table (ou tomber dans une poche du billard) coûte une seconde : la voiture revient à la dernière porte franchie, transparente un instant</div>
+        <div class="legrow"><span>💥</span><b>Bousculer</b> — les chocs poussent et font tourner. Une voiture qui tombe dans les 3 s après ton choc t'est créditée</div>
+        <h4>Formules (game master)</h4>
+        <div class="legrow"><span>🏁</span><b>Course</b> — 1, 3 ou 5 tours. Il faut passer les portes de contrôle dans l'ordre : couper à travers la table ne sert à rien. Quand le premier franchit la ligne, les autres ont 12 s pour finir, puis sont classés à leur progression</div>
+        <div class="legrow"><span>💥</span><b>Élimination</b> — comme les Micro Machines d'origine : un seul écran pour tous, centré sur le meneur, qui rétrécit. Qui en sort est éliminé ; le dernier dans le cadre gagne</div>
+        <h4>Circuits</h4>
+        <div class="legrow"><span>🥣</span><b>Petit-déjeuner</b> — table de cuisine : bol de céréales, tasse, lait renversé, sucre. Bords de table dangereux</div>
+        <div class="legrow"><span>✏️</span><b>Bureau d'écolier</b> — cahier quadrillé, crayons et règles en bordure, taches d'encre</div>
+        <div class="legrow"><span>🎱</span><b>Billard</b> — les bandes renvoient fort, les billes barrent la route, les poches avalent</div>
+        <div class="legrow"><span>🏁</span><b>Circuit-jouet</b> — piste orange à rails sur la moquette : pas de chute, flèches turbo</div>
+        <div class="note">Les bots ont trois niveaux (Facile, Normale, Difficile). Le meilleur tour de chaque pilote est gardé au classement.</div>
       </div>
     </div>
   </div>

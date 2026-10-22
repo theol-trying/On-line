@@ -383,6 +383,59 @@ SCENES.patate = {
     if (fr(t * 9) < 0.6) { c.fillStyle = '#ffd24a'; disque(c, px + tr + pr * 0.3, py - pr * 1.3, Math.max(1.2, r * 0.16)); }
   },
 };
+// Micro Machines : table de bois clair, piste ovale bordée de céréales, damier de départ ; trois voitures-jouets la parcourent,
+// la dernière dérape à chaque virage (traces de pneus qui s'effacent).
+function ovale(w, h) {                                                          // demi-axes de la piste (stade : deux droites + deux demi-cercles)
+  const rx = w * 0.36, ry = h * 0.3, r = ry;
+  return { cx: w / 2, cy: h / 2, rx, ry, r, dl: (rx - r) * 2, L: (rx - r) * 4 + 2 * Math.PI * r };
+}
+const PO = { x: 0, y: 0, a: 0, v: 0 };
+function surOvale(o, s) {                                                       // point du stade à l'abscisse s : droite du bas → virage de droite → droite du haut → virage de gauche
+  s = ((s % o.L) + o.L) % o.L;
+  const h = o.rx - o.r, d = 2 * h, arc = Math.PI * o.r;
+  PO.v = 0;
+  if (s < d) { PO.x = o.cx - h + s; PO.y = o.cy + o.r; PO.a = 0; return PO; }
+  s -= d; PO.v = 1;
+  if (s < arc) { const u = s / o.r; PO.x = o.cx + h + Math.sin(u) * o.r; PO.y = o.cy + Math.cos(u) * o.r; PO.a = -u; return PO; }
+  s -= arc; PO.v = 0;
+  if (s < d) { PO.x = o.cx + h - s; PO.y = o.cy - o.r; PO.a = Math.PI; return PO; }
+  s -= d; PO.v = 1;
+  const u = s / o.r; PO.x = o.cx - h - Math.sin(u) * o.r; PO.y = o.cy - Math.cos(u) * o.r; PO.a = Math.PI - u; return PO;
+}
+SCENES.micro = {
+  fixe: 1.4,
+  fond(c, w, h, st) {
+    c.fillStyle = '#c99a5e'; c.fillRect(0, 0, w, h);                                                              // table : planches
+    c.strokeStyle = 'rgba(110,64,30,.35)'; c.lineWidth = 1; for (let y = h / 4; y < h; y += h / 4) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); }
+    c.strokeStyle = 'rgba(110,64,30,.14)'; for (let y = 3; y < h; y += 5) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y + Math.sin(y) * 1.5); c.stroke(); }
+    const o = ovale(w, h); st.o = o;
+    c.lineJoin = 'round'; c.lineCap = 'round';
+    const band = (wd, col) => { c.strokeStyle = col; c.lineWidth = wd; c.beginPath(); for (let k = 0; k <= 64; k++) { const p = surOvale(o, k / 64 * o.L); if (k) c.lineTo(p.x, p.y); else c.moveTo(p.x, p.y); } c.closePath(); c.stroke(); };
+    const tw = Math.max(8, h * 0.2); st.tw = tw;
+    band(tw + 3, 'rgba(90,50,20,.35)'); band(tw, '#e8cf9f');
+    c.fillStyle = '#e39a2a';                                                                                      // céréales en bordure
+    for (let k = 0; k < 40; k++) for (const sd of [-1, 1]) { const p = surOvale(o, k / 40 * o.L), nx = -Math.sin(p.a), ny = Math.cos(p.a), d = (tw / 2 + 2) * sd; disque(c, p.x + nx * d, p.y + ny * d, Math.max(1, h * 0.022)); }
+    const s0 = surOvale(o, o.dl * 0.25), q = Math.max(2, tw / 4);                                                // damier de départ
+    for (let r = 0; r < 4; r++) for (let k = 0; k < 2; k++) { c.fillStyle = (r + k) % 2 ? '#111' : '#fff'; c.fillRect(s0.x - q + k * q, s0.y - tw / 2 + r * (tw / 4), q, tw / 4); }
+    c.fillStyle = '#f4f6fb'; disque(c, w * 0.5, h * 0.5, h * 0.12); c.strokeStyle = '#2f7ff0'; c.lineWidth = Math.max(1, h * 0.03); c.beginPath(); c.arc(w * 0.5, h * 0.5, h * 0.1, 0, TAU); c.stroke();   // bol au centre
+  },
+  image(c, w, h, t, st) {
+    const o = st.o, cols = ['#e8322a', '#2f7ff0', '#ffcf2e'], L = Math.max(5, h * 0.11), W2 = L * 0.55;
+    for (let i = 0; i < 3; i++) {
+      const s = t * o.L * (0.32 - i * 0.025) + i * o.L * 0.18, p = surOvale(o, s), off = (i - 1) * st.tw * 0.22, nx = -Math.sin(p.a), ny = Math.cos(p.a);
+      const glisse = i === 2 && p.v ? -0.35 : 0;      // la jaune dérape : le nez rentre dans le virage
+      const x = p.x + nx * off, y = p.y + ny * off, a = p.a + glisse;
+      if (glisse) { c.strokeStyle = 'rgba(60,30,10,.25)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x - Math.cos(p.a) * L * 2, y - Math.sin(p.a) * L * 2); c.lineTo(x, y); c.stroke(); }
+      c.save(); c.translate(x, y); c.rotate(a);
+      c.fillStyle = 'rgba(0,0,0,.3)'; rrect(c, -L / 2 + 1, -W2 / 2 + 1.5, L, W2, W2 * 0.3); c.fill();
+      c.fillStyle = '#16161c'; c.fillRect(L * 0.18, -W2 / 2 - 0.8, L * 0.2, W2 + 1.6); c.fillRect(-L * 0.38, -W2 / 2 - 0.8, L * 0.2, W2 + 1.6);
+      c.fillStyle = cols[i]; rrect(c, -L / 2, -W2 / 2, L, W2, W2 * 0.3); c.fill();
+      c.fillStyle = 'rgba(20,30,48,.9)'; c.fillRect(L * 0.02, -W2 * 0.32, L * 0.2, W2 * 0.64);
+      c.fillStyle = 'rgba(255,255,255,.55)'; c.fillRect(-L * 0.4, -0.6, L * 0.75, 1.2);
+      c.restore();
+    }
+  },
+};
 const SCENE_VIDE = { fixe: 0, fond(c, w, h) { c.fillStyle = '#12142a'; c.fillRect(0, 0, w, h); }, image() {} };
 
 /* ============================================================================
