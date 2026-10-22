@@ -143,7 +143,7 @@ function construire(def) {
   for (let i = 0; i < n; i++) {                                     // courbure signée, lissée sur ±3 échantillons
     let s = 0;
     for (let d = -3; d <= 3; d++) {
-      const a = (i + d - 1 + n) % n, b = (i + d + 1) % n;
+      const a = (i + d - 1 + n) % n, b = (i + d + 1 + n) % n;
       s += wrapA(Math.atan2(c.ty[b], c.tx[b]) - Math.atan2(c.ty[a], c.tx[a])) / (2 * c.step);
     }
     c.k[i] = s / 7;

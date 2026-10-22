@@ -120,6 +120,11 @@ async function jouer(id, participants, attentes = {}) {
       c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });
       if (Math.random() < 0.15) c.jeu({ t: 'dash' });
     }
+    else if (id === 'micro') {                         // gaz tenu + volant, ou cap absolu du joystick ; un coup de klaxon
+      if (Math.random() < 0.5) c.jeu({ t: 'input', up: Math.random() < 0.8, down: Math.random() < 0.1, left: Math.random() < 0.3, right: Math.random() < 0.3 });
+      else c.jeu({ t: 'input', mx: Math.random() * 2 - 1, my: Math.random() * 2 - 1 });
+      if (Math.random() < 0.05) c.jeu({ t: 'klaxon' });
+    }
     else if (id === 'patate') {                        // course tenue + sprint (comme le Foot) ; la patate passe au contact
       c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });
       if (Math.random() < 0.15) c.jeu({ t: 'sprint', on: Math.random() < 0.6 });
@@ -465,6 +470,7 @@ cadences.tank = await jouer('tank', 8, { arene: { lire: s => 'grille ' + s.ag, v
 cadences.bomb = await jouer('bomb', 8, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 17' } });
 cadences.foot = await jouer('foot', 10, { arene: { lire: s => 'arène ' + s.ar + ' · ' + (s.geo && s.geo.e ? s.geo.e.length : 0) + ' côtés', valeur: 'arène 1123 · 10 côtés' } });   // un côté (une cage) par joueur
 cadences.sumo = await jouer('sumo', 10, { arene: { lire: s => 'arène ' + s.ar, valeur: 'arène 1080' } });   // k = 1.8 → 600 × 1.8
+cadences.micro = await jouer('micro', 10, { arene: { lire: s => 'circuit ' + s.circuit + ' · ' + s.K + ' portes · ' + s.laps + ' tours · ' + s.formule, valeur: 'circuit dejeuner · 42 portes · 3 tours · course' } });   // géométrie partagée (shared.js) : seul l'identifiant du circuit voyage
 cadences.patate = await jouer('patate', 10, { arene: { lire: s => 'arène ' + s.ar + ' · ' + (s.pil || []).length + ' piliers · R ' + Math.round(s.R0), valeur: 'arène 1123 · 5 piliers · R 532' } });   // k = 1.56 → 720 × 1.56 ; rayon utile = 1123/2 − 30
 await arriveeEnCours();
 await protections();
