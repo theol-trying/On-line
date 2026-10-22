@@ -110,6 +110,7 @@ export function createMicro(room) {
       bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
       lane: 0, forme: 1, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0,
       gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
+      item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, oilIn: 0, pouce: 1,
       rs: 0, place: 0, elimTick: -1, score: 0,
     }));
   }
@@ -164,16 +165,18 @@ export function createMicro(room) {
       Object.assign(p, { x: s.x, y: s.y, px: s.x, py: s.y, a: s.a, vx: 0, vy: 0, steer: 0, thr: 0, si: s.i, ana: null,
         pg: 0, lap: 0, lapStart: 0, best: 0, last: 0, fin: 0, ftick: 0, pos: k + 1, fall: 0, fallHole: 0, ghost: 0, outT: 0,
         wrong: false, surf: 0, drift: 0, boostCd: 0, inZone: null, bumpFx: 0, bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
-        lane: ((k * 37) % 9 - 4) / 4 * 0.22, forme: 1 + (Math.random() * 2 - 1) * 0.022, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0, rs: 0, place: 0, elimTick: -1, alive: true, gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1 });
+        lane: ((k * 37) % 9 - 4) / 4 * 0.22, forme: 1 + (Math.random() * 2 - 1) * 0.022, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0, rs: 0, place: 0, elimTick: -1, alive: true, gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
+        item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, oilIn: 0 });
       p.inp = { up: false, down: false, left: false, right: false };
     });
     nParts = N; endTick = 0; winner = null; finCount = 0; finDeadline = 0; leader = -1; leadT = -1e9; lastBest = null;
+    boxT = C.boxes.map(() => 0); flaques = []; boules = [];
     cam = formule === 'elim' ? { x: g.reduce((s, q) => s + q.x, 0) / N, y: g.reduce((s, q) => s + q.y, 0) / N, hw: ELIM_HW0 } : null;
     round++; tick = 0; countdownUntil = COUNTDOWN_TICKS; gameState = 'countdown';
   }
   function backToLobby() {            // abandon : retour au lobby en pleine partie
     if (gameState !== 'play' && gameState !== 'countdown' && gameState !== 'paused') return;
-    gameState = 'lobby'; winner = null; fx = []; pend = []; cam = null;
+    gameState = 'lobby'; winner = null; fx = []; pend = []; cam = null; flaques = []; boules = [];
     for (const p of players) { p.playing = false; p.alive = false; p.vx = 0; p.vy = 0; }
   }
 
@@ -199,7 +202,7 @@ export function createMicro(room) {
 
   /* ---------- fin de manche ---------- */
   function endRound() {
-    gameState = 'over'; endTick = tick;
+    gameState = 'over'; endTick = tick; flaques = []; boules = [];
     majPositions();
     const ps = players.filter(p => p.playing);
     if (formule === 'elim') {
@@ -324,8 +327,9 @@ export function createMicro(room) {
     p.w *= p.slip > 0 ? 0.93 : 0.84;
     c = Math.cos(p.a); s = Math.sin(p.a);
     let vf = p.vx * c + p.vy * s, vr = -p.vx * s + p.vy * c;
-    const cap = VMAX * S.vmax * (p.bot && !p.fin ? D.v * p.forme : 1) * (p.penT > tick ? PEN_V : 1);   // forme du jour (±2 %) : deux bots du même niveau finissent par se séparer ; pénalité de coupe
-    if (p.thr > 0) { if (vf < cap) vf += ACC * S.acc * p.thr * (1 - Math.max(0, vf) / cap * 0.6); }
+    const tb = p.tbT > tick;                             // turbo (bonus) : plafond et reprise relevés ; escargot : plafond abaissé
+    const cap = VMAX * S.vmax * (p.bot && !p.fin ? D.v * p.forme : 1) * (p.penT > tick ? PEN_V : 1) * (tb ? TURBO_V : 1) * (p.slowT > tick ? SLOW_V : 1) * (p.pouce || 1);   // forme du jour (±2 %) : deux bots du même niveau finissent par se séparer ; pénalité de coupe
+    if (p.thr > 0 || tb) { if (vf < cap) vf += ACC * S.acc * (tb ? TURBO_A : p.thr) * (p.pouce || 1) * (1 - Math.max(0, vf) / cap * 0.6); }
     else if (p.thr < 0) { if (vf > 0.3) vf -= BRAKE * -p.thr; else if (vf > -VREV) vf -= REV * -p.thr; }
     else vf *= COAST;
     vf *= 1 - S.drag;
@@ -419,8 +423,9 @@ export function createMicro(room) {
     const sp = p.vx * nx + p.vy * ny, sq = -(q.vx * nx + q.vy * ny);
     let j = -(1 + E_CAR) * vn / 2;
     j += RAM_K * Math.max(0, Math.max(sp, sq) - 4);      // percuter fort pousse un peu plus (le pare-chocs avant compte)
-    impulsion(p, cx, cy, -nx, -ny, j, sp >= sq ? SLIP_K * 0.45 : SLIP_K);   // le percuté glisse plus longtemps que le percuteur
-    impulsion(q, cx, cy, nx, ny, j, sp >= sq ? SLIP_K : SLIP_K * 0.45);
+    const bp = p.shT > tick, bq = q.shT > tick;          // bouclier : le choc le secoue à peine (et ne le fait pas décrocher)
+    impulsion(p, cx, cy, -nx, -ny, j * (bp ? 0.45 : bq ? 1.25 : 1), bp ? 0 : sp >= sq ? SLIP_K * 0.45 : SLIP_K);   // le percuté glisse plus longtemps que le percuteur
+    impulsion(q, cx, cy, nx, ny, j * (bq ? 0.45 : bp ? 1.25 : 1), bq ? 0 : sp >= sq ? SLIP_K : SLIP_K * 0.45);
     if (j > 1.2) {
       if (sp >= sq) { q.bumpBy = p.seat; q.bumpT = tick; } else { p.bumpBy = q.seat; p.bumpT = tick; }
       if (tick >= p.bumpFx && tick >= q.bumpFx) { p.bumpFx = q.bumpFx = tick + 5; fx.push({ type: 'bump', a: p.seat, b: q.seat, x: r1(cx), y: r1(cy), i: r2(Math.min(1, j / 8)) }); }
@@ -505,6 +510,110 @@ export function createMicro(room) {
     p.lap++;
     fx.push({ type: 'lap', seat: p.seat, lap: p.lap, sec: r2(t / TICK_HZ), best: best ? 1 : 0, rec: record ? 1 : 0, last: formule === 'course' && p.lap === laps ? 1 : 0 });
   }
+  // ── BONUS / MALUS À RAMASSER (option `bonus`) ───────────────────────────────────────────────────────────────────
+  // Rangées de boîtes 🎁 (c.boxes, réapparition BOX_T) ; un objet en réserve, lâché avec `objet`. Le TIRAGE dépend de la
+  // place : le meneur reçoit surtout de quoi se défendre (huile, bouclier, petit turbo), les derniers de quoi revenir
+  // (triple turbo, escargot qui ralentit tous ceux de devant). C'est le rattrapage : rien d'autre ne triche avec la vitesse.
+  //   0 Turbo ⚡ 1,5 s (×1,4)       1 Triple turbo 🚀 (3 coups)      2 Flaque d'huile 🛢 (derrière soi, 12 s)
+  //   3 Boule de papier 📄 (tirée devant, rebondit 3 fois, fait tourner la voiture touchée)
+  //   4 Bouclier 🛡 5 s (ni huile, ni boule, ni escargot ; les chocs le secouent à peine)   5 Escargot 🐌 (tous ceux de devant ×0,62, 2,5 s)
+  const BOX_R = 24, BOX_T = 4 * TICK_HZ, TURBO_T = 45, TURBO_V = 1.4, TURBO_A = 1.6, SHIELD_T = 5 * TICK_HZ;
+  const SLOW_T = 75, SLOW_V = 0.62, OIL_R = 44, OIL_T = 12 * TICK_HZ, OIL_SLIP = 24, BALL_V = 15, BALL_R = 9, BALL_T = 3 * TICK_HZ;
+  const ITEMS = ['turbo', 'triple', 'huile', 'boule', 'bouclier', 'escargot'];
+  let bonusOn = true, boxT = [], flaques = [], boules = [], nextId = 1;
+  // COUP DE POUCE (option `pouce`) : plus on est loin derrière le meneur, plus la voiture va vite (plafond et reprise),
+  // jusqu'à +POUCE_MAX à un demi-tour d'écart. Calculé sur la progression du tick précédent ; le meneur n'a rien.
+  const POUCE_MAX = 0.16;
+  let pouceOn = true;
+  function coupsDePouce() {
+    let top = -Infinity;
+    for (const q of players) if (q.playing && q.alive && !q.fin && q.rs > top) top = q.rs;
+    const k = K();
+    for (const q of players) q.pouce = pouceOn && q.playing && q.alive && !q.fin && top > 0 ? 1 + Math.min(POUCE_MAX, Math.max(0, top - q.rs) / k * POUCE_MAX * 2) : 1;   // plein effet à un demi-tour
+  }
+  function poidsObjets(p) {                              // r : 0 = en tête … 1 = dernier (rattrapage)
+    const n = Math.max(1, players.filter(q => q.playing && q.alive).length), r = n > 1 ? (p.pos - 1) / (n - 1) : 0.5;
+    return [30 - 10 * r, 4 + 30 * r, 6 + 26 * (1 - r), 22, 6 + 20 * (1 - r), p.pos > 1 ? 4 + 26 * r * r : 0];
+  }
+  function tirerObjet(p) {
+    const w = poidsObjets(p); let s = 0; for (const v of w) s += v;
+    let x = Math.random() * s; for (let i = 0; i < w.length; i++) { x -= w[i]; if (x <= 0) return i; }
+    return 0;
+  }
+  function ramasser(p) {
+    if (!bonusOn || p.item >= 0 || p.fin) return;
+    for (let k = 0; k < C.boxes.length; k++) {
+      if (boxT[k] > tick) continue;
+      const b = C.boxes[k];
+      if ((p.x - b[0]) * (p.x - b[0]) + (p.y - b[1]) * (p.y - b[1]) > (BOX_R + CAR_R) * (BOX_R + CAR_R)) continue;
+      boxT[k] = tick + BOX_T;
+      p.item = tirerObjet(p); p.iu = p.item === 1 ? 3 : 1; p.itemT = tick;
+      fx.push({ type: 'boite', seat: p.seat, it: p.item, x: r1(b[0]), y: r1(b[1]) });
+      return;
+    }
+  }
+  const protege = q => q.shT > tick;
+  function utiliser(p) {
+    if (p.item < 0 || p.fall || p.fin || gameState !== 'play') return;
+    const it = p.item, c = Math.cos(p.a), s = Math.sin(p.a);
+    if (it === 0 || it === 1) { p.tbT = tick + TURBO_T; const vf = p.vx * c + p.vy * s; if (vf < VMAX) { p.vx += c * (VMAX - vf) * 0.5; p.vy += s * (VMAX - vf) * 0.5; } }
+    else if (it === 2) { flaques.push({ id: nextId++, x: p.x - c * (CAR_L * 0.9), y: p.y - s * (CAR_L * 0.9), t: tick + OIL_T, o: p.seat, ot: tick + TICK_HZ }); if (flaques.length > 12) flaques.shift(); }
+    else if (it === 3) { boules.push({ x: p.x + c * (CAR_L * 0.7), y: p.y + s * (CAR_L * 0.7), vx: c * BALL_V + p.vx * 0.3, vy: s * BALL_V + p.vy * 0.3, t: tick + BALL_T, o: p.seat, ot: tick + 9, reb: 3 }); }
+    else if (it === 4) p.shT = tick + SHIELD_T;
+    else if (it === 5) { for (const q of players) if (q.playing && q.alive && !q.fin && q.pos < p.pos && !protege(q)) q.slowT = tick + SLOW_T; }
+    fx.push({ type: 'objet', seat: p.seat, it, x: r1(p.x), y: r1(p.y) });
+    if (--p.iu <= 0) p.item = -1;
+  }
+  function majObjets() {                                 // flaques (glisse), boules de papier (vol, rebonds, impact)
+    for (let i = flaques.length - 1; i >= 0; i--) if (flaques[i].t <= tick) flaques.splice(i, 1);
+    for (const f of flaques) for (const q of players) {
+      if (!q.playing || !q.alive || q.fall || q.fin || q.ghost) continue;
+      if ((q.x - f.x) * (q.x - f.x) + (q.y - f.y) * (q.y - f.y) > OIL_R * OIL_R) { if (q.oilIn === f.id) q.oilIn = 0; continue; }
+      if (q.oilIn === f.id || (q.seat === f.o && tick < f.ot)) continue;
+      q.oilIn = f.id;
+      if (protege(q)) { fx.push({ type: 'pare', seat: q.seat }); continue; }
+      q.slip = Math.max(q.slip, OIL_SLIP); q.w += (Math.random() < 0.5 ? -1 : 1) * 0.14;
+      if (f.o !== q.seat && players[f.o] && players[f.o].team !== q.team) { q.bumpBy = f.o; q.bumpT = tick; }
+      fx.push({ type: 'glisse', seat: q.seat, by: f.o, x: r1(q.x), y: r1(q.y) });
+    }
+    for (let i = boules.length - 1; i >= 0; i--) {
+      const b = boules[i];
+      b.x += b.vx; b.y += b.vy;
+      let fini = b.t <= tick || (C.edge === 'chute' && !surTable(C, b.x, b.y)) || dansTrou(C, b.x, b.y);
+      if (!fini) {                                       // rebond sur murs et objets (miroir de la vitesse)
+        const ids = C.near(b.x, b.y);
+        for (let k = 0; k < ids.length && !fini; k++) {
+          const id = ids[k]; let nx = 0, ny = 0, pen = -1;
+          if (id >= 10000) { const r = C.rocks[id - 10000], dx = b.x - r[0], dy = b.y - r[1], d = Math.hypot(dx, dy); if (d < r[2] + BALL_R && d > 1e-6) { nx = dx / d; ny = dy / d; pen = r[2] + BALL_R - d; } }
+          else { const w = C.walls[id], ex = w[2] - w[0], ey = w[3] - w[1], l2 = ex * ex + ey * ey || 1, u = clamp(((b.x - w[0]) * ex + (b.y - w[1]) * ey) / l2, 0, 1), dx = b.x - (w[0] + ex * u), dy = b.y - (w[1] + ey * u), d = Math.hypot(dx, dy); if (d < w[4] + BALL_R && d > 1e-6) { nx = dx / d; ny = dy / d; pen = w[4] + BALL_R - d; } }
+          if (pen > 0) { b.x += nx * pen; b.y += ny * pen; const vn = b.vx * nx + b.vy * ny; if (vn < 0) { b.vx -= 2 * vn * nx; b.vy -= 2 * vn * ny; if (--b.reb < 0) fini = true; } }
+        }
+      }
+      if (!fini) for (const q of players) {
+        if (!q.playing || !q.alive || q.fall || q.fin || q.ghost || (q.seat === b.o && tick < b.ot)) continue;
+        if ((q.x - b.x) * (q.x - b.x) + (q.y - b.y) * (q.y - b.y) > (CAR_R + BALL_R + 4) * (CAR_R + BALL_R + 4)) continue;
+        fini = true;
+        if (protege(q)) { fx.push({ type: 'pare', seat: q.seat }); break; }
+        q.vx *= 0.35; q.vy *= 0.35; q.slip = Math.max(q.slip, 26); q.w = (Math.random() < 0.5 ? -1 : 1) * 0.3; q.hitT = tick;
+        if (b.o !== q.seat && players[b.o] && players[b.o].team !== q.team) { q.bumpBy = b.o; q.bumpT = tick; }
+        fx.push({ type: 'paf', seat: q.seat, by: b.o, x: r1(q.x), y: r1(q.y) });
+        break;
+      }
+      if (fini) boules.splice(i, 1);
+    }
+  }
+  function botObjet(p) {                                 // les bots s'en servent aussi (mieux en Difficile)
+    if (p.item < 0 || p.fin) return;
+    const D = MMDIFF[botDiff] || MMDIFF[1], held = tick - p.itemT, it = p.item, c = Math.cos(p.a), s = Math.sin(p.a);
+    if (held < (botDiff === 0 ? 50 : botDiff === 1 ? 25 : 10)) return;
+    let go = false;
+    if (it === 5) go = true;                             // escargot : tout de suite
+    else if (it === 0 || it === 1) go = C.rayon[(p.si + 12) % C.n] > 400 && p.dTrack < C.W && p.slip <= 0;   // turbo en ligne droite
+    else if (it === 4) go = boules.some(b => b.o !== p.seat && Math.hypot(b.x - p.x, b.y - p.y) < 160) || held > 150;
+    else if (it === 2) go = players.some(q => q !== p && q.playing && q.alive && !q.fin && Math.hypot(q.x - p.x, q.y - p.y) < 140 && ((q.x - p.x) * c + (q.y - p.y) * s) < -20) || held > 240;
+    else if (it === 3) go = players.some(q => { if (q === p || !q.playing || !q.alive || q.fin || q.team === p.team) return false; const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy); return d < 420 && d > 30 && (dx * c + dy * s) / d > (botDiff === 2 ? 0.96 : 0.9); }) || held > 300;
+    if (go && (D.err === 0 || Math.random() > D.err * 40)) utiliser(p);
+  }
   function eliminer(p) {
     p.alive = false; p.elimTick = tick; p.fall = 0;
     fx.push({ type: 'out', seat: p.seat, x: r1(p.x), y: r1(p.y) });
@@ -532,10 +641,11 @@ export function createMicro(room) {
     tick++;
     for (let k = 0; k < C.mobs.length; k++) mobile(C.mobs[k], tick / TICK_HZ, MOBP[k]);   // le temps de course décide de leur place : le client les recalcule
     const racers = players.filter(p => p.alive && p.playing);
+    coupsDePouce();
     for (const p of racers) {
       if (p.fall) continue;
       if (p.fin) botControl(p, true);                   // arrivé : pilote automatique au ralenti, en fantôme
-      else if (p.bot) botControl(p, false);
+      else if (p.bot) { botControl(p, false); if (bonusOn) botObjet(p); }
       else humanControl(p);
     }
     for (const p of racers) {
@@ -565,10 +675,12 @@ export function createMicro(room) {
       if (!p.fall) {
         portes(p);
         if (!p.fall) porteSautee(p);
+        if (!p.fall) ramasser(p);
         const ta = Math.atan2(C.ty[p.si], C.tx[p.si]), sp = Math.hypot(p.vx, p.vy);
         p.wrong = !p.fin && sp > 1.5 && Math.cos(p.a - ta) < -0.35 && (p.vx * C.tx[p.si] + p.vy * C.ty[p.si]) < -1;
       }
     }
+    if (bonusOn) majObjets();
     majPositions();
     if (formule === 'elim') fenetre();
     // fin de manche
@@ -591,6 +703,8 @@ export function createMicro(room) {
       lead: leader, finT: formule === 'course' && finDeadline && live ? Math.max(0, Math.ceil((finDeadline - tick) / TICK_HZ)) : null,
       cam: cam && gameState !== 'lobby' ? [r1(cam.x), r1(cam.y), Math.round(cam.hw)] : null,
       rec: lastBest ? [lastBest.seat, r2(lastBest.t / TICK_HZ)] : null,
+      bx: bonusOn ? (boxT.length === C.boxes.length ? boxT.map(t => (t > tick && gameState !== 'lobby' ? '0' : '1')).join('') : '1'.repeat(C.boxes.length)) : '',
+      fl: flaques.map(f => [r1(f.x), r1(f.y)]), pj: boules.map(b => [r1(b.x), r1(b.y)]), opt: { bonus: bonusOn ? 1 : 0, pouce: pouceOn ? 1 : 0 },
       match: match.etat(players),
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, circuit, laps, formule, match: match.gagne } : null,
       players: players.map(p => ({
@@ -600,7 +714,7 @@ export function createMicro(room) {
         su: p.surf, fa: p.fall ? r2(1 - p.fall / FALL_T) : 0, fh: p.fallHole, gh: p.ghost > 0, ww: !!p.wrong,
         lap: Math.max(1, Math.min(laps, p.lap || 1)), pos: p.pos, fin: p.fin, ft: p.fin ? r2(p.ftick / TICK_HZ) : 0,
         bl: p.best ? r2(p.best / TICK_HZ) : 0, ll: p.last ? r2(p.last / TICK_HZ) : 0, pg: p.pg,
-        bumps: p.bumps, kos: p.kos, falls: p.falls, cuts: p.cuts, pen: p.penT > tick, score: p.score, place: p.place, elimTick: p.elimTick,
+        bumps: p.bumps, kos: p.kos, falls: p.falls, cuts: p.cuts, pen: p.penT > tick, it: p.item, iu: p.iu, tb: p.tbT > tick, sh: p.shT > tick, sl: p.slowT > tick, score: p.score, place: p.place, elimTick: p.elimTick,
       })),
     };
   }
@@ -645,6 +759,9 @@ export function createMicro(room) {
       }
       else { p.ana = null; p.inp = { up: !!m.up, down: !!m.down, left: !!m.left, right: !!m.right }; }
     }
+    else if (m.t === 'objet' && p) { if (p.playing && p.alive && !p.bot) utiliser(p); }
+    else if (m.t === 'bonus') { if (editable()) bonusOn = !bonusOn; }
+    else if (m.t === 'pouce') { if (editable()) pouceOn = !pouceOn; }
     else if (m.t === 'klaxon' && p) { if (p.playing && clk - p.honkT >= 20 && (gameState === 'play' || gameState === 'countdown')) { p.honkT = clk; pend.push({ type: 'honk', seat: p.seat }); } }
     else if (m.t === 'start') startGame();
     else if (m.t === 'pause') { if (gameState === 'play') gameState = 'paused'; else if (gameState === 'paused') gameState = 'play'; }
