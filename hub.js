@@ -11,8 +11,9 @@ import snake from './games/snake/server.js';
 import sumo from './games/sumo/server.js';
 import foot from './games/foot/server.js';
 import patate from './games/patate/server.js';
+import micro from './games/micro/server.js';
 
-const GAMES = { [pong.meta.id]: pong, [tron.meta.id]: tron, [tank.meta.id]: tank, [bomb.meta.id]: bomb, [snake.meta.id]: snake, [sumo.meta.id]: sumo, [foot.meta.id]: foot, [patate.meta.id]: patate };   // registre : ajouter un jeu = l'importer et l'ajouter ici
+const GAMES = { [pong.meta.id]: pong, [tron.meta.id]: tron, [tank.meta.id]: tank, [bomb.meta.id]: bomb, [snake.meta.id]: snake, [sumo.meta.id]: sumo, [foot.meta.id]: foot, [patate.meta.id]: patate, [micro.meta.id]: micro };   // registre : ajouter un jeu = l'importer et l'ajouter ici
 const META = Object.values(GAMES).map(g => g.meta);
 const DEFAULT_ID = pong.meta.id;
 
@@ -90,7 +91,7 @@ function hostId() {
   return (p || plusAncien(members) || {}).id || null;
 }
 // Réglages de partie réservés au game master (messages routés vers les jeux via {t:'g',m}).
-const GM_ONLY = new Set(['mode', 'preset', 'opt', 'bots', 'botdiff', 'arena', 'wintarget', 'ff', 'gen', 'variant', 'rush', 'revenge', 'fade', 'lbreset', 'lives', 'terrain', 'item', 'fuse', 'bonus', 'match']);   // lives : nombre de vies du Foot · fuse/bonus : mèche et bonus de la Patate chaude · match : manches gagnantes du match (games/match.js)
+const GM_ONLY = new Set(['mode', 'preset', 'opt', 'bots', 'botdiff', 'arena', 'wintarget', 'ff', 'gen', 'variant', 'rush', 'revenge', 'fade', 'lbreset', 'lives', 'terrain', 'item', 'fuse', 'bonus', 'match', 'circuit', 'laps', 'formule']);   // lives : nombre de vies du Foot · fuse/bonus : mèche et bonus de la Patate chaude · match : manches gagnantes du match (games/match.js) · circuit/laps/formule : Micro Machines
 // …et parmi eux, ceux qui touchent à la mémoire DURABLE du site : réservés au détenteur de la clé admin, jamais à
 // l'hôte de repli (le premier arrivant, quand l'admin est absent, pouvait effacer le classement de Pong).
 const ADMIN_ONLY = new Set(['lbreset']);
