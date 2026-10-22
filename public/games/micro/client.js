@@ -248,6 +248,8 @@ export default (function () {
       else { sound('win'); music.sting('win'); }
     }
     if (m.gs === 'countdown' && prevGs !== 'countdown') {
+      // le serveur remet les commandes à zéro au départ : une touche (ou le stick) tenue depuis la manche d'avant est renvoyée
+      if (input.up || input.down || input.left || input.right) pushInput(); else if (anaSent && anaSent !== '0') { anaSent = ''; }
       const bm = balleDeMatch(m.match, matchTeamName);
       if (bm) { CALL.push('BALLE DE MATCH', '#ffd24a', now); msgGlobal('🏆', bm, { color: '#ffd24a' }); }
     }
@@ -498,6 +500,7 @@ export default (function () {
     skidG = skidCv.getContext('2d'); skidG.setTransform(q, 0, 0, q, 0, 0); skidG.lineCap = 'round';
   }
   function clearSkids() { if (skidG) { skidG.save(); skidG.setTransform(1, 0, 0, 1, 0, 0); skidG.clearRect(0, 0, skidCv.width, skidCv.height); skidG.restore(); } }
+  const HORS = { bois: '#4a2a1a', cahier: '#3c2618', feutre: '#3c2618', moquette: '#3c2618' };
   const SKID_COL = { bois: 'rgba(40,22,10,0.28)', cahier: 'rgba(70,70,84,0.26)', feutre: 'rgba(10,36,18,0.3)', moquette: 'rgba(60,24,8,0.32)' };
 
   function trackPath(g, c, off) {                       // polyligne fermée décalée de `off` u (à droite du sens de course)
@@ -609,7 +612,7 @@ export default (function () {
         for (let i = 0; i < c.n; i += 3) {
           if (R() < 0.12) continue;
           const o = (W + 8 + R() * 6) * side, x = c.sx[i] + c.nx[i] * o, y = c.sy[i] + c.ny[i] * o;
-          if (R() < 0.08) { g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(x - 6, y - 4, 13, 13); g.fillStyle = '#fbfbf6'; g.fillRect(x - 7, y - 7, 13, 13); g.strokeStyle = 'rgba(0,0,0,0.15)'; g.strokeRect(x - 7, y - 7, 13, 13); continue; }
+          if (R() < 0.08) { g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(x - 6, y - 4, 13, 13); g.fillStyle = '#fbfbf6'; g.fillRect(x - 7, y - 7, 13, 13); g.lineWidth = 1; g.strokeStyle = 'rgba(0,0,0,0.15)'; g.strokeRect(x - 7, y - 7, 13, 13); continue; }   // lineWidth : sinon celui du ruban de piste (≈ 150 u)
           const r = 7 + R() * 2;
           g.fillStyle = 'rgba(80,40,10,0.25)'; g.beginPath(); g.arc(x + 1.5, y + 2, r, 0, Math.PI * 2); g.fill();
           g.fillStyle = R() < 0.5 ? '#e7a93a' : '#d98b26'; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.arc(x, y, r * 0.42, 0, Math.PI * 2, true); g.fill();
@@ -917,7 +920,7 @@ export default (function () {
     if (shakeMag > 0.3 && !A.reduceFx && !rf) { ox = (Math.random() * 2 - 1) * shakeMag; oy = (Math.random() * 2 - 1) * shakeMag; shakeMag *= Math.pow(0.86, kdt); } else shakeMag = 0;
     const ws = cv.width / cam.w, hs = cv.width / HUDW;
     // fond (hors du monde) puis monde
-    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0c0d16'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = HORS[C.surf] || '#0c0d16'; ctx.fillRect(0, 0, cv.width, cv.height);   // au-delà du monde : le sol de la pièce, assombri
     ctx.setTransform(ws, 0, 0, ws, cv.width / 2 - (cam.x + ox) * ws, cv.height / 2 - (cam.y + oy) * ws);
     const vx0 = cam.x - cam.w / 2, vy0 = cam.y - cam.w / 2;
     blit(decorCv, decorQ, vx0, vy0, cam.w);
@@ -1033,12 +1036,12 @@ export default (function () {
     for (let k = 0; k < 3; k++) {
       const sp = 260 - k * 18, s = ((t * sp + k * 220) % C.L + C.L) % C.L, i = Math.floor(s / C.step) % C.n, j = (i + 1) % C.n, u = s / C.step - Math.floor(s / C.step);
       const o = (k - 1) * C.W * 0.45, x = C.sx[i] + (C.sx[j] - C.sx[i]) * u + C.nx[i] * o, y = C.sy[i] + (C.sy[j] - C.sy[i]) * u + C.ny[i] * o;
-      drawCar(ctx, k * 3 % MAX_SEATS, x, y, Math.atan2(C.ty[i], C.tx[i]), { st: Math.max(-1, Math.min(1, C.k[i] * 60)) }, now);
+      drawCar(ctx, k * 3 % MAX_SEATS, x, y, Math.atan2(C.ty[i], C.tx[i]), { st: Math.max(-1, Math.min(1, C.k[i] * 60)), scale: 2.2 }, now);   // vue d'ensemble : voitures grossies pour rester visibles
     }
   }
   function ecranTitre(now) {
     const c = HUDW / 2, cd = circuitParId(snap ? snap.circuit : cid);
-    ctx.fillStyle = 'rgba(8,10,20,0.45)'; ctx.fillRect(0, 0, HUDW, HUDW);
+    ctx.fillStyle = 'rgba(8,10,20,0.3)'; ctx.fillRect(0, 0, HUDW, HUDW);
     const f = readable(54, cv, HUDW, 22), bob = A.reduceFx ? 0 : Math.sin(now / 500) * 3;
     ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
     ctx.translate(c, c - 80 + bob); ctx.rotate(-0.05);
