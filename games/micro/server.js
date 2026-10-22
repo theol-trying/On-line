@@ -7,7 +7,7 @@
 // glisser), chocs entre voitures (on se bouscule, on se fait tourner), murs et obstacles, CHUTE quand on quitte la table
 // (ou dans une poche du billard) → réapparition à la dernière porte de contrôle franchie, fantôme 1,2 s.
 // Les tours se comptent par portes de contrôle franchies DANS L'ORDRE : couper à travers la table ne fait rien gagner.
-import { TICK_HZ, CAR_R, FALL_T, GHOST_T, LAPS, FORMULES, ELIM_HW0, ELIM_HW1, CIRCUITS, circuitParId, proche, surTable, dansTrou, zoneA, grilleDepart } from '../../public/games/micro/shared.js';
+import { TICK_HZ, CAR_R, CAR_L, CAR_W, FALL_T, GHOST_T, LAPS, FORMULES, ELIM_HW0, ELIM_HW1, CIRCUITS, circuitParId, proche, surTable, dansTrou, zoneA, grilleDepart } from '../../public/games/micro/shared.js';
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
 import { creerMatch } from '../match.js';
@@ -31,6 +31,13 @@ const GRACE_S = 12;                                      // Course : temps laiss
 const ELIM_SHRINK_S = 60, ELIM_OUT = 6;                  // Élimination : la fenêtre rétrécit en 1 min, puis encore (mort subite) ; 0,2 s dehors = éliminé
 const ELIM_HW2 = 170, ELIM_CAP_S = 150;                  // demi-côté au bout de 2 min (mort subite) ; filet : 2 min 30, le meneur gagne
 const BUMP_CREDIT = 3 * TICK_HZ;                         // une chute dans les 3 s qui suivent un choc est créditée au cogneur
+// ANTI-RACCOURCI. A : la voiture revient sur la piste AU-DELÀ de la porte suivante sans l'avoir franchie ; si elle a roulé
+// moins de CUT_A de la distance de piste correspondante, c'est un raccourci → retour à la dernière porte franchie (comme une
+// chute). Sinon (grand détour, voiture poussée au large) les portes sautées sont créditées sans pénalité.
+// B : porte franchie après plus de CUT_OFF de l'intervalle roulé loin hors piste (> CUT_MARGE u du bord) ET un trajet plus
+// court que CUT_B × l'espacement : la corde a été coupée par la table → vitesse plafonnée à PEN_V pendant PEN_T.
+const CUT_A = 0.72, CUT_B = 0.75, CUT_OFF = 0.5, CUT_MARGE = 20, PEN_T = 36, PEN_V = 0.45, CUT_FALL = 18;
+const BUMPER_KICK = 7.5;                                 // bumper de flipper : coup de pied (u/tick) en plus du rebond
 // IA : vitesse de pointe, marge en virage, regard (u), bruit de volant, part de la ligne idéale, erreur (proba. par tick)
 const MMDIFF = [
   { v: 0.8, lat: 0.78, look: 52, noise: 0.22, line: 0.45, err: 0.004 },
@@ -97,6 +104,7 @@ export function createMicro(room) {
       fall: 0, fallHole: 0, ghost: 0, outT: 0, wrong: false, surf: 0, drift: 0, boostCd: 0, inZone: null, bumpFx: 0, honkT: -1e9,
       bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
       lane: 0, forme: 1, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0,
+      gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0,
       rs: 0, place: 0, elimTick: -1, score: 0,
     }));
   }
@@ -145,7 +153,7 @@ export function createMicro(room) {
       Object.assign(p, { x: s.x, y: s.y, px: s.x, py: s.y, a: s.a, vx: 0, vy: 0, steer: 0, thr: 0, si: s.i, ana: null,
         pg: 0, lap: 0, lapStart: 0, best: 0, last: 0, fin: 0, ftick: 0, pos: k + 1, fall: 0, fallHole: 0, ghost: 0, outT: 0,
         wrong: false, surf: 0, drift: 0, boostCd: 0, inZone: null, bumpFx: 0, bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
-        lane: ((k * 37) % 9 - 4) / 4 * 0.22, forme: 1 + (Math.random() * 2 - 1) * 0.022, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0, rs: 0, place: 0, elimTick: -1, alive: true });
+        lane: ((k * 37) % 9 - 4) / 4 * 0.22, forme: 1 + (Math.random() * 2 - 1) * 0.022, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0, rs: 0, place: 0, elimTick: -1, alive: true, gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0 });
       p.inp = { up: false, down: false, left: false, right: false };
     });
     nParts = N; endTick = 0; winner = null; finCount = 0; finDeadline = 0; leader = -1; leadT = -1e9; lastBest = null;
@@ -279,8 +287,7 @@ export function createMicro(room) {
     let sf;
     if (z && z[4] !== 'boost') sf = ZONE_SURF[z[4]] || 1;
     else {
-      const i = p.si, d = Math.hypot(p.x - C.sx[i], p.y - C.sy[i]);
-      sf = d <= C.W + 4 ? 0 : 1;
+      sf = p.dTrack <= C.W + 4 ? 0 : 1;
     }
     if (z !== p.inZone) {                                // entrée dans une zone : éclaboussure / turbo (une fois par passage)
       p.inZone = z;
@@ -295,62 +302,100 @@ export function createMicro(room) {
     // la part latérale qui reste est le dérapage, amorti selon l'adhérence de la surface
     let c = Math.cos(p.a), s = Math.sin(p.a);
     const vf0 = p.vx * c + p.vy * s, k = Math.min(1, Math.abs(vf0) / TURN_V);
-    p.a = wrapA(p.a + p.steer * TURN * k * (vf0 >= 0 ? 1 : -1) * (Math.abs(vf0) > VMAX * 0.92 ? 0.9 : 1));
+    p.a = wrapA(p.a + p.steer * TURN * k * (vf0 >= 0 ? 1 : -1) * (Math.abs(vf0) > VMAX * 0.92 ? 0.9 : 1) + p.w);   // + rotation reçue d'un choc
+    p.w *= p.slip > 0 ? 0.93 : 0.84;
     c = Math.cos(p.a); s = Math.sin(p.a);
     let vf = p.vx * c + p.vy * s, vr = -p.vx * s + p.vy * c;
-    const cap = VMAX * S.vmax * (p.bot && !p.fin ? D.v * p.forme : 1);   // forme du jour (±2 %) : deux bots du même niveau finissent par se séparer
+    const cap = VMAX * S.vmax * (p.bot && !p.fin ? D.v * p.forme : 1) * (p.penT > tick ? PEN_V : 1);   // forme du jour (±2 %) : deux bots du même niveau finissent par se séparer ; pénalité de coupe
     if (p.thr > 0) { if (vf < cap) vf += ACC * S.acc * p.thr * (1 - Math.max(0, vf) / cap * 0.6); }
     else if (p.thr < 0) { if (vf > 0.3) vf -= BRAKE * -p.thr; else if (vf > -VREV) vf -= REV * -p.thr; }
     else vf *= COAST;
     vf *= 1 - S.drag;
     if (vf > cap) vf -= (vf - cap) * 0.07;               // trop vite pour la surface (sucre, hors piste) : ça freine
-    vr *= 1 - S.grip;
+    vr *= 1 - S.grip * (p.slip > 0 ? 0.12 : 1);          // après un choc, les pneus décrochent : la voiture glisse où on l'a poussée
+    if (p.slip > 0) p.slip--;
     p.vx = c * vf - s * vr; p.vy = s * vf + c * vr;
     p.drift = Math.abs(vr);
     p.px = p.x; p.py = p.y;
     p.x += p.vx; p.y += p.vy;
   }
-  function pousser(p, nx, ny, pen, e) {                  // sortie d'un obstacle le long de la normale + rebond
+  // ── CONTACTS ────────────────────────────────────────────────────────────────────────────────────────────────────
+  // La voiture n'est plus un disque plus petit que son dessin : DEUX disques (avant / arrière) couvrent ses 34 × 18 u.
+  // Un choc transmet une impulsion (auto-tamponneuse : rebond 0,9), un COUPLE (frappée sur l'avant ou l'arrière, la voiture
+  // tourne : vitesse de rotation `w` qui s'amortit) et une PERTE D'ADHÉRENCE (`slip`) proportionnelle à la violence du choc :
+  // pendant ce temps les pneus ne « mangent » plus la poussée latérale — la voiture glisse là où on l'a envoyée (jusqu'au
+  // bord de la table). Avant, l'adhérence effaçait la poussée en quelques ticks : « on touche, il ne se passe rien ».
+  const CC_OFF = CAR_L * 0.25, CC_R = CAR_W * 0.5, INERTIE = (CAR_L * CAR_L + CAR_W * CAR_W) / 12;
+  const E_CAR = 0.9, ROT_K = 0.55, W_MAX = 0.32, SLIP_K = 3.2, SLIP_MAX = 32, RAM_K = 0.18;
+  const CA = [[0, 0], [0, 0]], CB = [[0, 0], [0, 0]];   // centres des disques (réutilisés : aucune allocation par tick)
+  function disques(p, out) {
+    const c = Math.cos(p.a), s = Math.sin(p.a);
+    out[0][0] = p.x + c * CC_OFF; out[0][1] = p.y + s * CC_OFF; out[1][0] = p.x - c * CC_OFF; out[1][1] = p.y - s * CC_OFF;
+    return out;
+  }
+  // impulsion j (u/tick, déjà par unité de masse) appliquée au point (cx, cy) le long de (nx, ny) : vitesse, rotation, glisse
+  function impulsion(p, cx, cy, nx, ny, j, slipK) {
+    p.vx += nx * j; p.vy += ny * j;
+    const rx = cx - p.x, ry = cy - p.y;
+    p.w = clamp(p.w + clamp((rx * ny - ry * nx) * j / INERTIE * ROT_K, -W_MAX, W_MAX), -W_MAX, W_MAX);
+    const sl = Math.min(SLIP_MAX, Math.round(Math.abs(j) * slipK));
+    if (sl > p.slip) p.slip = sl;
+  }
+  // obstacle fixe (mur, objet, bumper) : chaque disque de la voiture est repoussé ; rebond `e`, frottement, petit couple
+  function pousser(p, cx, cy, nx, ny, pen, e, kick) {
     p.x += nx * pen; p.y += ny * pen;
     const vn = p.vx * nx + p.vy * ny;
-    if (vn < 0) {
-      p.vx -= (1 + e) * vn * nx; p.vy -= (1 + e) * vn * ny;
+    if (vn < 0 || kick) {
+      const j = (vn < 0 ? -(1 + e) * vn : 0) + (kick || 0);
+      impulsion(p, cx, cy, nx, ny, j, kick ? 2.4 : 0.8);
       const tx = -ny, ty = nx, vt = p.vx * tx + p.vy * ty; p.vx -= vt * 0.08 * tx; p.vy -= vt * 0.08 * ty;
-      if (-vn > 2.2 && tick >= p.bumpFx) { p.bumpFx = tick + 5; fx.push({ type: 'bump', a: p.seat, b: -1, x: r1(p.x - nx * CAR_R), y: r1(p.y - ny * CAR_R), i: r2(Math.min(1, -vn / 9)) }); }
+      if ((j > 2.2 || kick) && tick >= p.bumpFx) { p.bumpFx = tick + 5; fx.push({ type: 'bump', a: p.seat, b: -1, x: r1(cx - nx * CC_R), y: r1(cy - ny * CC_R), i: r2(Math.min(1, j / 9)), k: kick ? 1 : 0 }); }
     }
   }
   function murs(p) {
-    const ids = C.near(p.x, p.y);
-    for (let k = 0; k < ids.length; k++) {
-      const id = ids[k];
-      if (id >= 10000) {
-        const r = C.rocks[id - 10000], dx = p.x - r[0], dy = p.y - r[1], d = Math.hypot(dx, dy), rr = r[2] + CAR_R;
-        if (d < rr && d > 1e-6) pousser(p, dx / d, dy / d, rr - d, 0.35);
-      } else {
-        const w = C.walls[id], ex = w[2] - w[0], ey = w[3] - w[1], l2 = ex * ex + ey * ey || 1;
-        const u = clamp(((p.x - w[0]) * ex + (p.y - w[1]) * ey) / l2, 0, 1), qx = w[0] + ex * u, qy = w[1] + ey * u;
-        const dx = p.x - qx, dy = p.y - qy, d = Math.hypot(dx, dy), rr = w[4] + CAR_R;
-        if (d < rr && d > 1e-6) pousser(p, dx / d, dy / d, rr - d, Object.hasOwn(REST, w[5]) ? REST[w[5]] : 0.3);
+    disques(p, CA);
+    for (let d = 0; d < 2; d++) {
+      const px = CA[d][0], py = CA[d][1], ids = C.near(px, py);
+      for (let k = 0; k < ids.length; k++) {
+        const id = ids[k];
+        if (id >= 10000) {
+          const r = C.rocks[id - 10000], dx = px - r[0], dy = py - r[1], dd = Math.hypot(dx, dy), rr = r[2] + CC_R;
+          if (dd < rr && dd > 1e-6) {
+            const bump = r[3] === 'bumper';                // bumper de flipper : il RENVOIE (coup de pied en plus du rebond)
+            pousser(p, px - dx / dd * CC_R, py - dy / dd * CC_R, dx / dd, dy / dd, rr - dd, bump ? 0.6 : 0.35, bump ? BUMPER_KICK : 0);
+            disques(p, CA);
+          }
+        } else {
+          const w = C.walls[id], ex = w[2] - w[0], ey = w[3] - w[1], l2 = ex * ex + ey * ey || 1;
+          const u = clamp(((px - w[0]) * ex + (py - w[1]) * ey) / l2, 0, 1), qx = w[0] + ex * u, qy = w[1] + ey * u;
+          const dx = px - qx, dy = py - qy, dd = Math.hypot(dx, dy), rr = w[4] + CC_R;
+          if (dd < rr && dd > 1e-6) { pousser(p, qx + dx / dd * w[4], qy + dy / dd * w[4], dx / dd, dy / dd, rr - dd, Object.hasOwn(REST, w[5]) ? REST[w[5]] : 0.3, 0); disques(p, CA); }
+        }
       }
     }
   }
-  function choc(p, q) {                                  // deux voitures : séparation, échange d'élan, et ça fait tourner
-    const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy), rr = 2 * CAR_R;
-    if (d >= rr) return;
-    const nx = d > 1e-6 ? dx / d : 1, ny = d > 1e-6 ? dy / d : 0, ov = (rr - d) / 2;
-    p.x -= nx * ov; p.y -= ny * ov; q.x += nx * ov; q.y += ny * ov;
+  function choc(p, q) {                                  // deux voitures : la paire de disques la plus enfoncée décide du contact
+    const dx0 = q.x - p.x, dy0 = q.y - p.y;
+    if (dx0 * dx0 + dy0 * dy0 > (CAR_L + 6) * (CAR_L + 6)) return;
+    disques(p, CA); disques(q, CB);
+    let pen = 0, nx = 0, ny = 0, cx = 0, cy = 0;
+    for (let i = 0; i < 2; i++) for (let k = 0; k < 2; k++) {
+      const dx = CB[k][0] - CA[i][0], dy = CB[k][1] - CA[i][1], d = Math.hypot(dx, dy), o = 2 * CC_R - d;
+      if (o > pen) { pen = o; nx = d > 1e-6 ? dx / d : 1; ny = d > 1e-6 ? dy / d : 0; cx = (CA[i][0] + CB[k][0]) / 2; cy = (CA[i][1] + CB[k][1]) / 2; }
+    }
+    if (!(pen > 0)) return;
+    p.x -= nx * pen / 2; p.y -= ny * pen / 2; q.x += nx * pen / 2; q.y += ny * pen / 2;
     const vn = (q.vx - p.vx) * nx + (q.vy - p.vy) * ny;
     if (vn >= 0) return;
-    const j = -vn * 0.8;
-    p.vx -= nx * j; p.vy -= ny * j; q.vx += nx * j; q.vy += ny * j;
-    // effet de rotation : un choc reçu sur le flanc fait pivoter (couple ∝ composante latérale de la normale)
-    const latP = -nx * Math.sin(p.a) + ny * Math.cos(p.a), latQ = -nx * Math.sin(q.a) + ny * Math.cos(q.a);
-    p.a = wrapA(p.a + clamp(latP * j * 0.022, -0.14, 0.14)); q.a = wrapA(q.a - clamp(latQ * j * 0.022, -0.14, 0.14));
+    // qui pousse ? celui qui arrive le plus vite DANS le contact (avant l'échange d'élan) — pour le crédit des chutes
+    const sp = p.vx * nx + p.vy * ny, sq = -(q.vx * nx + q.vy * ny);
+    let j = -(1 + E_CAR) * vn / 2;
+    j += RAM_K * Math.max(0, Math.max(sp, sq) - 4);      // percuter fort pousse un peu plus (le pare-chocs avant compte)
+    impulsion(p, cx, cy, -nx, -ny, j, sp >= sq ? SLIP_K * 0.45 : SLIP_K);   // le percuté glisse plus longtemps que le percuteur
+    impulsion(q, cx, cy, nx, ny, j, sp >= sq ? SLIP_K : SLIP_K * 0.45);
     if (j > 1.2) {
-      // crédit : celui qui va le plus vite vers l'autre « pousse »
-      const sp = p.vx * nx + p.vy * ny, sq = -(q.vx * nx + q.vy * ny);
       if (sp >= sq) { q.bumpBy = p.seat; q.bumpT = tick; } else { p.bumpBy = q.seat; p.bumpT = tick; }
-      if (tick >= p.bumpFx && tick >= q.bumpFx) { p.bumpFx = q.bumpFx = tick + 5; fx.push({ type: 'bump', a: p.seat, b: q.seat, x: r1(p.x + nx * CAR_R), y: r1(p.y + ny * CAR_R), i: r2(Math.min(1, j / 7)) }); }
+      if (tick >= p.bumpFx && tick >= q.bumpFx) { p.bumpFx = q.bumpFx = tick + 5; fx.push({ type: 'bump', a: p.seat, b: q.seat, x: r1(cx), y: r1(cy), i: r2(Math.min(1, j / 8)) }); }
       if (j > 2.5) { if (sp >= sq) p.bumps++; else q.bumps++; }
     }
   }
@@ -371,8 +416,29 @@ export function createMicro(room) {
     }
     p.x = p.px = C.sx[i] + C.nx[i] * o * C.W; p.y = p.py = C.sy[i] + C.ny[i] * o * C.W;
     p.a = Math.atan2(C.ty[i], C.tx[i]); p.vx = 0; p.vy = 0; p.si = i; p.steer = 0;
-    p.fall = 0; p.ghost = GHOST_T; p.inZone = null;
+    p.fall = 0; p.ghost = GHOST_T; p.inZone = null; p.gLen = 0; p.gOff = 0; p.dTrack = 0; p.w = 0; p.slip = 0;
     fx.push({ type: 'respawn', seat: p.seat });
+  }
+  // raccourci (A) : comme une chute, mais la voiture « saute » de retour à la dernière porte (fallHole = 2 : rendu « téléporté »)
+  function raccourci(p) {
+    if (p.fall || p.fin) return;
+    p.fall = CUT_FALL; p.fallHole = 2; p.cuts++; p.bumpBy = -1;
+    fx.push({ type: 'coupe', seat: p.seat, x: r1(p.x), y: r1(p.y) });
+  }
+  // A : porte suivante dépassée sans avoir été franchie (la voiture est de retour sur la piste, plus loin)
+  function porteSautee(p) {
+    if (p.pg <= 0 || p.fin || p.dTrack > C.W + 30) return;
+    const k = K(), n = C.n;
+    let ng = p.pg % k, ahead = ((p.si - C.gates[ng].i) % n + n) % n;
+    const esp = C.L / k;                                 // espacement réel des portes
+    if (ahead >= n / 2 || ahead * C.step < esp * 0.9) return;
+    const gp = C.gates[(ng - 1 + k) % k].i, dist = (((p.si - gp) % n + n) % n) * C.step;
+    if (p.gLen < CUT_A * dist) { raccourci(p); return; }
+    for (let guard = 0; guard < k && ahead < n / 2 && ahead * C.step >= esp * 0.5; guard++) {   // grand détour : portes créditées
+      passerPorte(p, true);
+      if (p.fin) return;
+      ng = p.pg % k; ahead = ((p.si - C.gates[ng].i) % n + n) % n;
+    }
   }
   function portes(p) {                                   // franchissement de la porte suivante, DANS LE SENS de la course
     const k = K(), ng = p.pg % k, G = C.gates[ng];
@@ -381,6 +447,15 @@ export function createMicro(room) {
     const u = d0 / (d0 - d1), qx = p.px + (p.x - p.px) * u, qy = p.py + (p.y - p.py) * u;
     const lat = (qx - G.x) * -G.ty + (qy - G.y) * G.tx;
     if (Math.abs(lat) > G.h) return;
+    passerPorte(p, false);
+  }
+  function passerPorte(p, credit) {                     // une porte de plus : coupe de virage (B), tours, arrivée
+    const k = K(), ng = p.pg % k, n = C.n;
+    if (!credit && p.pg > 0) {
+      const gap = ((((C.gates[ng].i - C.gates[(ng - 1 + k) % k].i) % n) + n) % n) * C.step;
+      if (p.gOff > CUT_OFF * gap && p.gLen < CUT_B * gap) { p.penT = tick + PEN_T; p.cuts++; fx.push({ type: 'penalite', seat: p.seat }); }
+    }
+    p.gLen = 0; p.gOff = 0;
     p.pg++;
     if (ng !== 0) return;
     // ligne d'arrivée : premier passage = départ du tour 1 ; ensuite chaque passage boucle un tour
@@ -434,8 +509,11 @@ export function createMicro(room) {
       if (p.ghost > 0) p.ghost--;
       if (p.boostCd > tick + BOOST_CD) p.boostCd = 0;
       p.si = proche(C, p.x, p.y, p.si, 8);
+      p.dTrack = Math.hypot(p.x - C.sx[p.si], p.y - C.sy[p.si]);
       p.surf = surfaceDe(p);
       drive(p);
+      const dd = Math.hypot(p.x - p.px, p.y - p.py);       // trajet depuis la dernière porte (et la part loin hors piste)
+      p.gLen += dd; if (p.dTrack > C.W + CUT_MARGE) p.gOff += dd;
     }
     for (let i = 0; i < racers.length; i++) {
       const p = racers[i]; if (p.fall || p.ghost || p.fin) continue;
@@ -452,6 +530,7 @@ export function createMicro(room) {
       }
       if (!p.fall) {
         portes(p);
+        if (!p.fall) porteSautee(p);
         const ta = Math.atan2(C.ty[p.si], C.tx[p.si]), sp = Math.hypot(p.vx, p.vy);
         p.wrong = !p.fin && sp > 1.5 && Math.cos(p.a - ta) < -0.35 && (p.vx * C.tx[p.si] + p.vy * C.ty[p.si]) < -1;
       }
@@ -487,7 +566,7 @@ export function createMicro(room) {
         su: p.surf, fa: p.fall ? r2(1 - p.fall / FALL_T) : 0, fh: p.fallHole, gh: p.ghost > 0, ww: !!p.wrong,
         lap: Math.max(1, Math.min(laps, p.lap || 1)), pos: p.pos, fin: p.fin, ft: p.fin ? r2(p.ftick / TICK_HZ) : 0,
         bl: p.best ? r2(p.best / TICK_HZ) : 0, ll: p.last ? r2(p.last / TICK_HZ) : 0, pg: p.pg,
-        bumps: p.bumps, kos: p.kos, falls: p.falls, score: p.score, place: p.place, elimTick: p.elimTick,
+        bumps: p.bumps, kos: p.kos, falls: p.falls, cuts: p.cuts, pen: p.penT > tick, score: p.score, place: p.place, elimTick: p.elimTick,
       })),
     };
   }
