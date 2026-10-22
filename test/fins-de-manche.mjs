@@ -200,7 +200,7 @@ const REGLAGES = {
   sumo: () => [{ t: 'botdiff' }],
   foot: () => [{ t: 'lives' }, { t: 'terrain', v: pick(['stade', 'boue', 'glace', 'flipper', 'tempete']) }],
   patate: () => [{ t: 'botdiff' }, { t: 'fuse' }, { t: 'bonus' }],
-  micro: () => [{ t: 'circuit' }, { t: 'laps' }, { t: 'formule' }, { t: 'botdiff' }],
+  micro: () => [{ t: 'circuit' }, { t: 'laps' }, { t: 'formule' }, { t: 'botdiff' }, { t: 'sens' }],
 };
 // plafond de durée d'une manche, en secondes de JEU (pauses exclues). Pong : MAX_ROUND_TICKS ; Sumo : TIME_CAP ;
 // Foot : TIME_CAP ; Patate : chaque patate explose au bout de 25 s (pire cas ≈ 190 s à 10 joueurs) ; Tron : arène qui se referme ; Bomberman : mort subite + SD_GRACE (grille 17 : ~160 s).

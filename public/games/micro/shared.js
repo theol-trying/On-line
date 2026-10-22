@@ -1,22 +1,26 @@
 // MICRO MACHINES — géométrie PARTAGÉE serveur / client (module pur, zéro dépendance, iOS 15 sûr : ni ?. ni ??).
 // Le serveur s'en sert pour la physique (surfaces, murs, chutes, portes de contrôle), le client pour dessiner exactement
-// le même circuit : rien de la géométrie ne passe sur le réseau, seul l'identifiant du circuit (`circuit`).
+// le même circuit : rien de la géométrie ne passe sur le réseau, seuls l'identifiant du circuit (`circuit`) et le sens.
 //
 // Un circuit = une table (ou une moquette) vue de dessus, une ligne médiane fermée (points de contrôle lissés en
-// Catmull-Rom puis rééchantillonnés tous les STEP u) et une demi-largeur W. Autour : murs (capsules), obstacles ronds,
-// trous (poches de billard), zones (lait / encre qui glissent, sucre / gomme qui freinent, flèches turbo) et décor.
+// Catmull-Rom puis rééchantillonnés tous les STEP u) et une demi-largeur W. Autour : murs (capsules), obstacles ronds
+// (dont des BUMPERS qui renvoient fort), trous (poches de billard), zones (lait / encre / huile qui glissent, sucre /
+// gomme / craie / sciure qui freinent, flèches turbo), obstacles MOBILES (souris mécanique, bille, toupie) et décor.
 //   • bord « chute » : sortir de la table = tomber (réapparition à la dernière porte) ; bord « mur » : on rebondit.
 //   • portes de contrôle tous les ~GATE u : il faut les passer DANS L'ORDRE (pas de raccourci à travers la table).
+//   • chaque circuit se court dans les deux sens (`inverse`) : le décor et les obstacles restent, la course s'inverse.
 //
-// API : CIRCUITS (définitions), circuitParId(id) → circuit construit (mis en cache), puis sur un circuit c :
+// API : CIRCUITS (définitions), circuitParId(id, inverse) → circuit construit (mis en cache), puis sur un circuit c :
 //   c.n, c.sx/sy (Float32Array), c.tx/ty (tangente), c.nx/ny (normale, à DROITE du sens de course), c.cs (abscisse), c.L,
 //   c.k (courbure signée), c.gates [{ i, x, y, tx, ty, h }], c.walls [[x1,y1,x2,y2,r,type]], c.rocks [[x,y,r,type]],
-//   c.holes [[x,y,r]], c.zones [[x,y,rx,ry,kind,ang]], c.deco [...], grille de collision (c.near(x, y) → indices),
+//   c.holes [[x,y,r]], c.zones [[x,y,rx,ry,kind,ang]], c.mobs [{ type, r, per, seg | cer }], c.deco [...],
+//   grille de collision (c.near(x, y) → indices), c.boxes [[x,y]] (boîtes de bonus), c.croix (le tracé se croise : circuit en 8),
 //   proche(c, x, y, i0, fen) → indice d'échantillon le plus proche (recherche locale ; fen < 0 = globale),
-//   surTable(c, x, y), zoneA(c, x, y) → zone ou null, grilleDepart(c, n) → [{ x, y, a }].
+//   surTable(c, x, y), dansTrou(c, x, y), zoneA(c, x, y) → zone ou null, grilleDepart(c, n) → [{ x, y, a }],
+//   mobile(m, t, out) → position / cap / vitesse (u par tick) d'un obstacle mobile au temps de course t (s), est BUMPERS[type].
 
 export const TICK_HZ = 30;
-export const CAR_L = 34, CAR_W = 18, CAR_R = 12;        // voiture-jouet (u) ; collisions : un disque de rayon CAR_R
+export const CAR_L = 34, CAR_W = 18, CAR_R = 12;        // voiture-jouet (u) ; disque d'encombrement (murs : 2 disques côté serveur)
 export const STEP = 10;                                 // pas d'échantillonnage de la ligne médiane (u)
 export const GATE = 150;                                // espacement visé des portes de contrôle (u)
 export const VIEW = 580;                                // côté de la vue d'un joueur (u) : identique pour tous les écrans (équité)
@@ -24,18 +28,24 @@ export const FALL_T = 30, GHOST_T = 36;                 // chute (ticks) puis fa
 export const LAPS = [1, 3, 5];
 export const FORMULES = ['course', 'elim'];
 export const ELIM_HW0 = 520, ELIM_HW1 = 340;            // Élimination : demi-côté de la fenêtre commune (début → fin)
+export const BUMPERS = { bumper: 1, punaise: 1, pion: 1, tampon: 1 };   // obstacles qui RENVOIENT (flipper) au lieu d'arrêter
+export const ZONE_GLISSE = { lait: 1, encre: 1, huile: 1 }, ZONE_FREIN = { sucre: 1, gomme: 1, craie: 1, sciure: 1 };
 
 const TAU = Math.PI * 2;
 const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
 
 /* ---------- définitions des circuits ----------
-   pts : ligne médiane (sens de course), le départ est entre le dernier et le premier point (ligne droite).
-   make(H) : ajoute murs, obstacles, zones et décor à partir des échantillons (H.at(f) = point à la fraction f du tour). */
+   pts : ligne médiane (sens de course), le départ est sur le premier point (ligne droite avant ET après : sens inverse).
+   make(H) : ajoute murs, obstacles, zones et décor à partir des échantillons (H.at(f) = point à la fraction f du tour).
+   mobs : obstacles mobiles — seg [[x1,y1],[x2,y2]] (aller-retour) ou cer [cx, cy, R] (tourne en rond) ; per = période (s).
+   boxes : fractions du tour où poser une rangée de boîtes de bonus (3 en travers de la piste). */
 export const CIRCUITS = [
   {
-    id: 'dejeuner', nom: 'Petit-déjeuner', emoji: '🥣', sous: 'Table de cuisine · bol, lait renversé, sucre',
+    id: 'dejeuner', nom: 'Petit-déjeuner', emoji: '🥣', sous: 'Table de cuisine · bol, lait renversé, souris mécanique',
     w: 2600, h: 1700, surf: 'bois', edge: 'chute', table: { x0: 60, y0: 60, x1: 2540, y1: 1640, r: 90 }, W: 72,
     pts: [[700, 1420], [1300, 1430], [1900, 1400], [2260, 1250], [2350, 900], [2200, 560], [1860, 420], [1520, 560], [1320, 860], [1020, 960], [770, 800], [730, 480], [520, 300], [270, 420], [220, 800], [300, 1210]],
+    mobs: [{ type: 'souris', seg: [[1180, 680], [1180, 1110]], r: 20, per: 5.5 }],   // souris mécanique qui traverse l'épingle
+    boxes: [0.14, 0.47, 0.76],
     make(H) {
       H.rock(1720, 980, 150, 'bol');                       // bol de céréales au milieu de la boucle
       H.rock(1110, 1180, 62, 'tasse');                     // tasse de café
@@ -50,15 +60,18 @@ export const CIRCUITS = [
     },
   },
   {
-    id: 'bureau', nom: 'Bureau d\'écolier', emoji: '✏️', sous: 'Cahier quadrillé · crayons, règles, taches d\'encre',
+    id: 'bureau', nom: 'Bureau d\'écolier', emoji: '✏️', sous: 'Cahier quadrillé · crayons, punaises, taches d\'encre',
     w: 2600, h: 1700, surf: 'cahier', edge: 'chute', table: { x0: 60, y0: 60, x1: 2540, y1: 1640, r: 30 }, W: 70,
     pts: [[600, 1440], [1000, 1445], [1400, 1450], [1750, 1340], [1860, 1100], [2060, 960], [2290, 1060], [2410, 830], [2240, 430], [1800, 320], [1500, 470], [1310, 760], [1050, 830], [850, 650], [930, 400], [700, 230], [340, 330], [230, 680], [300, 1080]],
+    boxes: [0.2, 0.52, 0.84],
     make(H) {
       H.rail(0.015, 0.095, -1, 'regle'); H.rail(0.015, 0.095, 1, 'crayon');      // ligne droite de départ entre règle et crayon
       H.wall(122, 700, 128, 1060, 9, 'crayon');            // crayon couché le long de la ligne droite de gauche
       H.rock(1400, 1100, 52, 'gomme'); H.rock(2080, 620, 44, 'taille');
       H.rock(560, 900, 60, 'trombones');
       H.wall(1500, 1060, 1600, 1260, 14, 'stylo');
+      H.rockAt(0.39, 0.62, 18, 'punaise'); H.rockAt(0.42, -0.62, 18, 'punaise');   // punaises à tête ronde : elles renvoient
+      H.rockAt(0.665, 0.6, 18, 'punaise');
       H.zoneAt(0.30, 0.2, 90, 64, 'encre');               // tache d'encre au pied de la chicane
       H.zoneAt(0.66, -0.4, 80, 56, 'gomme');               // miettes de gomme à la corde
       H.zoneAt(0.78, 0.35, 70, 50, 'encre');
@@ -66,9 +79,11 @@ export const CIRCUITS = [
     },
   },
   {
-    id: 'billard', nom: 'Billard', emoji: '🎱', sous: 'Feutre vert · bandes, billes, poches qui avalent',
+    id: 'billard', nom: 'Billard', emoji: '🎱', sous: 'Feutre vert · bandes, billes qui roulent, poches qui avalent',
     w: 2520, h: 1370, surf: 'feutre', edge: 'mur', table: { x0: 70, y0: 70, x1: 2450, y1: 1300, r: 10 }, W: 70,
     pts: [[700, 1110], [1260, 1100], [1800, 1110], [2170, 1000], [2240, 640], [1990, 330], [1560, 400], [1260, 640], [960, 400], [520, 330], [270, 620], [330, 1000]],
+    mobs: [{ type: 'bille', seg: [[1260, 300], [1260, 790]], r: 26, per: 7 }],   // une bille roule d'une bande à l'autre à travers le S
+    boxes: [0.26, 0.5, 0.8],
     make(H) {
       const t = H.c.table;                                   // bandes : murs le long du feutre (on rebondit)
       H.wall(t.x0, t.y0, t.x1, t.y0, 14, 'bande'); H.wall(t.x1, t.y0, t.x1, t.y1, 14, 'bande');
@@ -86,16 +101,65 @@ export const CIRCUITS = [
     },
   },
   {
-    id: 'piste', nom: 'Circuit-jouet', emoji: '🏁', sous: 'Piste orange à rails · moquette du salon, flèches turbo',
+    id: 'piste', nom: 'Circuit-jouet', emoji: '🏁', sous: 'Piste orange à rails · moquette du salon, turbos, bumpers',
     w: 2600, h: 1650, surf: 'moquette', edge: 'mur', table: { x0: 40, y0: 40, x1: 2560, y1: 1610, r: 40 }, W: 66,
     pts: [[650, 1300], [1450, 1310], [2050, 1230], [2280, 900], [2120, 560], [1660, 470], [1300, 600], [1360, 880], [1080, 1000], [780, 860], [700, 600], [760, 400], [660, 240], [440, 190], [260, 380], [220, 860], [330, 1170]],
+    boxes: [0.08, 0.36, 0.7],
     make(H) {
       const t = H.c.table;
       H.wall(t.x0, t.y0, t.x1, t.y0, 20, 'plinthe'); H.wall(t.x1, t.y0, t.x1, t.y1, 20, 'plinthe');
       H.wall(t.x1, t.y1, t.x0, t.y1, 20, 'plinthe'); H.wall(t.x0, t.y1, t.x0, t.y0, 20, 'plinthe');
       H.rails('rail');                                       // rails de plastique tout le long : pas de raccourci, pas de chute
       H.boostAt(0.045); H.boostAt(0.115); H.boostAt(0.47); H.boostAt(0.80);
+      H.rockAt(0.585, 0.6, 20, 'bumper'); H.rockAt(0.61, -0.6, 20, 'bumper'); H.rockAt(0.635, 0.6, 20, 'bumper');   // slalom de bumpers
       H.deco(1900, 950, 'cubes'); H.deco(1700, 1520, 'livre'); H.deco(500, 1480, 'peluche'); H.deco(1450, 180, 'chaussette');
+    },
+  },
+  {
+    id: 'etabli', nom: 'Établi du garage', emoji: '🔧', sous: 'Contreplaqué taché d\'huile · étau, vis, tampons de caoutchouc',
+    w: 2600, h: 1700, surf: 'etabli', edge: 'chute', table: { x0: 60, y0: 60, x1: 2540, y1: 1640, r: 16 }, W: 68,
+    pts: [[600, 300], [1100, 290], [1700, 300], [2150, 380], [2380, 700], [2300, 1100], [2000, 1350], [1650, 1300], [1450, 1050], [1200, 1000], [1000, 1250], [800, 1450], [450, 1420], [280, 1150], [380, 850], [300, 550]],
+    boxes: [0.2, 0.44, 0.74],
+    make(H) {
+      H.rock(1880, 820, 115, 'etau');                       // étau au creux de la grande courbe
+      H.wall(780, 760, 1150, 680, 16, 'marteau');
+      H.rock(1320, 1470, 26, 'ecrou'); H.rock(2440, 1470, 30, 'boulon'); H.rock(640, 1020, 24, 'ecrou'); H.rock(2440, 200, 22, 'vis');
+      H.rockAt(0.105, 0.62, 19, 'tampon'); H.rockAt(0.135, -0.62, 19, 'tampon');   // tampons de caoutchouc sur la grande ligne droite : ça rebondit
+      H.zoneAt(0.25, 0.2, 90, 62, 'huile');                // flaque d'huile en sortie de la grande courbe
+      H.zoneAt(0.78, 0.55, 80, 56, 'sciure');              // sciure à la corde de l'épingle
+      H.zoneAt(0.95, -0.2, 70, 50, 'huile');
+      H.deco(1350, 120, 'metre'); H.deco(2250, 1560, 'chiffon'); H.deco(160, 1580, 'tournevis'); H.deco(1600, 820, 'pinceau');
+    },
+  },
+  {
+    id: 'plateau', nom: 'Jeu de société', emoji: '🎲', sous: 'Plateau de jeu · dés, pions qui renvoient, toupie folle',
+    w: 2600, h: 1700, surf: 'plateau', edge: 'chute', table: { x0: 60, y0: 60, x1: 2540, y1: 1640, r: 60 }, W: 70,
+    pts: [[600, 1380], [1400, 1390], [2100, 1360], [2380, 1120], [2200, 880], [1750, 860], [1500, 760], [1450, 560], [1250, 420], [800, 320], [400, 400], [250, 750], [300, 1100]],
+    mobs: [{ type: 'toupie', cer: [1000, 1240, 150], r: 26, per: 6 }],   // toupie qui tourne en rond et mord sur la ligne droite
+    boxes: [0.2, 0.56, 0.8],
+    make(H) {
+      H.rock(2050, 620, 46, 'de'); H.rock(1850, 1150, 40, 'de'); H.rock(700, 900, 44, 'de');
+      H.rock(1100, 620, 34, 'sablier');
+      H.rockAt(0.455, 0.6, 20, 'pion'); H.rockAt(0.485, -0.6, 20, 'pion');          // pions : bumpers dans le S du milieu (loin du bord)
+      H.rockAt(0.66, 0.6, 20, 'pion'); H.rockAt(0.69, -0.6, 20, 'pion');
+      H.zoneAt(0.86, 0.3, 80, 56, 'sucre');                 // miettes de biscuit
+      H.deco(1400, 1050, 'cartes'); H.deco(2350, 200, 'billets'); H.deco(160, 1560, 'gobelet');
+    },
+  },
+  {
+    id: 'huit', nom: 'Circuit en 8', emoji: '♾️', sous: 'Piste-jouet qui se croise · tapis de jeu, turbos, bumpers',
+    w: 2600, h: 1650, surf: 'tapis', edge: 'mur', table: { x0: 40, y0: 40, x1: 2560, y1: 1610, r: 40 }, W: 64,
+    pts: [[2000, 1300], [2280, 1295], [2410, 1060], [2400, 580], [2230, 370], [1900, 360], [1650, 500], [1300, 825], [950, 1150], [700, 1290], [370, 1290], [200, 1070], [200, 580], [370, 370], [700, 360], [950, 500], [1300, 825], [1650, 1150], [1850, 1300]],
+    croix: true,
+    boxes: [0.2, 0.62],
+    make(H) {
+      const t = H.c.table;
+      H.wall(t.x0, t.y0, t.x1, t.y0, 20, 'plinthe'); H.wall(t.x1, t.y0, t.x1, t.y1, 20, 'plinthe');
+      H.wall(t.x1, t.y1, t.x0, t.y1, 20, 'plinthe'); H.wall(t.x0, t.y1, t.x0, t.y0, 20, 'plinthe');
+      H.rails('rail');                                       // rails partout SAUF au croisement (rails() le détecte)
+      H.boostAt(0.32); H.boostAt(0.82);
+      H.rockAt(0.535, 0.6, 20, 'bumper'); H.rockAt(0.565, -0.6, 20, 'bumper');
+      H.deco(2250, 820, 'maison'); H.deco(350, 820, 'maison'); H.deco(1300, 180, 'arbre'); H.deco(1300, 1480, 'arbre');
     },
   },
 ];
@@ -128,11 +192,8 @@ function resample(poly, step) {                         // polyligne fermée →
   }
   return { pts: out, L };
 }
-
-function construire(def) {
-  const c = Object.assign({}, def);
-  const sm = resample(catmull(def.pts, 24), STEP), P = sm.pts, n = P.length;
-  c.n = n; c.L = sm.L; c.step = sm.L / n;
+function geometrie(c, P) {                              // tangentes, normales, abscisse, courbure d'une suite d'échantillons
+  const n = P.length;
   c.sx = new Float32Array(n); c.sy = new Float32Array(n); c.tx = new Float32Array(n); c.ty = new Float32Array(n);
   c.nx = new Float32Array(n); c.ny = new Float32Array(n); c.cs = new Float32Array(n); c.k = new Float32Array(n);
   for (let i = 0; i < n; i++) { c.sx[i] = P[i][0]; c.sy[i] = P[i][1]; c.cs[i] = i * c.step; }
@@ -148,7 +209,24 @@ function construire(def) {
     }
     c.k[i] = s / 7;
   }
-  c.walls = []; c.rocks = []; c.holes = []; c.zones = []; c.deco = [];
+}
+// un autre tronçon de piste passe-t-il à moins de `d` u de l'échantillon i ? (tronçons à plus de 6 W d'abscisse)
+function autreTroncon(c, i, d) {
+  const n = c.n;
+  for (let j = 0; j < n; j += 2) {
+    let ds = Math.abs(j - i); ds = Math.min(ds, n - ds) * c.step;
+    if (ds < c.W * 6) continue;
+    if (Math.hypot(c.sx[j] - c.sx[i], c.sy[j] - c.sy[i]) < d) return true;
+  }
+  return false;
+}
+
+function construire(def, inverse) {
+  const c = Object.assign({}, def);
+  const sm = resample(catmull(def.pts, 24), STEP), n = sm.pts.length;
+  c.n = n; c.L = sm.L; c.step = sm.L / n; c.inverse = !!inverse;
+  geometrie(c, sm.pts);
+  c.walls = []; c.rocks = []; c.holes = []; c.zones = []; c.deco = []; c.boxes = [];
   const H = {
     c,
     at(f, lat) { const i = ((Math.round(f * n) % n) + n) % n, o = (lat || 0) * c.W; return { i, x: c.sx[i] + c.nx[i] * o, y: c.sy[i] + c.ny[i] * o }; },
@@ -169,15 +247,25 @@ function construire(def) {
       if (manque > 0) { x1 += mx * manque * side; y1 += my * manque * side; x2 += mx * manque * side; y2 += my * manque * side; }
       c.walls.push([x1, y1, x2, y2, r, type]);
     },
-    rails(type) {                                                   // rails continus des deux côtés (circuit-jouet)
+    rails(type) {                                                   // rails continus des deux côtés, interrompus aux croisements
       const off = c.W + 10, k = 3;
       for (let i = 0; i < n; i += k) {
         const j = (i + k) % n;
+        if (autreTroncon(c, i, c.W * 2 + 40) || autreTroncon(c, j, c.W * 2 + 40)) continue;
         for (const side of [-1, 1]) c.walls.push([c.sx[i] + c.nx[i] * off * side, c.sy[i] + c.ny[i] * off * side, c.sx[j] + c.nx[j] * off * side, c.sy[j] + c.ny[j] * off * side, 7, type]);
       }
     },
   };
   if (def.make) def.make(H);
+  for (const f of def.boxes || []) for (const lat of [-0.5, 0, 0.5]) { const p = H.at(f, lat); c.boxes.push([p.x, p.y]); }   // rangées de 3 boîtes
+  c.mobs = (def.mobs || []).map(m => ({ type: m.type, r: m.r, per: m.per, seg: m.seg || null, cer: m.cer || null }));
+  // sens inverse : on parcourt les mêmes échantillons à rebours (le n° 0, la ligne, ne bouge pas) ; décor et obstacles restent
+  if (inverse) {
+    const P = [];
+    for (let i = 0; i < n; i++) { const j = (n - i) % n; P.push([c.sx[j], c.sy[j]]); }
+    geometrie(c, P);
+    for (const z of c.zones) if (z[4] === 'boost') z[5] = wrapA(z[5] + Math.PI);   // les flèches turbo se retournent
+  }
   // portes de contrôle : K portes équidistantes, la porte 0 = ligne de départ / d'arrivée (échantillon 0)
   const K = Math.max(8, Math.round(c.L / GATE));
   c.gates = [];
@@ -202,7 +290,7 @@ function construire(def) {
     const a = Math.max(0, Math.floor(x0 / CELL)), b = Math.min(gw - 1, Math.floor(x1 / CELL)), e = Math.max(0, Math.floor(y0 / CELL)), f = Math.min(gh - 1, Math.floor(y1 / CELL));
     for (let gy = e; gy <= f; gy++) for (let gx = a; gx <= b; gx++) { const k = gy * gw + gx; (grid[k] || (grid[k] = [])).push(id); }
   };
-  const pad = CAR_R + 24;
+  const pad = CAR_L * 0.75 + 24;
   c.walls.forEach((w, i) => put(Math.min(w[0], w[2]) - w[4] - pad, Math.min(w[1], w[3]) - w[4] - pad, Math.max(w[0], w[2]) + w[4] + pad, Math.max(w[1], w[3]) + w[4] + pad, i));
   c.rocks.forEach((r, i) => put(r[0] - r[2] - pad, r[1] - r[2] - pad, r[0] + r[2] + pad, r[1] + r[2] + pad, 10000 + i));
   const EMPTY = [];
@@ -222,11 +310,12 @@ function construire(def) {
 }
 
 const CACHE = {};
-export function circuitParId(id) {
+export function circuitParId(id, inverse) {
   let d = null;
   for (let i = 0; i < CIRCUITS.length; i++) if (CIRCUITS[i].id === id) d = CIRCUITS[i];
   if (!d) d = CIRCUITS[0];
-  return CACHE[d.id] || (CACHE[d.id] = construire(d));
+  const key = d.id + (inverse ? '|inv' : '');
+  return CACHE[key] || (CACHE[key] = construire(d, !!inverse));
 }
 
 /* ---------- requêtes ---------- */
@@ -257,6 +346,21 @@ export function zoneA(c, x, y) {                                  // zone (ellip
     if (u * u + v * v <= 1) return z;
   }
   return null;
+}
+// obstacle mobile au temps de course t (s) : aller-retour adouci le long d'un segment, ou tour complet d'un cercle
+export function mobile(m, t, out) {
+  const w = TAU / m.per;
+  if (m.seg) {
+    const a = m.seg[0], b = m.seg[1], u = 0.5 - 0.5 * Math.cos(w * t), du = 0.5 * Math.sin(w * t) * w / TICK_HZ;
+    out.x = a[0] + (b[0] - a[0]) * u; out.y = a[1] + (b[1] - a[1]) * u;
+    out.vx = (b[0] - a[0]) * du; out.vy = (b[1] - a[1]) * du;
+    out.a = Math.atan2(out.vy, out.vx) || Math.atan2(b[1] - a[1], b[0] - a[0]);
+  } else {
+    const c = m.cer, g = w * t;
+    out.x = c[0] + Math.cos(g) * c[2]; out.y = c[1] + Math.sin(g) * c[2];
+    out.vx = -Math.sin(g) * c[2] * w / TICK_HZ; out.vy = Math.cos(g) * c[2] * w / TICK_HZ; out.a = g + Math.PI / 2;
+  }
+  return out;
 }
 // grille de départ : deux files décalées DERRIÈRE la ligne (porte 0), voiture 1 en pole à droite
 export function grilleDepart(c, nb) {
