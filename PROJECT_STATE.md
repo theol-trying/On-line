@@ -321,7 +321,7 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
   (`public/games/micro/shared.js`) : ligne médiane Catmull-Rom rééchantillonnée tous les 10 u, demi-largeur `W`, murs
   (capsules), obstacles ronds, trous, zones, décor, grille de collision (cellules 120 u). Rien de la géométrie ne voyage :
   le snapshot ne porte que `circuit` (id) et `K` (nombre de portes).
-- **4 circuits** : Petit-déjeuner (bois, bord de table = chute, bol de céréales, lait qui glisse, sucre qui freine),
+- **4 circuits d'origine** (7 depuis la v2, voir plus bas) : Petit-déjeuner (bois, bord de table = chute, bol de céréales, lait qui glisse, sucre qui freine),
   Bureau d'écolier (cahier quadrillé, crayons et règle en bordure, encre, gomme), Billard (bandes qui renvoient fort,
   billes en chicane, 6 poches = chute), Circuit-jouet (piste orange à rails continus, flèches turbo ×1,42, pas de chute).
   Vérifiés en Node (dégagement entre tronçons ≥ 2W + 70, rayon ≥ 70, obstacles hors piste sauf billes de chicane).
@@ -359,6 +359,33 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
 - **Classement** : `{games, wins, podiums, kos, falls, bestLap, bl{circuit: s}}` (meilleur tour global et par circuit).
 - Vérifié : `npm test` 120/120 + 82/82 ; navigateur (bureau et téléphone 375 px) : 4 circuits, Course et Élimination,
   clavier, joystick analogique, écran de fin et podium, sans erreur. **Pas encore joué à plusieurs humains.**
+- **v2 (22-23/10)** — demandée pour l'équilibrage (« si on est dernier c'est presque impossible de rattraper ») :
+  - **Anti-raccourci** : (A) porte de contrôle SAUTÉE avec un trajet réel < 72 % de la distance de piste → retour à la
+    dernière porte (fx `coupe`, `fh` 2 : rendu « téléporté »), compteur `cuts` (⛔ à l'écran de fin) ; grand détour honnête
+    = portes créditées. Une voiture projetée par un choc depuis < 2,5 s est seulement REPLACÉE à la porte sautée (fx
+    `replace`, `fh` 3). (B) coupe de virage (> 50 % de l'intervalle hors piste et trajet < 75 % de l'espacement) →
+    vitesse × 0,45 pendant 1,2 s (fx `penalite`, joueur `pen`).
+  - **7 circuits** : + Établi du garage (étau, marteau, écrous, tampons qui renvoient, huile, sciure), Jeu de société
+    (chemin de cases numérotées, dés, sablier, pions qui renvoient, toupie mobile), Circuit en 8 (tapis de jeu, rails
+    interrompus au croisement, `croix`). **Bumpers** (`BUMPERS` de shared.js : bumper, punaise, pion, tampon) qui
+    renvoient comme un flipper ; **obstacles mobiles** `mobs` (souris, bille, toupie) placés par `mobile(m, t)` avec
+    t = `rt` : serveur et client les calculent chacun, rien ne voyage. **Sens inverse** (msg `sens` : normal / inverse
+    / hasard → `inv`, `sens`) et **circuit au hasard** (le cycle `circuit` finit par « hasard » → `choix`).
+  - **Objets** (option `bonus`, msg `bonus`) : rangées de 3 boîtes 🎁 (`C.boxes`, champ `bx` = '1'/'0' par boîte,
+    réapparition 4 s) ; un objet en réserve (`it`, `iu`), utilisé par `objet` (Espace / bouton `#mmItem` ; klaxon → H).
+    Tirage pondéré par la PLACE : Turbo, Triple turbo, Flaque d'huile (`fl`), Boule de papier (`pj`, rebondit 3 fois),
+    Bouclier (`sh`), Escargot (ralentit tous ceux de devant, `sl`). Les bots s'en servent. fx `boite, objet, paf,
+    glisse, pare`. **Coup de pouce** (option `pouce`) : jusqu'à +16 % de vitesse et de reprise selon le retard sur le
+    meneur. Mesure (pilote faible scripté, 20 manches) : place moyenne 3,1 → 2,0 (Petit-déjeuner), 5,0 → 3,5 (Bureau)
+    avec les deux options ; les deux sont ACTIVÉES par défaut.
+  - **Physique des contacts** : 2 disques par voiture, rebond 0,9, couple → vitesse de rotation `w` (tête-à-queue),
+    perte d'adhérence `slip` après un choc (sans elle, l'adhérence effaçait la poussée en quelques ticks : « il ne se
+    passe rien ») ; le bouclier amortit.
+  - ⚠️ **Piège** : un fx poussé depuis `onMessage` est PERDU (le tick repart de `fx = pend`). L'objet d'un humain pose
+    donc un drapeau `useReq`, consommé dans le tick ; le klaxon passe par `pend`.
+  - Vérifié : `npm test` 120/120 + 82/82 ; simulations (tricheur sanctionné, trajectoire serrée honnête jamais
+    pénalisée, 14 variantes de circuits) ; navigateur bureau + téléphone 375 px, pilote automatique par script :
+    objets ramassés et utilisés, aucune erreur.
 
 ## ZQSD / WASD dans tous les jeux (25/09)
 Les 7 jeux lisent le clavier par `e.code` (position PHYSIQUE) : `KeyW`/`KeyA` sont les touches Z/Q d'un clavier

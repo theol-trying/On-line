@@ -6,7 +6,7 @@
 |---|---|---|
 | Pong · Tron · Snake · Sumo · Foot · Patate chaude | **2 à 10** (Snake dès 1) | Géométrie et grilles générées : elles s'adaptent au nombre de participants |
 | Tanks · Bomberman | **2 à 8** (Bomberman dès 1) | Au-delà, même sur une carte agrandie, on meurt trop souvent sans avoir vu venir |
-| Micro Machines | **1 à 10** | Course de voitures-jouets sur 4 circuits fixes (tables, circuit-jouet) : la grille de départ en accueille 10 |
+| Micro Machines | **1 à 10** | Course de voitures-jouets sur 7 circuits (tables, plateau de jeu, circuits-jouets), dans les deux sens, avec objets à ramasser : la grille de départ en accueille 10 |
 
 L'arène grandit automatiquement avec le nombre de participants (bots compris).
 Serveur Node.js **autoritatif**, **zéro dépendance npm**, **aucun fichier binaire** (graphismes dessinés au canvas, musique générée en WebAudio).

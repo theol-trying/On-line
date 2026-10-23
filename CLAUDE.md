@@ -55,6 +55,9 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
 - Le snapshot renvoyé par `tick()` **doit** contenir `gs` (utilisé par le throttle du hub). Il ne doit **jamais** avoir de clé
   `t`, `g`, `fx`, `shz` ou `pd` à lui : le hub les pose sur le message (un chrono nommé `t` écrasait `t: 'state'` — Micro Machines,
   22/10 ; seul le test de fumée le voit, `fins-de-manche.mjs` appelle `tick()` en direct).
+- Un **fx poussé depuis `onMessage`** est perdu si le `tick()` du jeu repart d'un tableau neuf : passer par la file
+  `pend` du jeu ou poser un drapeau consommé dans le tick (objet d'un humain à Micro Machines, corrigé le 23/10 : seuls
+  les bots, qui agissent dans le tick, produisaient l'effet visuel).
 - **Joystick analogique** : un jeu qui veut le vecteur du stick (et non des boutons) exporte `joyAna(dx, dy, fin)` dans son
   module ; `app.js` le passe à `joystickPour(id, mod.joy, mod.joyAna)` (Micro Machines : cap absolu).
 
