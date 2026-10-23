@@ -51,8 +51,8 @@ const DISP = "'Racing Sans One', 'Russo One', Impact, sans-serif";
 const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', KeyZ: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', KeyQ: 'left', ArrowRight: 'right', KeyD: 'right' };
 const ORD = n => n === 1 ? '1er' : n + 'ᵉ';
 // objets à ramasser (indices = ITEMS du serveur)
-const ITEM = [{ e: '⚡', n: 'Turbo', c: '#ffd23a' }, { e: '🚀', n: 'Triple turbo', c: '#ff8a1e' }, { e: '🛢', n: 'Flaque d\'huile', c: '#7a5a3a' },
-  { e: '📄', n: 'Boule de papier', c: '#f2f2ea' }, { e: '🛡', n: 'Bouclier', c: '#6fc6ff' }, { e: '🐌', n: 'Escargot', c: '#9be060' }];
+const ITEM = [{ e: '⚡', n: 'Turbo', c: '#ffd23a' }, { e: '🚀', n: 'Triple turbo', c: '#ff8a1e' }, { e: '🛢️', n: 'Flaque d\'huile', c: '#7a5a3a' },
+  { e: '📄', n: 'Boule de papier', c: '#f2f2ea' }, { e: '🛡️', n: 'Bouclier', c: '#6fc6ff' }, { e: '🐌', n: 'Escargot', c: '#9be060' }];
 const itemAt = k => (k | 0) === k && k >= 0 && k < ITEM.length ? ITEM[k] : null;
 const SENS_NAME = { normal: '➡️ Sens normal', inverse: '↩️ Sens inverse', hasard: '🎲 Sens au hasard' };
 const CAR_NAMES = ['proto', 'mini', 'pickup', 'formule', 'fourgon'];
@@ -1089,7 +1089,7 @@ export default (function () {
       ctx.restore();
     }
     const ic = p.sl ? '🐌' : p.pen ? '⚠️' : '';
-    if (ic) { const b = A.reduceFx ? 0 : Math.sin(now / 160) * 2; ctx.save(); ctx.font = '18px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(ic, v.x, v.y - CAR_L * 0.95 + b); ctx.restore(); }
+    if (ic) { const b = A.reduceFx ? 0 : Math.sin(now / 160) * 2; ctx.save(); ctx.font = '18px system-ui, sans-serif'; ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(ic, v.x, v.y - CAR_L * 0.95 + b); ctx.restore(); }
   }
   function decor(g, d, R) {
     const x = d[0], y = d[1], t = d[2];
@@ -1514,15 +1514,15 @@ export default (function () {
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         if (d) {
           const pop = A.reduceFx ? 1 : 1 + 0.35 * Math.max(0, 1 - (now - lastItemMsg) / 320);
-          ctx.font = Math.round(28 * pop) + 'px system-ui, sans-serif'; ctx.fillText(d.e, 29, 31);
+          ctx.font = Math.round(28 * pop) + 'px system-ui, sans-serif'; ctx.fillStyle = '#ffffff'; ctx.fillText(d.e, 29, 31);
           if (me.iu > 1) { ctx.font = 'bold 13px system-ui, sans-serif'; ctx.fillStyle = K.cream; ctx.fillText('×' + me.iu, 47, 48); }
           if (!TOUCH) { ctx.font = 'bold 10px system-ui, sans-serif'; ctx.fillStyle = 'rgba(255,246,224,.75)'; ctx.fillText('ESPACE', 29, 68); }
-        } else { ctx.globalAlpha = 0.3; ctx.font = '24px system-ui, sans-serif'; ctx.fillText('🎁', 29, 31); ctx.globalAlpha = 1; }
+        } else { ctx.globalAlpha = 0.3; ctx.font = '24px system-ui, sans-serif'; ctx.fillStyle = '#ffffff'; ctx.fillText('🎁', 29, 31); ctx.globalAlpha = 1; }
         ctx.restore();
       }
       const fxs = [];                                     // effets en cours, à droite de la position
-      if (me.tb) fxs.push('⚡'); if (me.sh) fxs.push('🛡'); if (me.sl) fxs.push('🐌'); if (me.pen) fxs.push('⚠️');
-      if (fxs.length && me.alive) { ctx.save(); ctx.translate(12 + 110 * k, 12); ctx.scale(k, k); ctx.font = '20px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; for (let i = 0; i < fxs.length; i++) ctx.fillText(fxs[i], i * 26, 18); ctx.restore(); }
+      if (me.tb) fxs.push('⚡'); if (me.sh) fxs.push('🛡️'); if (me.sl) fxs.push('🐌'); if (me.pen) fxs.push('⚠️');
+      if (fxs.length && me.alive) { ctx.save(); ctx.translate(12 + 110 * k, 12); ctx.scale(k, k); ctx.font = '20px system-ui, sans-serif'; ctx.fillStyle = '#ffffff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; for (let i = 0; i < fxs.length; i++) ctx.fillText(fxs[i], i * 26, 18); ctx.restore(); }
       // tour + chrono (en haut à droite)
       if (snap.formule !== 'elim') {
         const lt = me.fin ? me.ft : Math.max(0, (snap.rt || 0) - (me.pg > 0 ? myLapT0 : snap.rt || 0));
