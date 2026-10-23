@@ -110,7 +110,7 @@ export function createMicro(room) {
       bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
       lane: 0, forme: 1, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0,
       gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
-      item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, oilIn: 0, pouce: 1,
+      item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, oilIn: 0, pouce: 1, useReq: false,
       rs: 0, place: 0, elimTick: -1, score: 0,
     }));
   }
@@ -166,7 +166,7 @@ export function createMicro(room) {
         pg: 0, lap: 0, lapStart: 0, best: 0, last: 0, fin: 0, ftick: 0, pos: k + 1, fall: 0, fallHole: 0, ghost: 0, outT: 0,
         wrong: false, surf: 0, drift: 0, boostCd: 0, inZone: null, bumpFx: 0, bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
         lane: ((k * 37) % 9 - 4) / 4 * 0.22, forme: 1 + (Math.random() * 2 - 1) * 0.022, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0, rs: 0, place: 0, elimTick: -1, alive: true, gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
-        item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, oilIn: 0 });
+        item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, oilIn: 0, pouce: 1, useReq: false });
       p.inp = { up: false, down: false, left: false, right: false };
     });
     nParts = N; endTick = 0; winner = null; finCount = 0; finDeadline = 0; leader = -1; leadT = -1e9; lastBest = null;
@@ -646,7 +646,7 @@ export function createMicro(room) {
       if (p.fall) continue;
       if (p.fin) botControl(p, true);                   // arrivé : pilote automatique au ralenti, en fantôme
       else if (p.bot) { botControl(p, false); if (bonusOn) botObjet(p); }
-      else humanControl(p);
+      else { humanControl(p); if (p.useReq) { p.useReq = false; utiliser(p); } }   // l'objet demandé par message : utilisé DANS le tick (fx d'un message = perdus, le tick repart de `pend`)
     }
     for (const p of racers) {
       if (p.fall) { p.vx *= 0.9; p.vy *= 0.9; p.x += p.vx; p.y += p.vy; if (--p.fall <= 0) reapparaitre(p); continue; }
@@ -759,7 +759,7 @@ export function createMicro(room) {
       }
       else { p.ana = null; p.inp = { up: !!m.up, down: !!m.down, left: !!m.left, right: !!m.right }; }
     }
-    else if (m.t === 'objet' && p) { if (p.playing && p.alive && !p.bot) utiliser(p); }
+    else if (m.t === 'objet' && p) { if (p.playing && p.alive && !p.bot && p.item >= 0) p.useReq = true; }
     else if (m.t === 'bonus') { if (editable()) bonusOn = !bonusOn; }
     else if (m.t === 'pouce') { if (editable()) pouceOn = !pouceOn; }
     else if (m.t === 'klaxon' && p) { if (p.playing && clk - p.honkT >= 20 && (gameState === 'play' || gameState === 'countdown')) { p.honkT = clk; pend.push({ type: 'honk', seat: p.seat }); } }
