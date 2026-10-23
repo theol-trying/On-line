@@ -593,16 +593,19 @@
       <span class="sep"></span>
       <button class="gm" id="mmCircuit">🥣 Petit-déjeuner</button>
       <button class="gm" id="mmFormule">🏁 Course</button>
+      <button class="gm" id="mmSens">➡️ Sens normal</button>
       <button class="gm" id="mmLaps">🔁 3 tours</button>
       <button class="gm" id="mmBots">🤖 Bots : 0</button>
       <button class="gm" id="mmDiff">🎯 IA : Normale</button>
       <button class="gm" id="mmMode" disabled>⚔ FFA</button>
+      <button class="gm" id="mmBonus">🎁 Bonus : oui</button>
+      <button class="gm" id="mmPouce">🤝 Coup de pouce : oui</button>
       <button id="mmHelp">❔ Règles</button>
       <button id="mmLbBtn">🏆 Classement</button>
     </div>
     <div class="help">
-      <b>↑</b> / <b>Z</b> (W) accélère · <b>↓</b> / <b>S</b> freine et recule · <b>← →</b> / <b>Q D</b> (A D) tournent · <b>Espace</b> ou <b>H</b> = klaxon 📯 · <b>P / Échap</b> = pause.
-      Attention au bord de la table : on tombe !
+      <b>↑</b> / <b>Z</b> (W) accélère · <b>↓</b> / <b>S</b> freine et recule · <b>← →</b> / <b>Q D</b> (A D) tournent · <b>Espace</b> = utiliser l'objet 🎁 · <b>H</b> = klaxon 📯 · <b>P / Échap</b> = pause.
+      Attention au bord de la table : on tombe ! Couper la piste est sanctionné.
     </div>
     <div class="gpad">
       <div class="dirs">
@@ -610,7 +613,8 @@
         <div class="drow"><button id="mmLeft" class="touch" aria-label="tourner à gauche">◀</button><button id="mmDown" class="touch" aria-label="freiner">▼</button><button id="mmRight" class="touch" aria-label="tourner à droite">▶</button></div>
       </div>
       <div class="acts">
-        <button id="mmHorn" class="touch fire" aria-label="klaxon">📯</button>
+        <button id="mmItem" class="touch fire" aria-label="utiliser l'objet">🎁</button>
+        <button id="mmHorn" class="touch" aria-label="klaxon">📯</button>
       </div>
     </div>
     <button id="mmPauseFloat" class="pauseFloat" aria-label="pause">⏸</button>
@@ -625,7 +629,16 @@
         <div class="legrow"><span>🕹</span><b>Clavier</b> — ↑ accélère, ↓ freine puis recule, ← → tournent. <b>Sur téléphone</b>, le joystick donne la <b>direction</b> : la voiture tourne vers le stick et accélère (stick vers l'arrière, presque à l'arrêt : marche arrière)</div>
         <div class="legrow"><span>💨</span><b>Glisse</b> — en virage serré la voiture dérape (traces de pneus). Le lait et l'encre font glisser, le sucre, la gomme et la craie freinent, hors de la piste on va moins vite</div>
         <div class="legrow"><span>😵</span><b>Chute</b> — quitter la table (ou tomber dans une poche du billard) coûte une seconde : la voiture revient à la dernière porte franchie, transparente un instant</div>
-        <div class="legrow"><span>💥</span><b>Bousculer</b> — les chocs poussent et font tourner. Une voiture qui tombe dans les 3 s après ton choc t'est créditée</div>
+        <div class="legrow"><span>💥</span><b>Bousculer</b> — les chocs poussent, font tourner et déraper : une voiture percutée perd son adhérence un instant. Une voiture qui tombe dans les 3 s après ton choc t'est créditée</div>
+        <div class="legrow"><span>⛔</span><b>Raccourcis</b> — sauter une porte de contrôle en coupant à travers la table renvoie à la dernière porte. Couper un virage trop large hors de la piste : vitesse bridée un instant (⚠). Une voiture projetée par un adversaire est seulement replacée, sans pénalité</div>
+        <h4>Objets 🎁 (option du game master)</h4>
+        <div class="legrow"><span>🎁</span><b>Boîtes</b> — on en ramasse une en roulant dessus ; l'objet s'utilise avec <b>Espace</b> (ou le bouton 🎁 sur téléphone). Les derniers reçoivent les meilleurs objets</div>
+        <div class="legrow"><span>⚡</span><b>Turbo</b> (🚀 triple turbo : trois fois) — accélération et vitesse de pointe pendant un instant</div>
+        <div class="legrow"><span>🛢</span><b>Flaque d'huile</b> — posée derrière soi : qui roule dessus glisse et tourne</div>
+        <div class="legrow"><span>📄</span><b>Boule de papier</b> — lancée devant : la voiture touchée part en tête-à-queue</div>
+        <div class="legrow"><span>🛡</span><b>Bouclier</b> — protège des boules, des flaques et amortit les chocs</div>
+        <div class="legrow"><span>🐌</span><b>Escargot</b> — ralentit tous ceux qui sont devant</div>
+        <div class="legrow"><span>🤝</span><b>Coup de pouce</b> — (option) plus on est loin derrière le meneur, plus la voiture va vite, jusqu'à +16 %. Le meneur n'en a pas</div>
         <h4>Formules (game master)</h4>
         <div class="legrow"><span>🏁</span><b>Course</b> — 1, 3 ou 5 tours. Il faut passer les portes de contrôle dans l'ordre : couper à travers la table ne sert à rien. Quand le premier franchit la ligne, les autres ont 12 s pour finir, puis sont classés à leur progression</div>
         <div class="legrow"><span>💥</span><b>Élimination</b> — comme les Micro Machines d'origine : un seul écran pour tous, centré sur le meneur, qui rétrécit. Qui en sort est éliminé ; le dernier dans le cadre gagne</div>
@@ -633,7 +646,12 @@
         <div class="legrow"><span>🥣</span><b>Petit-déjeuner</b> — table de cuisine : bol de céréales, tasse, lait renversé, sucre. Bords de table dangereux</div>
         <div class="legrow"><span>✏️</span><b>Bureau d'écolier</b> — cahier quadrillé, crayons et règles en bordure, taches d'encre</div>
         <div class="legrow"><span>🎱</span><b>Billard</b> — les bandes renvoient fort, les billes barrent la route, les poches avalent</div>
-        <div class="legrow"><span>🏁</span><b>Circuit-jouet</b> — piste orange à rails sur la moquette : pas de chute, flèches turbo</div>
+        <div class="legrow"><span>🏁</span><b>Circuit-jouet</b> — piste orange à rails sur la moquette : pas de chute, flèches turbo, plots rebondissants</div>
+        <div class="legrow"><span>🔧</span><b>Établi du garage</b> — étau, marteau, écrous et vis ; tampons en caoutchouc qui renvoient comme un flipper, flaques d'huile et sciure</div>
+        <div class="legrow"><span>🎲</span><b>Jeu de société</b> — sur le plateau : dés, sablier, pions rebondissants et une toupie qui tourne au milieu</div>
+        <div class="legrow"><span>♾️</span><b>Circuit en 8</b> — tapis de jeu d'enfant avec un croisement : attention aux collisions au milieu</div>
+        <div class="legrow"><span>🐭</span><b>Obstacles mobiles</b> — la souris mécanique (petit-déjeuner), la bille (billard) et la toupie (jeu de société) bougent : elles bousculent fort</div>
+        <div class="legrow"><span>↩️</span><b>Sens et hasard</b> — le game master peut faire courir chaque circuit à l'envers, ou tirer le circuit (🎲) et le sens au hasard à chaque manche</div>
         <div class="note">Les bots ont trois niveaux (Facile, Normale, Difficile). Le meilleur tour de chaque pilote est gardé au classement.</div>
       </div>
     </div>
