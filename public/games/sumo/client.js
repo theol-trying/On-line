@@ -4,6 +4,8 @@
 // paille, sel rituel, pompons du toit suspendu, bois laqué, vermillon, washi et encre.
 import { AR0, RING0, PR } from './shared.js';
 import { createMusic } from '../../music.js';
+import { creerSfx } from '../../sfx.js';                         // boîte à sons partagée (bus, réverbération, primitives réalistes)
+import { SONS, SALLE, NIVEAU } from './sons.js';                // recettes des bruitages « Dohyō » (taiko, hyoshigi, koto, sel, foule)
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motif par siège, peint sur la ceinture (mawashi)
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
@@ -23,10 +25,11 @@ const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', {
 // musique : gamme pentatonique japonaise in-sen (0,1,5,7,8) — bourdon de quinte, pincements de koto,
 // taiko graves en jeu, flûte (shakuhachi) douce ; climax (mort subite / duel final) = taiko serrés + tempo.
 const MUSIC_THEME = { piste: 'sumo', bpm: 92, bpmBoost: 16, vol: 0.5, root: 73.42, len: 32,
-  stingers: { kill: { notes: [12, 8, 7, 0], wave: 'triangle', oct: 1, gain: 0.05, dur: 0.24, rate: 0.08 },
-    win: { base: 293.66, notes: [[0, 7], [5, 12], [7, 12, 19], [12, 19, 24]], gain: 0.035, dur: 0.42, rate: 0.16 },
-    count: { notes: [0], oct: 2, wave: 'triangle', dur: 0.14, gain: 0.045, duck: false }, go: { notes: [[0, 7, 12]], oct: 2, wave: 'triangle', dur: 0.5, gain: 0.05, duck: false },
-    alert: { notes: [0, 1, 5, 7, 8, 12, 13], oct: 1, wave: 'triangle', rate: 0.07, dur: 0.16, gain: 0.04 } },
+  // fanfares adoucies (sinus / triangle, gains plus bas) : les bruitages de sons.js portent désormais l'impact
+  stingers: { kill: { notes: [12, 8, 7, 0], wave: 'triangle', oct: 1, gain: 0.036, dur: 0.24, rate: 0.08 },
+    win: { base: 293.66, notes: [[0, 7], [5, 12], [7, 12, 19], [12, 19, 24]], wave: 'triangle', gain: 0.026, dur: 0.42, rate: 0.16 },
+    count: { notes: [0], oct: 2, wave: 'sine', dur: 0.14, gain: 0.032, duck: false }, go: { notes: [[0, 7, 12]], oct: 2, wave: 'sine', dur: 0.5, gain: 0.036, duck: false },
+    alert: { notes: [0, 1, 5, 7, 8, 12, 13], oct: 1, wave: 'triangle', rate: 0.07, dur: 0.16, gain: 0.03 } },
   layers: [
   { seq: [[0, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [1, 8], null, null, null, null, null, null, null, [-5, 0], null, null, null, null, null, null, null], wave: 'sine', gain: 0.02, dur: 14 },
   { seq: [24, null, null, 25, null, null, 29, null, 31, null, null, 29, null, 25, null, null, 24, null, null, null, 20, null, 19, null, null, null, 17, null, 19, null, null, null], wave: 'triangle', gain: 0.022, dur: 0.9 },   // koto pincé
@@ -98,7 +101,7 @@ export default (function () {
   let board = [], buf = [];
   let AR = AR0, RING_0 = RING0;                          // géométrie courante (le serveur l'agrandit avec le nombre de lutteurs)
   const puffs = [], salt = [], waves = [], flyers = [], outTxt = [], sparks = [];
-  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0, ringPulse = 0;
+  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, lastFrame = 0, ringPulse = 0;
   const lastHit = {};                                   // anti-mitraillage des « don » : un contact tenu émet un choc par tick
   // éclairage, crépuscule, journal de manche (écran de fin) — tout est côté client, rien de plus sur le réseau
   const LUM = creerLumieres(24), J = creerJournal({ pas: 500 });
@@ -353,43 +356,13 @@ export default (function () {
   // ───────────────────────── sons (WebAudio, zéro fichier) ─────────────────────────
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
   let sndPan = 0;                                        // pan stéréo du prochain son (posé par psound)
-  const vol = () => (A && typeof A.sfx === 'number') ? A.sfx : 1;
-  function out(node) { if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); node.connect(pn); } else node.connect(actx.destination); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.02); }
-  function noise(d, type, freq, g, dl = 0, q) {
-    const v = vol(); if (!actx || v <= 0) return;
-    if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) { const sr = actx.sampleRate, b = actx.createBuffer(1, Math.floor(sr * 1.5), sr), dd = b.getChannelData(0); for (let i = 0; i < dd.length; i++) dd[i] = Math.random() * 2 - 1; noiseBuf = b; }
-    const t0 = actx.currentTime + dl, s = actx.createBufferSource(), f = actx.createBiquadFilter(), gg = actx.createGain();
-    s.buffer = noiseBuf; f.type = type; f.frequency.value = freq; if (q) f.Q.value = q;
-    gg.gain.setValueAtTime(0.0001, t0); gg.gain.exponentialRampToValueAtTime(g * v, t0 + Math.min(0.012, d * 0.2)); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-    s.connect(f); f.connect(gg); out(gg); s.start(t0); s.stop(t0 + d + 0.02);
-  }
-  // « don » de taiko : peau grave qui plonge + claquement de la frappe. f = force du choc (0..1).
-  function taiko(f, dl = 0) {
-    const v = vol(); if (!actx || v <= 0) return;
-    const t0 = actx.currentTime + dl, o = actx.createOscillator(), g = actx.createGain();
-    o.type = 'sine'; o.frequency.setValueAtTime(120 + 40 * f, t0); o.frequency.exponentialRampToValueAtTime(52, t0 + 0.28);
-    g.gain.setValueAtTime((0.12 + 0.3 * f) * v, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.34 + 0.2 * f);
-    o.connect(g); out(g); o.start(t0); o.stop(t0 + 0.6);
-    noise(0.05, 'lowpass', 1100, 0.06 + 0.12 * f, dl);
-  }
+  // boîte à sons partagée (sfx.js) : bus avec compresseur + réverbération de la salle de tournoi ; recettes dans ./sons.js
+  // (taiko, hyoshigi, koto, sel, foule — à écouter sur /sons.html). Elle suit le contexte courant : actx est recréé à chaque entrée.
+  const S = creerSfx(() => actx, () => A, { salle: SALLE, niveau: NIVEAU });
   function psound(k, x, arg) { sndPan = Math.max(-1, Math.min(1, (x / AR - 0.5) * 1.7)); sound(k, arg); sndPan = 0; }   // son positionné gauche/droite
-  function sound(k, arg) {
-    if (!actx) return;
-    if (k === 'hit') taiko(arg == null ? 0.5 : arg);
-    else if (k === 'dash') { noise(0.035, 'highpass', 1500, 0.2); noise(0.03, 'highpass', 1800, 0.14, 0.022); noise(0.22, 'bandpass', 900, 0.07, 0.01, 0.7); }   // claquement de mains + souffle
-    else if (k === 'brace') { tone(68, 0.22, 'sine', 0.14); tone(230, 0.05, 'triangle', 0.05); }   // pied qui frappe le sol (shiko)
-    else if (k === 'pickup') {                                                                                 // koto pincé (in-sen) ; onigiri : une note de plus par palier (arg = palier 1..5)
-      tone(587.33, 0.16, 'triangle', 0.05); tone(880, 0.22, 'triangle', 0.045, 0.07);
-      if (arg >= 2) tone(1046.5, 0.2, 'triangle', 0.04, 0.14); if (arg >= 3) tone(1174.66, 0.22, 'triangle', 0.04, 0.2);
-      if (arg >= 4) tone(1396.91, 0.26, 'triangle', 0.04, 0.26); if (arg >= 5) { tone(1760, 0.5, 'triangle', 0.045, 0.32); taiko(0.5, 0.05); }
-    }
-    else if (k === 'shock') { taiko(1); noise(0.45, 'lowpass', 500, 0.14); }
-    else if (k === 'out') { taiko(0.9); noise(1.3, 'bandpass', 520, 0.09, 0.05, 0.8); }                        // chute + « ooh » du public
-    else if (k === 'salt') { noise(0.3, 'highpass', 5200, 0.05); noise(0.25, 'highpass', 6000, 0.04, 0.12); }
-    else if (k === 'count') taiko(0.35);
-    else if (k === 'go') { taiko(0.8); taiko(0.8, 0.14); }
-    else if (k === 'win') { tone(293.66, 0.3, 'triangle', 0.06); tone(392, 0.3, 'triangle', 0.06, 0.14); tone(440, 0.3, 'triangle', 0.06, 0.28); tone(587.33, 0.5, 'triangle', 0.06, 0.42); }
+  function sound(k, arg, att) {                         // k : clé de SONS (hit, dash, brace, pickup, shock, out, salt, count, go, win)
+    if (!actx || !Object.prototype.hasOwnProperty.call(SONS, k)) return;
+    S.avec(sndPan, att == null ? 1 : att, () => SONS[k](S, arg));
   }
 
   // ───────────────────────── effets ponctuels ─────────────────────────
@@ -1171,7 +1144,7 @@ export default (function () {
     // si l'une était tenue, staleInput fait renvoyer l'état « tout relâché » au prochain init() du Sumo
     for (const k in input) if (input[k]) { input[k] = false; staleInput = true; }
     // audio : le contexte est fermé (il ne reste pas actif en arrière-plan, et iOS limite le nombre de contextes) ; unlockAudio() en recrée un au prochain geste
-    if (actx) { const c0 = actx; actx = null; noiseBuf = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }
+    if (actx) { const c0 = actx; actx = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }
     puffs.length = 0; salt.length = 0; waves.length = 0; flyers.length = 0; outTxt.length = 0; sparks.length = 0; bursts.length = 0; flashes.length = 0; STREAK.reset();
     RL.clear(); CAM.reset(); pendingEnd = null; repOut = {}; repHas = false;
   }

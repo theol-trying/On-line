@@ -62,6 +62,9 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
 - Un **fx poussé depuis `onMessage`** est perdu si le `tick()` du jeu repart d'un tableau neuf : passer par la file
   `pend` du jeu ou poser un drapeau consommé dans le tick (objet d'un humain à Micro Machines, corrigé le 23/10 : seuls
   les bots, qui agissent dans le tick, produisaient l'effet visuel).
+- **Bruitages** : jamais de synthèse locale dans un client (plus de `tone()` / `noise()` maison). Boîte partagée
+  `public/sfx.js` (`creerSfx` : bus, réverbération, primitives, moteur) + recettes `public/games/<id>/sons.js` (`SONS`,
+  `SALLE`, `NIVEAU`, `DEMO`). Écoute sur `/sons.html`, contrôle `node outils/verifier-sons.mjs <id>` (inclus dans `npm test`).
 - **Musique = fichiers** (`public/music/`, seule exception à « aucun binaire ») : un nouveau morceau passe TOUJOURS par
   `node outils/importer-musique.mjs <dossier>` (retire ID3/APE/C2PA, nomme par empreinte), puis nom + `debut`/`fin` dans
   `public/pistes.js` (`outils/points-de-boucle.js` dans la console). Jamais de mp3 déposé à la main : le cache est

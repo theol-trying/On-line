@@ -9,7 +9,7 @@
 | Micro Machines | **1 à 10** | Course de voitures-jouets sur 7 circuits (tables, plateau de jeu, circuits-jouets), dans les deux sens, avec objets à ramasser : la grille de départ en accueille 10 |
 
 L'arène grandit automatiquement avec le nombre de participants (bots compris).
-Serveur Node.js **autoritatif**, **zéro dépendance npm**, **aucun fichier binaire** hormis les morceaux de musique (graphismes dessinés au canvas, bruitages synthétisés en WebAudio ; une musique de menu et une de partie par jeu, en mp3 sans métadonnées).
+Serveur Node.js **autoritatif**, **zéro dépendance npm**, **aucun fichier binaire** hormis les morceaux de musique (graphismes dessinés au canvas, bruitages synthétisés en WebAudio par une boîte à sons partagée, écoutables sur /sons.html ; une musique de menu et une de partie par jeu, en mp3 sans métadonnées).
 
 Une seule partie active à la fois : les joueurs choisissent le jeu dans un lobby commun, un appareil = un joueur.
 

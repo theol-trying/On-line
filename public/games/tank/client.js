@@ -5,6 +5,8 @@
 // ombres de nuages, vautour), écrans titre / compte à rebours / pause thématisés, sons et musique synthétisés.
 import { ARENA as ARENA0, TANK_R, SHELL_R, BLK, G as G0 } from './shared.js';
 import { createMusic } from '../../music.js';
+import { creerSfx } from '../../sfx.js';                       // boîte à sons partagée (bus, réverbération du désert, primitives réalistes)
+import { SONS, SALLE, NIVEAU } from './sons.js';               // recettes des bruitages de Tanks (écoutables sur /sons.html)
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
@@ -30,10 +32,11 @@ let G = G0, ARENA = ARENA0;
 // musique : désert militaire — bourdon grave, luth pincé en mode phrygien dominant (0,1,4,5,7,8,10),
 // caisse claire de marche + ostinato de basse en jeu ; climax (1 vie / duel final) = cuivres + roulements, tempo.
 const MUSIC_THEME = { piste: 'tank', bpm: 100, bpmBoost: 14, vol: 0.55, root: 73.42, len: 32,
-  stingers: { kill: { notes: [0, -5, -7], wave: 'sawtooth', oct: 0, gain: 0.05, dur: 0.28, rate: 0.11 },
-    win: { base: 261.63, notes: [[0, 7], [0, 7], [4, 12], [7, 12, 16], [12, 16, 19]], gain: 0.034, dur: 0.3, rate: 0.14 },   // fanfare de clairon
-    count: { notes: [7], oct: 2, wave: 'square', dur: 0.08, gain: 0.028, duck: false }, go: { notes: [[0, 7, 12]], oct: 1, wave: 'sawtooth', dur: 0.45, gain: 0.045, duck: false },
-    alert: { notes: [0, 1, 0, 1], oct: 1, wave: 'square', rate: 0.09, dur: 0.08, gain: 0.03 } },
+  // fanfares adoucies (28/10) : plus de carré ni de dent de scie, seulement triangle / sinus, gains un peu plus bas
+  stingers: { kill: { notes: [0, -5, -7], wave: 'triangle', oct: 0, gain: 0.044, dur: 0.28, rate: 0.11 },
+    win: { base: 261.63, notes: [[0, 7], [0, 7], [4, 12], [7, 12, 16], [12, 16, 19]], wave: 'triangle', gain: 0.03, dur: 0.3, rate: 0.14 },   // fanfare de clairon
+    count: { notes: [7], oct: 2, wave: 'sine', dur: 0.08, gain: 0.024, duck: false }, go: { notes: [[0, 7, 12]], oct: 1, wave: 'triangle', dur: 0.45, gain: 0.038, duck: false },
+    alert: { notes: [0, 1, 0, 1], oct: 1, wave: 'triangle', rate: 0.09, dur: 0.08, gain: 0.026 } },
   layers: [
   { seq: [[0, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, [1, 8], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sawtooth', gain: 0.016, dur: 14 },
   { seq: [12, null, 13, null, 16, null, null, 13, 12, null, null, null, 8, null, 7, null, 12, null, 13, null, 16, null, 17, 16, 13, null, 12, null, null, null, null, null], oct: 1, wave: 'triangle', gain: 0.016, dur: 0.7 },   // luth pincé
@@ -156,7 +159,7 @@ export default (function () {
   const flashes = [];                                   // éclats blancs à l'endroit d'un char détruit { x, y, born }
   const spawnAt = {}, prevLv = {}, prevInv = {};        // siège -> heure de (ré)apparition (pastille numérotée 2 s) ; vies / invulnérabilité de l'état précédent
   let nPlay = 0, hudA = 1, touch = false;               // équipages en lice ; opacité courante de la jauge du bas ; écran tactile (pas d'indications clavier)
-  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0;
+  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, lastFrame = 0;
   let music = NOMUSIC;                                  // recréé à chaque init() : dispose() au teardown est définitif pour l'instance
   const input = { left: false, right: false, fwd: false, back: false, fire: false };
   let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, diffBtn, arenaBtn, winBtn, ffBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl;
@@ -415,41 +418,16 @@ export default (function () {
   }
 
   // ───────────────────────── sons (WebAudio, zéro fichier) ─────────────────────────
+  // Recettes dans ./sons.js (table SONS), jouées par la boîte à sons partagée (../../sfx.js) : bus par AudioContext
+  // (volume 🔊 → compresseur doux → passe-bas) + réverbération courte et sèche du désert. Plus aucune synthèse ici.
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
   let sndPan = 0;                                   // pan stéréo du prochain son (posé par psound)
-  const vol = () => (A && typeof A.sfx === 'number') ? A.sfx : 1;
-  function out(node) { if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); node.connect(pn); } else node.connect(actx.destination); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.02); }
-  function sweep(f0, f1, d, ty, g, dl = 0) { const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + d); gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.02); }
-  function noise(d, type, freq, g, dl = 0, q) {
-    const v = vol(); if (!actx || v <= 0) return;
-    if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) { const sr = actx.sampleRate, b = actx.createBuffer(1, Math.floor(sr * 1.5), sr), dd = b.getChannelData(0); for (let i = 0; i < dd.length; i++) dd[i] = Math.random() * 2 - 1; noiseBuf = b; }
-    const t0 = actx.currentTime + dl, s = actx.createBufferSource(), f = actx.createBiquadFilter(), gg = actx.createGain();
-    s.buffer = noiseBuf; f.type = type; f.frequency.value = freq; if (q) f.Q.value = q;
-    gg.gain.setValueAtTime(0.0001, t0); gg.gain.exponentialRampToValueAtTime(g * v, t0 + Math.min(0.012, d * 0.2)); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-    s.connect(f); f.connect(gg); out(gg); s.start(t0); s.stop(t0 + d + 0.02);
-  }
-  function cannon(f, dl = 0) { sweep(150, 42, 0.28, 'sine', 0.14 + 0.12 * f, dl); noise(0.2, 'lowpass', 900, 0.08 + 0.1 * f, dl); noise(0.03, 'highpass', 3200, 0.06, dl); }   // coup de canon : souffle grave + claquement
-  function boom(f) {                                // explosion : grondement filtré + sous-grave qui plonge + crépitements
-    noise(0.35 + 0.8 * f, 'lowpass', 650, 0.06 + 0.16 * f); sweep(80, 28, 0.6, 'sine', 0.2 * f);
-    noise(0.05, 'highpass', 1800, 0.05, 0.12); noise(0.05, 'highpass', 1600, 0.04, 0.25); noise(0.06, 'highpass', 2000, 0.035, 0.38);
-  }
+  const S = creerSfx(() => actx, () => A, { salle: SALLE, niveau: NIVEAU });   // une boîte par instance : elle suit actx (recréé à chaque retour sur le jeu)
   function psound(k, x, arg) { sndPan = Math.max(-1, Math.min(1, (x / ARENA - 0.5) * 1.7)); sound(k, arg); sndPan = 0; }   // son positionné gauche/droite
-  function sound(k, arg) {
-    if (!actx) return;
-    if (k === 'shot') cannon(0.55);
-    else if (k === 'hit') { tone(520, 0.12, 'triangle', 0.07); tone(787, 0.1, 'triangle', 0.05); tone(1240, 0.05, 'square', 0.018); noise(0.06, 'highpass', 2600, 0.08); }   // obus sur blindage : « clang »
-    else if (k === 'shield') { sweep(500, 1500, 0.2, 'triangle', 0.06); tone(1900, 0.12, 'sine', 0.03, 0.08); }
-    else if (k === 'boom') boom(arg == null ? 1 : arg);
-    else if (k === 'barrel') { boom(1.25); noise(0.5, 'bandpass', 420, 0.1, 0.02, 0.7); }                        // + « whoosh » du carburant
-    else if (k === 'wood') { noise(0.07, 'bandpass', 1400, 0.12, 0, 2); noise(0.12, 'bandpass', 700, 0.08, 0.03, 1.5); tone(180, 0.06, 'triangle', 0.05); }   // caisse qui éclate
-    else if (k === 'metal') { tone(410, 0.22, 'triangle', 0.06); tone(655, 0.18, 'triangle', 0.04); noise(0.08, 'highpass', 3000, 0.07); }
-    else if (k === 'pickup') { noise(0.02, 'highpass', 4000, 0.06); noise(0.02, 'highpass', 3600, 0.05, 0.05); tone(392, 0.1, 'triangle', 0.05, 0.02); tone(523.25, 0.18, 'triangle', 0.05, 0.1); }   // culasse + clairon
-    else if (k === 'mineset') { noise(0.02, 'highpass', 3000, 0.08); noise(0.025, 'highpass', 2400, 0.06, 0.06); tone(90, 0.1, 'sine', 0.08, 0.02); }
-    else if (k === 'emp') { sweep(1400, 120, 0.35, 'sawtooth', 0.04); noise(0.25, 'highpass', 5000, 0.04); }   // décharge électrique
-    else if (k === 'count') tone(880, 0.09, 'sine', 0.07);
-    else if (k === 'go') { cannon(1); tone(1320, 0.18, 'sine', 0.06, 0.02); }
-    else if (k === 'win') { tone(392, 0.12, 'triangle', 0.06); tone(523.25, 0.12, 'triangle', 0.06, 0.12); tone(659.25, 0.14, 'triangle', 0.06, 0.24); tone(784, 0.5, 'triangle', 0.06, 0.42); }   // clairon
+  // k : clé de SONS (shot, hit, shield, boom, barrel, wood, metal, pickup, mineset, emp, count, go, win) ; att : atténuation 0..1
+  function sound(k, arg, att) {
+    if (!actx || !Object.prototype.hasOwnProperty.call(SONS, k)) return;
+    S.avec(sndPan, att == null ? 1 : att, () => SONS[k](S, arg));
   }
   // Un power-up vient d'être ramassé : on annonce son EFFET. Jamais de nom de joueur (constantes seules).
   // Perso pour l'équipement (les autres n'ont pas à le savoir : ce serait du bruit), global quand l'effet
@@ -1661,7 +1639,7 @@ export default (function () {
     let held = false; for (const k in input) if (input[k]) { input[k] = false; held = true; }
     if (held && send) { try { pushInput(); } catch {} }   // touche tenue au moment de quitter : on envoie l'état « relâché » (sinon le char continue seul). Inoffensif si le hub a déjà changé de jeu : tout à faux
     music.stop(); music.dispose(); music = NOMUSIC;    // ordonnanceur arrêté + écouteur visibilitychange retiré (dispose) ; init() en recrée un
-    if (actx) { try { actx.close(); } catch {} actx = null; noiseBuf = null; }   // AudioContext libéré : unlockAudio() en rouvre un au retour sur le jeu
+    if (actx) { try { actx.close(); } catch {} actx = null; }   // AudioContext libéré (la boîte à sons rebranchera son bus sur le suivant) : unlockAudio() en rouvre un au retour sur le jeu
     parts.length = 0; rings.length = 0; flashes.length = 0;
     RL.clear(); CAM.reset(); pendingEnd = null; podT0 = 0; replaying = false; rframe = null; TR = tread;   // rejeu / carte différée / zoom : abandonnés
     for (const k in rtread) delete rtread[k];

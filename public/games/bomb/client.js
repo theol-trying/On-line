@@ -8,6 +8,9 @@ import { GW as GW0, GH as GH0, CELL, ARENA as ARENA0 } from './shared.js';
 // c'est le NOMBRE de cases qui augmente (13 / 15 / 17), donc ARENA = GW * CELL.
 let GW = GW0, GH = GH0, ARENA = ARENA0;
 import { createMusic } from '../../music.js';
+// bruitages : boîte partagée (bus compressé + salle) et recettes « Confiserie » propres au jeu (écoutables sur /sons.html)
+import { creerSfx } from '../../sfx.js';
+import { SONS, SALLE, NIVEAU } from './sons.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux 5 jeux (mode plein écran compris)
@@ -31,10 +34,11 @@ const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', {
 // musique : cartoon enjoué — basse bondissante, mélodie espiègle, célesta sucré, woodblock + caisse claire ;
 // climax (mort subite) = motif chromatique + grosse caisse + tempo
 const MUSIC_THEME = { piste: 'bomb', bpm: 134, bpmBoost: 16, vol: 0.48, root: 130.81, len: 32,
-  stingers: { kill: { notes: [12, 7, 3, 0], wave: 'square', oct: 0, gain: 0.035, dur: 0.13, rate: 0.06 },
-    win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16], [12, 16, 19, 24]], gain: 0.035, dur: 0.32, rate: 0.13 },
-    count: { notes: [0], oct: 2, wave: 'triangle', dur: 0.1, gain: 0.05, duck: false }, go: { notes: [[0, 4, 7, 12]], oct: 1, wave: 'square', dur: 0.42, gain: 0.045, duck: false },
-    alert: { notes: [0, 2, 4, 6, 8, 10, 12], oct: 1, wave: 'sawtooth', rate: 0.06, dur: 0.12, gain: 0.035 } },
+  // fanfares adoucies (28/10) : plus de carré / dent de scie (ils râpaient par-dessus les bruitages), gains un peu plus bas
+  stingers: { kill: { notes: [12, 7, 3, 0], wave: 'triangle', oct: 0, gain: 0.032, dur: 0.13, rate: 0.06 },
+    win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16], [12, 16, 19, 24]], wave: 'triangle', gain: 0.03, dur: 0.32, rate: 0.13 },
+    count: { notes: [0], oct: 2, wave: 'triangle', dur: 0.1, gain: 0.044, duck: false }, go: { notes: [[0, 4, 7, 12]], oct: 1, wave: 'triangle', dur: 0.42, gain: 0.038, duck: false },
+    alert: { notes: [0, 2, 4, 6, 8, 10, 12], oct: 1, wave: 'triangle', rate: 0.06, dur: 0.12, gain: 0.032 } },
   layers: [
   { seq: [[0, 4, 7], null, null, null, null, null, null, null, null, null, null, null, null, null, null, null], wave: 'sine', gain: 0.02, dur: 12 },
   { seq: [0, null, 7, null, 0, null, 7, null, 5, null, 12, null, 5, null, 12, null, 0, null, 7, null, 0, null, 7, null, -4, null, 3, null, 7, null, 3, null], wave: 'square', gain: 0.03, dur: 0.9, min: 1 },
@@ -210,7 +214,7 @@ export default (function () {
   const blastBorn = new Map();                        // par case : apparition de la flamme (gonflement)
   let blastSet = new Set();
   let lastDrop = { i: -1, t: 0 }, goAt = 0;
-  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0;
+  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, lastFrame = 0;
   let music = createMusic(() => actx, () => A, MUSIC_THEME);   // recréée à chaque init : dispose() (teardown) est définitif
   const streaks = createStreaks({ window: 5000 }), hitStop = createHitStop(60);
   let callouts = createCallouts();
@@ -463,41 +467,16 @@ export default (function () {
     if (revBtn) { revBtn.disabled = !idle; revBtn.textContent = '☠ Revanche : ' + (m.revenge ? 'ON' : 'OFF'); revBtn.classList.toggle('on', !!m.revenge); }
   }
 
-  // ───────────────────────── sons (WebAudio, zéro fichier) ─────────────────────────
+  // ───────────────────────── sons (boîte partagée sfx.js, recettes dans ./sons.js, zéro fichier) ─────────────────────────
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
   let sndPan = 0;                                   // pan stéréo du prochain son
-  const lastSnd = {};                               // anti-rafale : une réaction en chaîne ne joue pas 20 fois le même son
-  const vol = () => (A && typeof A.sfx === 'number') ? A.sfx : 1;
-  function out(node) { if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); node.connect(pn); } else node.connect(actx.destination); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.02); }
-  function sweep(f0, f1, d, ty = 'sine', g = 0.05, dl = 0) { const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + d); gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.02); }
-  function noise(d, type, freq, g, dl = 0, q) {
-    const v = vol(); if (!actx || v <= 0) return;
-    if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) { const sr = actx.sampleRate, b = actx.createBuffer(1, Math.floor(sr * 1.2), sr), dd = b.getChannelData(0); for (let i = 0; i < dd.length; i++) dd[i] = Math.random() * 2 - 1; noiseBuf = b; }
-    const t0 = actx.currentTime + dl, s = actx.createBufferSource(), f = actx.createBiquadFilter(), gg = actx.createGain();
-    s.buffer = noiseBuf; f.type = type; f.frequency.value = freq; if (q) f.Q.value = q;
-    gg.gain.setValueAtTime(0.0001, t0); gg.gain.exponentialRampToValueAtTime(g * v, t0 + Math.min(0.012, d * 0.2)); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-    s.connect(f); f.connect(gg); out(gg); s.start(t0); s.stop(t0 + d + 0.02);
-  }
+  // une boîte par instance : volume 🔊 → compresseur doux → passe-bas, + petite salle chaleureuse ; elle suit actx (rebranchée
+  // après un teardown). L'anti-rafale (réaction en chaîne, murs cassés ensemble) est porté par S.limite dans chaque recette.
+  const S = creerSfx(() => actx, () => A, { salle: SALLE, niveau: NIVEAU });
   function psound(k, gx, arg) { sndPan = Math.max(-1, Math.min(1, (cpx(gx) / ARENA - 0.5) * 1.7)); sound(k, arg); sndPan = 0; }   // son positionné gauche/droite
-  function sound(k, arg) {
-    if (!actx) return;
-    const now = performance.now(); if (lastSnd[k] && now - lastSnd[k] < 45) return; lastSnd[k] = now;
-    if (k === 'place') { sweep(170, 520, 0.08, 'sine', 0.07); noise(0.03, 'lowpass', 900, 0.05); }                        // « plop » de bombe posée
-    else if (k === 'kick') { noise(0.05, 'bandpass', 1300, 0.12, 0, 1.2); sweep(320, 140, 0.1, 'triangle', 0.05); }        // pichenette
-    else if (k === 'throw') { noise(0.2, 'bandpass', 900, 0.06, 0, 0.8); sweep(380, 900, 0.16, 'triangle', 0.03); }          // envol
-    else if (k === 'explode') { const n = Math.min(1, (arg || 1) / 3); noise(0.55 + 0.25 * n, 'lowpass', 900, 0.2 + 0.08 * n); sweep(110, 38, 0.45, 'sine', 0.17); noise(0.14, 'highpass', 3200, 0.05, 0.03); }
-    else if (k === 'wall') { noise(0.09, 'bandpass', 1800, 0.1, 0, 1.2); noise(0.12, 'bandpass', 700, 0.06, 0.02); tone(1320, 0.06, 'triangle', 0.025, 0.02); tone(1760, 0.07, 'triangle', 0.02, 0.05); }   // boîte qui craque + bonbons qui tintent
-    else if (k === 'pickup') { tone(784, 0.1, 'triangle', 0.045); tone(988, 0.1, 'triangle', 0.045, 0.05); tone(1319, 0.16, 'triangle', 0.045, 0.1); tone(2637, 0.12, 'sine', 0.015, 0.14); }
-    else if (k === 'bad') { sweep(420, 170, 0.28, 'sawtooth', 0.035); sweep(300, 210, 0.3, 'triangle', 0.04, 0.05); }
-    else if (k === 'pouf') { noise(0.38, 'lowpass', 1400, 0.16); sweep(900, 240, 0.36, 'sine', 0.045, 0.02); }                // pouf + sifflet qui descend
-    else if (k === 'guard') { sweep(300, 1300, 0.07, 'sine', 0.09); noise(0.04, 'highpass', 4200, 0.05, 0.05); }            // bulle qui éclate
-    else if (k === 'warp') { sweep(300, 1400, 0.22, 'sine', 0.04); sweep(1400, 500, 0.2, 'triangle', 0.03, 0.12); }
-    else if (k === 'spawn') { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.12, 'triangle', 0.045, i * 0.06)); }
-    else if (k === 'drop') { sweep(150, 45, 0.24, 'sine', 0.14); noise(0.18, 'lowpass', 500, 0.08); }                       // bloc qui tombe
-    else if (k === 'count') { tone(1250, 0.04, 'triangle', 0.06); tone(820, 0.06, 'sine', 0.05, 0.01); noise(0.12, 'highpass', 5000, 0.02); }   // tic de mèche
-    else if (k === 'go') { noise(0.5, 'lowpass', 1000, 0.18); sweep(120, 40, 0.4, 'sine', 0.15); }
-    else if (k === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.3, 'triangle', 0.06, 0.24); tone(1047, 0.4, 'triangle', 0.05, 0.38); tone(2093, 0.3, 'sine', 0.015, 0.42); }
+  function sound(k, arg, att) {                     // clé de SONS (sons.js) ; att 0..1 = atténuation de distance (1 = pleine)
+    if (!actx || !Object.prototype.hasOwnProperty.call(SONS, k)) return;
+    S.avec(sndPan, att == null ? 1 : att, () => SONS[k](S, arg));
   }
 
   // ───────────────────────── effets ponctuels ─────────────────────────
@@ -1516,7 +1495,7 @@ export default (function () {
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
     let held = false; for (const k in input) if (input[k]) { input[k] = false; held = true; }
     if (held) { try { pushInput(); } catch (e) {} }   // touches tenues relâchées côté serveur aussi (un « tout relâché » est inoffensif si le hub a déjà changé de jeu)
-    if (actx) { try { const pr = actx.close(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {} actx = null; } noiseBuf = null;   // l'AudioContext est fermé ; unlockAudio() en recrée un au retour
+    if (actx) { try { const pr = actx.close(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {} actx = null; }   // l'AudioContext est fermé ; unlockAudio() en recrée un au retour (la boîte S y rebranche son bus)
     hitFlashes.length = 0; streaks.reset(); dangerSm = 0; rainK = 0;
     RL.clear(); pendingEnd = null; podOn = false; applyEndLayout(); podKey = null; podEntries = []; inReplay = false;   // rejeu / podium coupés, styles en ligne de la carte de fin retirés
   }

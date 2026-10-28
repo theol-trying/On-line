@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<!-- Page d'ÉCOUTE des bruitages des 9 jeux (public/games/<id>/sons.js, boîte à sons public/sfx.js). Non liée depuis le
+     site : elle sert à juger chaque son et à faire des retours précis (« Tanks › Tir : trop sec »). Le moteur de Micro
+     Machines se pilote au curseur. « Mesurer » rend chaque son hors ligne et affiche crête / niveau / durée. -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0a0c16">
+<title>Bruitages On-line</title>
+<style>
+:root{
+  --ground:#0a0c16; --panel:#161a2d; --panel2:#1f2440; --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.22);
+  --ink:#eef0fb; --muted:#8e96b8; --cyan:#5be4ff; --pink:#ff5db4; --ok:#4ad991; --warn:#ffb545;
+  color-scheme:dark;
+}
+*{ -webkit-box-sizing:border-box; box-sizing:border-box; }
+html,body{ margin:0; }
+body{ background:var(--ground); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-size:14px;
+  -webkit-tap-highlight-color:transparent; padding:16px; }
+h1{ font-size:20px; margin:0 0 4px; letter-spacing:.04em; }
+.sous{ color:var(--muted); margin:0 0 14px; line-height:1.4; }
+.barre{ display:-webkit-box; display:flex; -webkit-flex-wrap:wrap; flex-wrap:wrap; -webkit-box-align:center; align-items:center;
+  background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:14px; }
+.barre > *{ margin:4px 12px 4px 0; }
+.jeu{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:12px; }
+.jeu h2{ font-size:15px; margin:0 0 8px; color:var(--cyan); letter-spacing:.05em; text-transform:uppercase; }
+.jeu .vide{ color:var(--muted); }
+.boutons{ display:-webkit-box; display:flex; -webkit-flex-wrap:wrap; flex-wrap:wrap; }
+button{ font:inherit; color:var(--ink); background:var(--panel2); border:1px solid var(--line2); border-radius:9px;
+  padding:9px 12px; margin:0 8px 8px 0; cursor:pointer; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+button:active{ background:#2c3360; }
+button.on{ border-color:var(--ok); color:var(--ok); }
+.mesure{ display:block; font-size:11px; color:var(--muted); margin-top:3px; }
+.mesure.alerte{ color:var(--warn); }
+.moteur{ border-top:1px solid var(--line); margin-top:6px; padding-top:10px; }
+.moteur label{ display:block; margin:6px 0; color:var(--muted); }
+.moteur input[type=range]{ width:220px; vertical-align:middle; }
+input[type=range]{ accent-color:var(--cyan); }
+</style>
+</head>
+<body>
+<h1>Bruitages des jeux</h1>
+<p class="sous">Touchez un bouton pour écouter. Les sons passent par la même chaîne que dans les jeux (réverbération du lieu,
+compresseur, volume des effets). Le moteur de Micro Machines se pilote avec les curseurs.</p>
+<div class="barre">
+  <label>Volume des effets <input id="vol" type="range" min="0" max="100" value="100"></label>
+  <button id="mesurer" type="button">Mesurer tous les sons</button>
+  <span id="etat" class="sous" style="margin:0"></span>
+</div>
+<div id="jeux"></div>
+<script type="module">
+import { creerSfx } from './sfx.js';
+const JEUX = [['pong', 'Pong'], ['tron', 'Tron'], ['tank', 'Tanks'], ['bomb', 'Bomberman'], ['snake', 'Snake'],
+  ['sumo', 'Sumo'], ['foot', 'Foot'], ['patate', 'Patate chaude'], ['micro', 'Micro Machines']];
+const A = { sfx: 1 };
+let ctx = null;
+const boites = {}, modules = {};
+function contexte() {
+  if (!ctx) { const C = window.AudioContext || window.webkitAudioContext; ctx = new C(); }
+  if (ctx.state !== 'running') { const p = ctx.resume(); if (p && p.catch) p.catch(function () {}); }
+  return ctx;
+}
+document.getElementById('vol').oninput = function () { A.sfx = (parseInt(this.value, 10) || 0) / 100; };
+function boite(id) {
+  const M = modules[id];
+  if (!boites[id]) boites[id] = creerSfx(() => ctx, () => A, { salle: M.SALLE, niveau: M.NIVEAU == null ? 1 : M.NIVEAU });
+  return boites[id];
+}
+function jouer(id, d) {
+  contexte();
+  const S = boite(id), M = modules[id];
+  const go = () => S.avec(0, 1, () => M.SONS[d.k](S, d.arg));
+  if (ctx.state === 'running') go(); else setTimeout(go, 60);
+}
+const racine = document.getElementById('jeux');
+for (const j of JEUX) {
+  const id = j[0], bloc = document.createElement('section'); bloc.className = 'jeu';
+  bloc.innerHTML = '<h2></h2><div class="boutons"></div>'; bloc.querySelector('h2').textContent = j[1];
+  racine.appendChild(bloc);
+  let M = null;
+  try { M = await import('./games/' + id + '/sons.js'); } catch (e) { M = null; }
+  const zone = bloc.querySelector('.boutons');
+  if (!M || !M.SONS || !Array.isArray(M.DEMO)) { zone.innerHTML = '<span class="vide">pas encore de bruitages</span>'; continue; }
+  modules[id] = M;
+  M.DEMO.forEach(function (d, i) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = d.nom || d.k; b.dataset.cle = id + ':' + i;
+    b.onclick = () => jouer(id, d);
+    zone.appendChild(b);
+  });
+  if (M.MOTEUR) {
+    const m = document.createElement('div'); m.className = 'moteur';
+    m.innerHTML = '<button type="button" class="act">▶ Moteur</button>' +
+      '<label>Régime (vitesse) <input type="range" min="0" max="100" value="30" class="reg"></label>' +
+      '<label>Gaz <input type="range" min="0" max="100" value="60" class="gaz"></label>' +
+      '<label>Glisse <input type="range" min="0" max="100" value="0" class="gli"></label>';
+    bloc.appendChild(m);
+    let moteur = null, actif = false, minuteur = 0;
+    const lire = c => (parseInt(m.querySelector(c).value, 10) || 0) / 100;
+    const regler = () => { if (moteur) moteur.regler({ actif: actif, regime: lire('.reg'), gaz: lire('.gaz'), glisse: lire('.gli') }); };
+    m.querySelector('.act').onclick = function () {
+      contexte(); actif = !actif; this.classList.toggle('on', actif); this.textContent = actif ? '■ Moteur' : '▶ Moteur';
+      if (!moteur) moteur = boite(id).moteur(M.MOTEUR);
+      if (actif) { setTimeout(regler, 60); minuteur = setInterval(regler, 150); } else { clearInterval(minuteur); moteur.arreter(); }
+    };
+    m.querySelectorAll('input').forEach(x => { x.oninput = regler; });
+  }
+}
+
+// Mesure hors ligne : chaque démo est rendue seule (OfflineAudioContext), crête et niveau RMS en dBFS, durée audible.
+async function mesurer(id, d) {
+  const M = modules[id], sr = 44100, oc = new OfflineAudioContext(2, sr * 4, sr);
+  const S = creerSfx(() => oc, () => ({ sfx: 1 }), { salle: M.SALLE, niveau: M.NIVEAU == null ? 1 : M.NIVEAU, horsLigne: true });
+  S.avec(0, 1, () => M.SONS[d.k](S, d.arg));
+  const b = await oc.startRendering(), L = b.getChannelData(0), R = b.getChannelData(1);
+  let pic = 0, s = 0, dernier = 0;
+  for (let i = 0; i < L.length; i++) { const x = Math.max(Math.abs(L[i]), Math.abs(R[i])); if (x > pic) pic = x; s += (L[i] * L[i] + R[i] * R[i]) / 2; if (x > 0.003) dernier = i; }
+  const db = x => 20 * Math.log10(Math.max(x, 1e-6));
+  const actif = Math.max(1, dernier), rms = Math.sqrt(s / actif);
+  return { jeu: id, k: d.k, nom: d.nom, crete: +db(pic).toFixed(1), rms: +db(rms).toFixed(1), duree: +(dernier / sr).toFixed(2), muet: pic < 0.003, sature: pic > 0.98 };
+}
+window.mesurerTout = async function () {
+  const out = [];
+  for (const id of Object.keys(modules)) for (const d of modules[id].DEMO) { try { out.push(await mesurer(id, d)); } catch (e) { out.push({ jeu: id, k: d.k, erreur: String(e && e.message || e) }); } }
+  return out;
+};
+document.getElementById('mesurer').onclick = async function () {
+  const etat = document.getElementById('etat'); etat.textContent = 'mesure…';
+  const res = await window.mesurerTout();
+  res.forEach(function (r) {
+    const i = modules[r.jeu].DEMO.findIndex(d => d.k === r.k && d.nom === r.nom);
+    const b = document.querySelector('button[data-cle="' + r.jeu + ':' + i + '"]'); if (!b) return;
+    let s = b.querySelector('.mesure'); if (!s) { s = document.createElement('span'); s.className = 'mesure'; b.appendChild(s); }
+    s.textContent = r.erreur ? 'erreur' : 'crête ' + r.crete + ' dB · ' + r.rms + ' dB RMS · ' + r.duree + ' s';
+    s.classList.toggle('alerte', !!(r.erreur || r.muet || r.sature));
+  });
+  etat.textContent = res.length + ' sons mesurés';
+};
+</script>
+</body>
+</html>

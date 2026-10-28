@@ -5,6 +5,8 @@
 // alu qui rougit, purée, tomate et crème.
 import { AR0, PR, BR, FUSE_MAX } from './shared.js';
 import { createMusic } from '../../music.js';
+import { creerSfx } from '../../sfx.js';                       // boîte à sons partagée (bus : volume, compresseur, plein air)
+import { SONS, SALLE, NIVEAU } from './sons.js';               // recettes des bruitages « Pique-nique » (écoute : /sons.html)
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motif par siège, peint sur la bordure du pion
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune à tous les jeux (mode plein écran compris)
@@ -24,10 +26,10 @@ const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', {
 // musique : valse de guinguette au pique-nique — basse pizzicato (oum-pa-pa), mélodie pentatonique majeure à l'accordéon-jouet,
 // caisse claire en balais en jeu ; climax (duel final / mèche à bout) = tempo accéléré, arpèges serrés et roulement.
 const MUSIC_THEME = { piste: 'patate', bpm: 118, bpmBoost: 34, vol: 0.5, root: 98, len: 32,
-  stingers: { kill: { notes: [12, 7, 3, -2], wave: 'triangle', oct: 1, gain: 0.05, dur: 0.22, rate: 0.07 },
-    win: { base: 392, notes: [[0, 7], [4, 12], [7, 12, 16], [12, 19, 24]], gain: 0.035, dur: 0.4, rate: 0.15 },
-    count: { notes: [0], oct: 2, wave: 'triangle', dur: 0.14, gain: 0.045, duck: false }, go: { notes: [[0, 7, 12]], oct: 2, wave: 'triangle', dur: 0.5, gain: 0.05, duck: false },
-    alert: { notes: [12, 9, 7, 4, 0], oct: 1, wave: 'triangle', rate: 0.07, dur: 0.16, gain: 0.04 } },
+  stingers: { kill: { notes: [12, 7, 3, -2], wave: 'triangle', oct: 1, gain: 0.04, dur: 0.22, rate: 0.07 },
+    win: { base: 392, notes: [[0, 7], [4, 12], [7, 12, 16], [12, 19, 24]], wave: 'triangle', gain: 0.028, dur: 0.4, rate: 0.15 },
+    count: { notes: [0], oct: 2, wave: 'sine', dur: 0.14, gain: 0.038, duck: false }, go: { notes: [[0, 7, 12]], oct: 2, wave: 'sine', dur: 0.5, gain: 0.04, duck: false },
+    alert: { notes: [12, 9, 7, 4, 0], oct: 1, wave: 'triangle', rate: 0.07, dur: 0.16, gain: 0.032 } },
   layers: [
   { seq: [0, null, 7, 7, null, null, 0, null, 7, 7, null, null, 5, null, 12, 12, null, null, 5, null, 12, 12, null, null, 7, null, 14, 14, null, null, 0, null], wave: 'triangle', gain: 0.03, dur: 0.9 },   // basse pizzicato
   { seq: [24, null, 28, null, 31, null, 28, null, 26, null, 29, null, 33, null, 29, null, 24, null, 28, null, 31, null, 36, null, 33, null, 31, null, 28, null, 26, null], wave: 'triangle', gain: 0.018, dur: 1.4 },   // jouet d'accordéon
@@ -80,7 +82,7 @@ export default (function () {
   let board = [], buf = [];
   let AR = AR0, R0v = AR0 / 2 - 30;                      // géométrie courante (le serveur agrandit la nappe avec le nombre de joueurs)
   const puffs = [], waves = [], flyers = [], booms = [], sparks = [], stains = [];
-  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0, ringPulse = 0;
+  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, lastFrame = 0, ringPulse = 0;
   const LUM = creerLumieres(24), J = creerJournal({ pas: 500 });
   let duskV = 0, jRound = -1, jLast = -1e9;
   let fini = {}, outChain = {}, holdT0 = {}, passLog = [], lastChain = -1e9;   // journal : courbes arrêtées, séries d'explosions, début de garde de la patate, passes récentes
@@ -346,40 +348,16 @@ export default (function () {
     J.fin();
   }
 
-  // ───────────────────────── sons (WebAudio, zéro fichier) ─────────────────────────
+  // ───────────────────────── sons (boîte partagée sfx.js + recettes ./sons.js, zéro fichier) ─────────────────────────
+  // Recettes « Pique-nique » (pop + fwip de passe, squish, boing, gros boum rond, tic-tac de minuteur) dans sons.js ;
+  // la boîte fournit le bus (volume 🔊, compresseur doux, retour de plein air) et se rebranche seule sur chaque nouvel actx.
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
   let sndPan = 0;                                        // pan stéréo du prochain son (posé par psound)
-  const vol = () => (A && typeof A.sfx === 'number') ? A.sfx : 1;
-  function out(node) { if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); node.connect(pn); } else node.connect(actx.destination); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.02); }
-  function glide(f0, f1, d, ty, g, dl = 0) {             // note qui glisse de f0 à f1 (plop, sifflet, chute)
-    const v = vol(); if (!actx || v <= 0) return;
-    const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain();
-    o.type = ty; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t0 + d);
-    gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.03);
-    o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.06);
-  }
-  function noise(d, type, freq, g, dl = 0, q) {
-    const v = vol(); if (!actx || v <= 0) return;
-    if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) { const sr = actx.sampleRate, b = actx.createBuffer(1, Math.floor(sr * 1.5), sr), dd = b.getChannelData(0); for (let i = 0; i < dd.length; i++) dd[i] = Math.random() * 2 - 1; noiseBuf = b; }
-    const t0 = actx.currentTime + dl, s = actx.createBufferSource(), f = actx.createBiquadFilter(), gg = actx.createGain();
-    s.buffer = noiseBuf; f.type = type; f.frequency.value = freq; if (q) f.Q.value = q;
-    gg.gain.setValueAtTime(0.0001, t0); gg.gain.exponentialRampToValueAtTime(g * v, t0 + Math.min(0.012, d * 0.2)); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-    s.connect(f); f.connect(gg); out(gg); s.start(t0); s.stop(t0 + d + 0.02);
-  }
+  const S = creerSfx(() => actx, () => A, { salle: SALLE, niveau: NIVEAU });   // une boîte par instance du jeu
   function psound(k, x, arg) { sndPan = Math.max(-1, Math.min(1, (x / AR - 0.5) * 1.7)); sound(k, arg); sndPan = 0; }   // son positionné gauche/droite
-  function sound(k, arg) {
-    if (!actx) return;
-    if (k === 'pass') { glide(520, 880, 0.09, 'triangle', 0.07); noise(0.03, 'highpass', 2500, 0.08); if (arg) { tone(1320, 0.16, 'square', 0.04, 0.06); tone(1760, 0.2, 'square', 0.035, 0.12); } }   // « pop » de la passe ; in extremis : petit cri aigu
-    else if (k === 'boom') { glide(150, 38, 0.45, 'sine', 0.3); noise(0.75, 'lowpass', 800, 0.24); noise(0.22, 'bandpass', 1900, 0.12, 0.02, 0.8); noise(0.2, 'bandpass', 520, 0.12, 0.13, 1.2); }   // BAOUM : grosse caisse, souffle, puis « splat » de purée
-    else if (k === 'spawn') { glide(260, 720, 0.12, 'sine', 0.09); tone(980, 0.09, 'triangle', 0.04, 0.1); }   // plop : une nouvelle patate tombe
-    else if (k === 'tick') { const g = 0.03 + 0.06 * (arg || 0); tone(1300, 0.04, 'square', g); }
-    else if (k === 'tack') { const g = 0.03 + 0.06 * (arg || 0); tone(880, 0.05, 'square', g); }
-    else if (k === 'pick0') { tone(660, 0.14, 'triangle', 0.05); tone(990, 0.2, 'triangle', 0.045, 0.07); tone(1320, 0.24, 'triangle', 0.035, 0.14); }   // bouclier : carillon
-    else if (k === 'pick1') { glide(300, 1200, 0.22, 'sawtooth', 0.04); tone(1500, 0.14, 'triangle', 0.04, 0.2); }                                        // turbo : sifflet qui monte
-    else if (k === 'count') tone(440, 0.12, 'triangle', 0.06);
-    else if (k === 'go') { tone(660, 0.12, 'triangle', 0.06); tone(880, 0.28, 'triangle', 0.06, 0.1); }
-    else if (k === 'win') { tone(392, 0.3, 'triangle', 0.06); tone(494, 0.3, 'triangle', 0.06, 0.14); tone(587, 0.3, 'triangle', 0.06, 0.28); tone(784, 0.5, 'triangle', 0.06, 0.42); }
+  function sound(k, arg, att) {                          // k : clé de SONS (clé inconnue = silence) ; att 0..1 : atténuation de distance
+    if (!actx || !Object.prototype.hasOwnProperty.call(SONS, k)) return;
+    S.avec(sndPan, att == null ? 1 : att, () => SONS[k](S, arg));
   }
   // tic-tac de la patate : deux tons alternés dont la cadence suit la chaleur du porteur le plus chaud (et plus fort si c'est moi) ;
   // un seul fil sonore même avec 2 patates (celle qui chauffe le plus)
@@ -457,7 +435,8 @@ export default (function () {
     if (f.type === 'pick') {
       if (!seatOk(f.seat)) return;
       const d = puAt(f.k), k = PU.indexOf(d), p = ps[f.seat];
-      if (p && fin(p.x)) psound('pick' + k, p.x);
+      const son = 'pick' + k;                              // clé calculée : 'pick0' (bouclier) / 'pick1' (turbo) de sons.js
+      if (p && fin(p.x)) psound(son, p.x);
       if (f.seat === mySeat) msgPerso(d.i, d.msg, { color: d.c });
       if (p && !A.reduceFx && fin(p.x) && fin(p.y)) { waves.push({ x: p.x, y: p.y, r0: 10, r1: 40, born: now, life: 420, col: hexRgb(d.c).join(','), lw: 3.5 }); LUM.ajouter(p.x, p.y, 76, d.l, 440, 0.5); }
       return;
@@ -1099,7 +1078,7 @@ export default (function () {
     for (const k in input) if (input[k]) { input[k] = false; staleInput = true; }
     if (sprintOn) { sprintOn = false; staleInput = true; }
     // audio : le contexte est fermé (il ne reste pas actif en arrière-plan, et iOS limite le nombre de contextes) ; unlockAudio() en recrée un au prochain geste
-    if (actx) { const c0 = actx; actx = null; noiseBuf = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }
+    if (actx) { const c0 = actx; actx = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }
     resetRound(); tossOf.fill(null); snap = null; decorCv = null; decorKey = '';
   }
 

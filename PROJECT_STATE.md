@@ -358,7 +358,7 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
   zoom d'ouverture au décompte, feux de départ, 5 silhouettes de voitures (proto, mini, pick-up, formule, fourgon) au
   motif du siège + numéro, mini-carte, HUD position / tour / chrono / meilleur tour, « mauvais sens », phares au
   crépuscule du duel, ralenti (dernière élimination, ou arrivée qui clôt la course), podium de voitures, journal de fin
-  (positions au fil de la course), moteur et crissement WebAudio, musique « rock'n'roll de salle de jeux », police
+  (positions au fil de la course), moteur et crissement WebAudio (depuis le 29/10 : modèle `S.moteur` de `public/sfx.js`, voir « Bruitages »), musique « rock'n'roll de salle de jeux », police
   Racing Sans One, confettis à damier.
 - **Classement** : `{games, wins, podiums, kos, falls, bestLap, bl{circuit: s}}` (meilleur tour global et par circuit).
 - Vérifié : `npm test` 120/120 + 82/82 ; navigateur (bureau et téléphone 375 px) : 4 circuits, Course et Élimination,
@@ -451,7 +451,7 @@ en QWERTY, et W A S D reste valable. Textes d'aide mis à jour (« Z Q S D (W A 
   · **Ducking** : intégré à `sting()` (master plongé à ×0.35, remonté par l'ordonnanceur en ~300 ms) ; `duck:false` sur les stingers `count`/`go`.
   · **Décompte musical** : stingers `count` (note par tick du 3·2·1, timbre du thème) + `go` (accord) déclenchés dans les 5 clients (changement de `m.count`, transition countdown→play).
   · **Riser de mort subite** : stinger `alert` (montée chromatique) sur `sd` false→true (Pong/Bomb) et `shrink` 0→1 (Tron).
-  · **Pan stéréo** : `sndPan` module + routage `StereoPannerNode` dans `tone()` + helper `psound(kind, x)` — câblé sur shot/hit/boom/barrel (Tanks), crash (Tron), eat/crash (Snake), place/wall/boom (Bomb). Pong non panné (balle centrale).
+  · **Pan stéréo** : `sndPan` module + routage `StereoPannerNode` dans `tone()` (aujourd'hui : `S.avec(pan, att, …)` de `public/sfx.js`) + helper `psound(kind, x)` — câblé sur shot/hit/boom/barrel (Tanks), crash (Tron), eat/crash (Snake), place/wall/boom (Bomb). Pong non panné (balle centrale).
 - **Perf mobile — pré-rendu du décor** (Snake/Tanks/Bomberman) : `ensureTerrain()` dessine le décor statique sur un **canvas offscreen** (`terrainCv`), re-rendu **seulement si `terrainKey` change** (taille canvas + grille + boue) ; `draw()` fait un seul `drawImage(terrainCv, 0, 0, ARENA, ARENA)` **en coordonnées monde** (suit shake/zoom). Technique : swap temporaire du `ctx` module vers l'offscreen. Contenu : Snake = fond+damier(900 rects)+fleurs+grille+bordure (clé = taille seule) ; Tanks = sol+murs rivetés+caisses+bordure+**boue** ; Bomberman = sol+murs (les **portails 🌀 restent animés en live** via `warpCells` collecté au rendu). Tron/Pong non concernés (rendu déjà léger). Économie : ~300-950 tracés canvas par frame et par jeu.
 - **Ergonomie mobile (retours de test)** : ① **musique coupée écran verrouillé/onglet masqué** — `music.js` écoute `visibilitychange` et `suspend()`/`resume()` l'AudioContext (1 point central, couvre musique + SFX des 5 jeux). ② **Manette 2 zones** (`.gpad` : `.dirs` croix clavier ▲ / ◀▼▶ à gauche, `.acts` à droite ; Snake `.solo` = croix centrée) — DOM des 4 pavés réorganisé (IDs préservés, JS lie par ID), boutons agrandis (`clamp(58-86px)`), actions principales (🔥/💣) en bas près du pouce. Affichée mobile seulement (`.gpad{display:none}` desktop). ③ **Pong** : les flèches ▲▼ passent **sous** le plateau, larges et côte à côte (`.stage` row+wrap, `flex:1 1 0`, height 64). ④ **Boutons flottants** (pause/quitter/réglages/émote) sur mobile : petits (42px), **translucides** (opacity .6, plein au toucher), `#quitFloat`→« ✕ » seul, et `body.playing{padding-top:54px}` crée une bande haute → ils ne couvrent plus le plateau. Les anciennes règles `.dpad`/`.tankpad` deviennent mortes (inoffensives).
 - **Compat mobile ancien iOS (Safari pré-clamp)** : les contrôles utilisaient `clamp()`/`min()` (iOS 13.4+) → invalides sur vieux Safari → repli sur `width:min(82vw…)` → boutons géants empilés. Refait en **px fixes** (`.gpad .touch{66px}`, actions `74px`, palier `≤370px`→54/60px) + **espacement par marges** (pas de `flex gap`, non supporté) + `width:100%/max-width` (pas de `min()`). **Émote masquée en partie** sur mobile (`body.playing #emoteFloat/#emoteBar{display:none}`) : le bouton 😀 `position:fixed` bas-gauche recouvrait le pavé directionnel et volait les taps. *(Si un jour les contrôles ne répondent pas du tout sur iOS <13 : ce serait les Pointer Events — prévoir un repli `touchstart`.)*
@@ -1289,8 +1289,9 @@ l'écran de fin.
   (table de `pistes.js`, calculée par `outils/points-de-boucle.js` : silence de tête retiré, queue < -12 dB coupée) avec
   **fondu enchaîné à puissance constante de 2 s** (deux voix se chevauchent). Le moment du bouclage suit la vitesse réelle
   (`positionA` / `instantPour`, rampe comprise) : mesuré 5,63 s pour 5,63 s attendus avec une boucle raccourcie au climax.
-- **Niveau** : morceaux masterisés à ~-14,5 dBFS RMS (crêtes 0 dBFS) contre ~-27 dBFS pour les bruitages synthétisés →
-  `VOL = 0,17` × volume musique (0,7 par défaut) ≈ -33,5 dBFS RMS : sous les bruitages. Fanfare = ducking à 40 %.
+- **Niveau** : morceaux masterisés à ~-14,5 dBFS RMS (crêtes 0 dBFS) → `VOL = 0,17` × volume musique (0,7 par défaut)
+  ≈ -33 dBFS RMS. Les bruitages refaits le 29/10 sortent à -28 dBFS RMS en médiane (pire fenêtre de 300 ms) : ~5 dB
+  au-dessus de la musique (l'ancien rendu en ondes brutes était plutôt SOUS la musique). Fanfare = ducking à 40 %.
 - **Réseau / mémoire** : rien n'est téléchargé tant que 🎵 est coupé ; avant le premier geste, seul le morceau affiché est
   téléchargé (décodé au premier geste) ; l'autre morceau du jeu est préchargé ensuite. Seuls les 2 morceaux du jeu
   affiché restent décodés (~24 Mo chacun en PCM, ~40 Mo pour les longs), y compris avant le premier geste (mp3 bruts).
@@ -1318,6 +1319,33 @@ l'écran de fin.
   GitHub de Render perdue avec la recréation du dépôt du 26/10) et a été lancée à la main. Désormais
   `.github/workflows/deploy.yml` (copie de celui de Soirée) : `npm test` sur Node 24, puis Deploy Hook Render
   (secret `RENDER_DEPLOY_HOOK`) ; tests en échec = pas de déploiement. Auto-déploiement natif de Render à couper.
+
+## Bruitages (29/10/2026) — boîte à sons partagée
+Demande : « des sons plus agréables, plus réalistes, plus proches du style de chaque jeu, surtout le moteur de Micro
+Machines, très désagréable ». Avant : chaque client empilait des carrés / dents de scie bruts (tone, noise, glide…)
+directement sur la sortie, sans espace ni variation ; le moteur de Micro était une dent de scie + un carré au bourdon fixe.
+- **`public/sfx.js`** (`creerSfx`) : un bus par AudioContext (volume 🔊 → compresseur doux → passe-bas 14 kHz) + départ
+  de **réverbération** générée (salle propre à chaque jeu : `SALLE`), primitives `ton` (ondes adoucies 'doux' / 'creux' /
+  'orgue', glissando, vibrato, filtre), `bruit` (blanc / rose / brun), `fm` (cloche, métal), `corde` (Karplus-Strong),
+  `choc`, `membrane` (taiko), `explosion`, `souffle`, `sifflet`, `foule`, `accord`, `limite` (anti-mitraillage),
+  `plus` (calage), `avec` (pan + distance) et **`moteur`** : train d'explosions (onde périodique aux phases dispersées)
+  qui suit le régime, irrégularité au demi-régime, grain de combustion, passe-bas qui s'ouvre avec les gaz, résonances
+  d'échappement FIXES, + roulement et crissement. Variation aléatoire légère à chaque coup.
+- **`public/games/<id>/sons.js`** : les recettes du jeu (`SONS`, `SALLE`, `NIVEAU`, `DEMO`, et `MOTEUR` pour Micro), écrites
+  par jeu dans son style (Pong arcade néon, Tron cristal numérique, Tanks militaire au désert, Bomberman cartoon,
+  Snake jardin, Sumo taiko et hyoshigi, Foot stade + sifflet + foule, Patate pique-nique comique, Micro jouets sur
+  table). Le client garde ses déclencheurs (mêmes clés) ; `sound(k, arg)` appelle `S.avec(sndPan, att, () => SONS[k](S, arg))`.
+  Fanfares de `MUSIC_THEME.stingers` adoucies (sinus / triangle).
+- **`/sons.html`** (non liée, noindex) : écoute de chaque son, moteur de Micro pilotable aux curseurs, bouton « Mesurer »
+  (rendu hors ligne : crête, RMS, durée). **`outils/verifier-sons.mjs <id>`** (et `test/sons.mjs` dans `npm test`) : chaque
+  recette exécutée contre une boîte factice (bornes, niveau des couches superposées, couverture de DEMO, déclencheurs
+  littéraux du client, plus aucune synthèse brute dans client.js).
+- **Mesuré** (navigateur, rendu hors ligne) : 0 son muet, 0 saturé, médiane -28 dBFS RMS ; décomptes relevés (~-33) et
+  toujours sous le départ ; couches médium ajoutées aux sons trop graves pour un haut-parleur de téléphone (Sumo, départs
+  de Tanks et Bomberman, frappe du Foot). Moteur de Micro : -37 dB au ralenti, -32 en croisière, -30 plein gaz (l'ancien :
+  -30 en croisière). Une manche jouée dans chacun des 9 jeux, son activé : 0 erreur d'exécution.
+- Fait par un workflow (9 agents, un par jeu, puis relecture croisée) ; calage des niveaux après mesure.
+- **Non vérifiable ici** : l'écoute réelle (agrément, réalisme). Retours attendus de l'utilisateur via /sons.html.
 
 ## Limites connues (assumées)
 - ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».

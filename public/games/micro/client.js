@@ -6,6 +6,8 @@
 // iOS 15 : ni ?. ni ??, ni roundRect / ctx.filter / ctx.ellipse / letterSpacing / OffscreenCanvas.
 import { TICK_HZ, CAR_L, CAR_W, VIEW, CIRCUITS, BUMPERS, circuitParId, mobile } from './shared.js';
 import { createMusic } from '../../music.js';
+import { creerSfx } from '../../sfx.js';
+import { SONS, SALLE, NIVEAU, MOTEUR } from './sons.js';
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';
@@ -22,11 +24,13 @@ const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final : plu
 
 // musique : rock'n'roll de salle de jeux — basse « boogie » en croches, riff pentatonique au synthé-jouet, charleston serré ;
 // climax (dernier tour / duel) : tempo plus vif, roulement et arpège montant.
+// Fanfares (stingers) adoucies le 28/10 : triangle / sinus au lieu du carré, gains plus bas (les bruitages de ./sons.js
+// jouent par-dessus dans la même tonalité de la).
 const MUSIC_THEME = { piste: 'micro', bpm: 152, bpmBoost: 26, vol: 0.5, root: 110, len: 32,
-  stingers: { kill: { notes: [7, 3, 0, -5], wave: 'square', oct: 1, gain: 0.04, dur: 0.18, rate: 0.06 },
-    win: { base: 440, notes: [[0, 4, 7], [5, 9, 12], [7, 11, 14], [12, 16, 19, 24]], gain: 0.032, dur: 0.42, rate: 0.14 },
-    count: { notes: [0], oct: 1, wave: 'square', dur: 0.16, gain: 0.04, duck: false }, go: { notes: [[0, 7, 12]], oct: 2, wave: 'square', dur: 0.55, gain: 0.045, duck: false },
-    alert: { notes: [0, 4, 7, 12, 16], oct: 1, wave: 'square', rate: 0.06, dur: 0.14, gain: 0.035 } },
+  stingers: { kill: { notes: [7, 3, 0, -5], wave: 'triangle', oct: 1, gain: 0.034, dur: 0.2, rate: 0.06 },
+    win: { base: 440, notes: [[0, 4, 7], [5, 9, 12], [7, 11, 14], [12, 16, 19, 24]], wave: 'triangle', gain: 0.026, dur: 0.42, rate: 0.14 },
+    count: { notes: [0], oct: 1, wave: 'triangle', dur: 0.16, gain: 0.034, duck: false }, go: { notes: [[0, 7, 12]], oct: 2, wave: 'triangle', dur: 0.55, gain: 0.034, duck: false },
+    alert: { notes: [0, 4, 7, 12, 16], oct: 1, wave: 'sine', rate: 0.06, dur: 0.14, gain: 0.03 } },
   layers: [
   { seq: [0, 0, 12, 0, 3, 0, 5, 7, 0, 0, 12, 0, 3, 0, 7, 5, 5, 5, 17, 5, 8, 5, 10, 12, 7, 7, 19, 7, 5, 5, 3, 2], wave: 'triangle', gain: 0.03, dur: 0.5 },   // basse boogie
   { seq: [24, null, 27, null, 29, 31, null, 29, 27, null, 24, null, 22, null, 24, null, 29, null, 32, null, 34, 36, null, 34, 31, null, 29, null, 27, null, 24, null], wave: 'square', gain: 0.012, dur: 0.6 },   // riff jouet
@@ -76,7 +80,7 @@ export default (function () {
   let C = circuitParId(CIRCUITS[0].id), cid = C.id;
   const cam = { x: C.w / 2, y: C.h / 2, w: Math.max(C.w, C.h) + 80, init: false };
   const puffs = [], drops = [], sparks = [], flyers = [], rings = [];
-  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0, duskV = 0;
+  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, lastFrame = 0, duskV = 0;
   const LUM = creerLumieres(24), J = creerJournal({ pas: 500 });
   let jRound = -1, jLast = -1e9;
   const NOMUSIC = { start() {}, stop() {}, setIntensity() {}, sting() {}, dispose() {} };
@@ -333,21 +337,12 @@ export default (function () {
     J.fin();
   }
 
-  // ───────────────────────── sons (WebAudio, zéro fichier) ─────────────────────────
+  // ───────────────────────── sons (boîte partagée ../../sfx.js, recettes dans ./sons.js) ─────────────────────────
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (actx && actx.state === 'suspended') actx.resume(); }
   let sndPan = 0;
-  const vol = () => (A && typeof A.sfx === 'number') ? A.sfx : 1;
-  function out(node) { if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); node.connect(pn); } else node.connect(actx.destination); }
-  function tone(f, d, ty, g, dl) { ty = ty || 'square'; g = g == null ? 0.05 : g; dl = dl || 0; const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.02); }
-  function glide(f0, f1, d, ty, g, dl) { dl = dl || 0; const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t0 + d); gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.03); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.06); }
-  function bruit() { if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) { const sr = actx.sampleRate, b = actx.createBuffer(1, Math.floor(sr * 1.5), sr), dd = b.getChannelData(0); for (let i = 0; i < dd.length; i++) dd[i] = Math.random() * 2 - 1; noiseBuf = b; } return noiseBuf; }
-  function noise(d, type, freq, g, dl, q) {
-    const v = vol(); if (!actx || v <= 0) return;
-    const t0 = actx.currentTime + (dl || 0), s = actx.createBufferSource(), f = actx.createBiquadFilter(), gg = actx.createGain();
-    s.buffer = bruit(); f.type = type; f.frequency.value = freq; if (q) f.Q.value = q;
-    gg.gain.setValueAtTime(0.0001, t0); gg.gain.exponentialRampToValueAtTime(g * v, t0 + Math.min(0.012, d * 0.2)); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-    s.connect(f); f.connect(gg); out(gg); s.start(t0); s.stop(t0 + d + 0.02);
-  }
+  // UNE boîte pour l'instance du jeu : elle suit le contexte courant (actx est recréé à chaque entrée dans le jeu) et
+  // le volume des effets (A.sfx) ; bus compressé + réverbération de la pièce (SALLE de ./sons.js).
+  const S = creerSfx(() => actx, () => A, { salle: SALLE, niveau: NIVEAU });
   // son positionné : gauche / droite selon la position à l'écran, atténué avec la distance à MA voiture
   function psound(k, x, y, arg) {
     const dx = x - cam.x, dy = y - cam.y, d = Math.hypot(dx, dy), half = cam.w / 2;
@@ -355,61 +350,21 @@ export default (function () {
     sndPan = Math.max(-1, Math.min(1, dx / half * 0.9)); sound(k, arg, Math.max(0.25, 1 - d / (half * 2.2))); sndPan = 0;
   }
   function sound(k, arg, att) {
-    if (!actx) return;
-    const a = att == null ? 1 : att;
-    if (k === 'bump') { const i = Math.max(0.2, Math.min(1, arg || 0.5)); noise(0.09, 'lowpass', 900 + 900 * i, 0.16 * i * a); tone(110 + 60 * i, 0.08, 'triangle', 0.06 * i * a); }   // choc de plastique
-    else if (k === 'wall') { const i = Math.max(0.2, Math.min(1, arg || 0.5)); noise(0.07, 'bandpass', 1800, 0.12 * i * a, 0, 2); tone(220, 0.06, 'square', 0.03 * i * a); }
-    else if (k === 'fall') { glide(900, 140, 0.55, 'triangle', 0.07 * a); noise(0.12, 'lowpass', 600, 0.14 * a, 0.55); }   // sifflet qui tombe… et « toc » par terre
-    else if (k === 'hole') { glide(500, 90, 0.35, 'sine', 0.08 * a); tone(70, 0.2, 'sine', 0.1 * a, 0.34); }             // plop dans la poche
-    else if (k === 'respawn') { tone(660, 0.07, 'square', 0.035 * a); tone(990, 0.1, 'square', 0.03 * a, 0.07); }
-    else if (k === 'lap') { tone(880, 0.12, 'triangle', 0.05); tone(1320, 0.18, 'triangle', 0.045, 0.1); }
-    else if (k === 'best') { tone(988, 0.1, 'square', 0.035); tone(1319, 0.1, 'square', 0.035, 0.09); tone(1760, 0.22, 'square', 0.03, 0.18); }
-    else if (k === 'lastlap') { for (let i = 0; i < 3; i++) tone(1046, 0.12, 'square', 0.04, i * 0.16); }
-    else if (k === 'finish') { tone(523, 0.14, 'square', 0.05); tone(659, 0.14, 'square', 0.05, 0.12); tone(784, 0.14, 'square', 0.05, 0.24); tone(1046, 0.4, 'square', 0.05, 0.36); }
-    else if (k === 'boost') { glide(260, 1300, 0.32, 'sawtooth', 0.04 * a); noise(0.3, 'highpass', 2500, 0.05 * a); }
-    else if (k === 'splash') { noise(0.22, arg === 'lait' || arg === 'encre' ? 'highpass' : 'bandpass', arg === 'lait' || arg === 'encre' ? 1800 : 3200, 0.09 * a, 0, 1.5); }
-    else if (k === 'honk') { const b = arg || 0; tone(392 + b, 0.26, 'square', 0.04 * a); tone(494 + b, 0.26, 'square', 0.035 * a); }   // pouet-pouet de voiture-jouet
-    else if (k === 'out') { glide(420, 110, 0.45, 'sawtooth', 0.05 * a); }
-    else if (k === 'coupe') { tone(220, 0.12, 'square', 0.05 * a); tone(160, 0.22, 'square', 0.05 * a, 0.12); }   // buzzer de pénalité
-    else if (k === 'boite') { tone(880, 0.07, 'square', 0.04 * a); tone(1175, 0.07, 'square', 0.04 * a, 0.06); tone(1568, 0.12, 'square', 0.035 * a, 0.12); }
-    else if (k === 'objet0' || k === 'objet1') { glide(300, 1400, 0.35, 'sawtooth', 0.045 * a); noise(0.35, 'highpass', 2200, 0.05 * a); }
-    else if (k === 'objet2') { noise(0.25, 'lowpass', 500, 0.12 * a); glide(200, 90, 0.3, 'sine', 0.05 * a); }   // flaque : « splotch »
-    else if (k === 'objet3') { glide(900, 300, 0.18, 'triangle', 0.05 * a); noise(0.08, 'bandpass', 3000, 0.06 * a); }   // lancer
-    else if (k === 'objet4') { tone(523, 0.3, 'sine', 0.04 * a); tone(784, 0.4, 'sine', 0.035 * a, 0.08); }
-    else if (k === 'objet5') { glide(600, 180, 0.6, 'triangle', 0.05 * a); tone(120, 0.3, 'sine', 0.05 * a, 0.3); }
-    else if (k === 'paf') { noise(0.14, 'bandpass', 1400, 0.16 * a, 0, 0.8); tone(180, 0.12, 'triangle', 0.06 * a); }
-    else if (k === 'glisse') { noise(0.4, 'bandpass', 2600, 0.07 * a, 0, 1.2); }
-    else if (k === 'pare') { tone(1320, 0.12, 'sine', 0.05 * a); tone(1760, 0.16, 'sine', 0.04 * a, 0.05); }
-    else if (k === 'bumper') { tone(660, 0.06, 'square', 0.05 * a); tone(990, 0.1, 'square', 0.045 * a, 0.05); }   // « ding » de flipper
-    else if (k === 'count') tone(392, 0.16, 'square', 0.05);
-    else if (k === 'go') { tone(784, 0.5, 'square', 0.05); tone(1175, 0.5, 'square', 0.03); }
-    else if (k === 'win') { tone(523, 0.3, 'triangle', 0.06); tone(659, 0.3, 'triangle', 0.06, 0.14); tone(784, 0.3, 'triangle', 0.06, 0.28); tone(1046, 0.5, 'triangle', 0.06, 0.42); }
+    if (!actx || !Object.prototype.hasOwnProperty.call(SONS, k)) return;
+    S.avec(sndPan, att == null ? 1 : att, () => SONS[k](S, arg));
   }
-  // moteur de MA voiture : dent de scie + carré désaccordé, filtre passe-bas ; régime = vitesse ; crissement = bruit filtré selon la glisse
-  const eng = { on: false, o1: null, o2: null, f: null, g: null, ns: null, nf: null, ng: null };
+  // moteur de MA voiture : S.moteur (petit moteur thermique de voiture-jouet, preset MOTEUR de ./sons.js), créé UNE fois ;
+  // la boîte le reconstruit d'elle-même sur le nouveau contexte. regime = vitesse / pointe (VMAX 11,5 u/tick du serveur,
+  // + 20 % de marge : le turbo et la flèche turbo le font encore monter) ; sous l'accélérateur, le moteur prend des tours
+  // avant que la voiture n'ait de la vitesse (départ arrêté, feux) ; glisse = dérapage latéral (crissement des pneus).
+  const VPOINTE = 11.5 * 1.2;
+  const moteurSon = S.moteur(MOTEUR);
   function moteur(sp, thr, drift, actif) {
-    if (!actx || vol() <= 0 || !actif) { if (eng.on) stopMoteur(); return; }
-    if (!eng.on) {
-      try {
-        eng.o1 = actx.createOscillator(); eng.o2 = actx.createOscillator(); eng.f = actx.createBiquadFilter(); eng.g = actx.createGain();
-        eng.o1.type = 'sawtooth'; eng.o2.type = 'square'; eng.f.type = 'lowpass'; eng.f.frequency.value = 600; eng.g.gain.value = 0;
-        eng.o1.connect(eng.f); eng.o2.connect(eng.f); eng.f.connect(eng.g); eng.g.connect(actx.destination); eng.o1.start(); eng.o2.start();
-        eng.ns = actx.createBufferSource(); eng.ns.buffer = bruit(); eng.ns.loop = true; eng.nf = actx.createBiquadFilter(); eng.nf.type = 'bandpass'; eng.nf.frequency.value = 2400; eng.nf.Q.value = 1.4; eng.ng = actx.createGain(); eng.ng.gain.value = 0;
-        eng.ns.connect(eng.nf); eng.nf.connect(eng.ng); eng.ng.connect(actx.destination); eng.ns.start();
-        eng.on = true;
-      } catch (e) { stopMoteur(); return; }
-    }
-    const t = actx.currentTime, v = vol(), f = 52 + sp * 13 + (thr > 0 ? 18 : 0);
-    eng.o1.frequency.setTargetAtTime(f, t, 0.05); eng.o2.frequency.setTargetAtTime(f * 0.502, t, 0.05);
-    eng.f.frequency.setTargetAtTime(380 + sp * 90 + (thr > 0 ? 400 : 0), t, 0.08);
-    eng.g.gain.setTargetAtTime((0.012 + 0.0022 * sp + (thr > 0 ? 0.006 : 0)) * v, t, 0.06);
-    eng.ng.gain.setTargetAtTime(drift >= 2 && sp > 3 ? Math.min(0.05, 0.008 * drift) * v : 0, t, 0.05);
+    const v = Math.max(0, Math.min(1, (sp || 0) / VPOINTE)), gaz = thr > 0 ? 1 : 0;
+    const gl = sp > 3 ? Math.max(0, Math.min(1, ((drift || 0) - 1) / 5)) : 0;
+    moteurSon.regler({ actif: !!actif, regime: Math.max(v, gaz * 0.28), gaz: gaz, glisse: gl, roulement: v });
   }
-  function stopMoteur() {
-    const list = ['o1', 'o2', 'ns']; for (const k of list) { const n = eng[k]; if (n) { try { n.stop(); } catch (e) {} try { n.disconnect(); } catch (e) {} } }
-    for (const k of ['f', 'g', 'nf', 'ng']) { const n = eng[k]; if (n) { try { n.disconnect(); } catch (e) {} } }
-    eng.on = false; eng.o1 = eng.o2 = eng.f = eng.g = eng.ns = eng.nf = eng.ng = null;
-  }
+  function stopMoteur() { moteurSon.arreter(); }
 
   // ───────────────────────── effets ponctuels ─────────────────────────
   const FX = () => !A.reduceFx;
@@ -497,7 +452,7 @@ export default (function () {
     }
     if (f.type === 'objet') {
       if (!seatOk(f.seat) || !fin(f.x)) return;
-      const it = f.it | 0; psound('objet' + it, f.x, f.y);
+      const it = f.it | 0; psound(`objet${it}`, f.x, f.y);   // clé calculée objet0..objet5 (sound() ignore une clé absente de SONS)
       if (it === 0 || it === 1) { if (FX()) LUM.ajouter(f.x, f.y, 80, '#ffd23a', 420, 0.55); }
       else if (it === 4) { if (FX()) LUM.ajouter(f.x, f.y, 70, '#8fd8ff', 400, 0.5); }
       else if (it === 5) { msgGlobal('🐌', nameOf(f.seat) + ' ralentit tous ceux de devant !', { color: '#9be060' }); if (snap && mySeat >= 0 && snap.players[mySeat] && snap.players[mySeat].pos < (ps[f.seat] ? ps[f.seat].pos : 99)) CALL.push('ESCARGOT !', '#9be060', now); }
@@ -1656,7 +1611,7 @@ export default (function () {
     for (const k in input) if (input[k]) { input[k] = false; staleInput = true; }
     if (anaSent && anaSent !== '0') staleInput = true;
     if (anaTimer) { clearTimeout(anaTimer); anaTimer = 0; } anaPend = null;
-    if (actx) { const c0 = actx; actx = null; noiseBuf = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {} }
+    if (actx) { const c0 = actx; actx = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {} }
     resetRound(); snap = null; decorCv = null; decorKey = ''; skidCv = null; skidG = null; skidKey = ''; miniCv = null; miniKey = '';
   }
 

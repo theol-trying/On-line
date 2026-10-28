@@ -7,6 +7,8 @@ import { GW as GW0, GH as GH0, CELL as CELL0, ARENA } from './shared.js';
 // grille dynamique (nb de joueurs) : l'arène garde la MÊME taille logique, seule la taille des cases change
 let GW = GW0, GH = GH0, CELL = CELL0;
 import { createMusic } from '../../music.js';
+import { creerSfx } from '../../sfx.js';                       // boîte à sons partagée (bus compressé + réverbération du lieu)
+import { SONS, SALLE, NIVEAU } from './sons.js';                // recettes des bruitages de Tron (écoute : /sons.html)
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège (daltonisme / jusqu'à 10 joueurs)
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // bandeaux « ce que tu viens de ramasser »
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux jeux (mode plein écran compris)
@@ -27,10 +29,11 @@ const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', {
 // musique : synthwave en mi mineur (i–VI–III–VII) — nappe en dents de scie, basse en croches à l'octave,
 // arpège carré, batterie 4 temps ; lobby = nappe + arpège sinus ; climax (duel final) = charley serré + lead.
 const MUSIC_THEME = { piste: 'tron', bpm: 118, bpmBoost: 14, vol: 0.5, root: 82.41, len: 32,
-  stingers: { kill: { notes: [12, 7, 3, -5], wave: 'square', oct: 1, gain: 0.03, dur: 0.12, rate: 0.045 },   // dérésolution : arpège qui s'effondre
-    win: { base: 164.81, notes: [[0, 7, 12], [3, 10, 15], [5, 12, 17], [7, 12, 19, 24]], wave: 'sawtooth', gain: 0.028, dur: 0.36, rate: 0.14 },
-    count: { notes: [12], oct: 2, wave: 'square', dur: 0.08, gain: 0.03, duck: false }, go: { notes: [[0, 7, 12, 19]], oct: 1, wave: 'sawtooth', dur: 0.5, gain: 0.032, duck: false },
-    alert: { notes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], oct: 1, wave: 'sawtooth', rate: 0.035, dur: 0.1, gain: 0.03 } },
+  // fanfares adoucies (28/10) : triangle / sinus seulement, un peu plus bas — les bruitages de sons.js portent le relief
+  stingers: { kill: { notes: [12, 7, 3, -5], wave: 'triangle', oct: 1, gain: 0.026, dur: 0.12, rate: 0.045 },   // dérésolution : arpège qui s'effondre
+    win: { base: 164.81, notes: [[0, 7, 12], [3, 10, 15], [5, 12, 17], [7, 12, 19, 24]], wave: 'triangle', gain: 0.024, dur: 0.36, rate: 0.14 },
+    count: { notes: [12], oct: 2, wave: 'sine', dur: 0.08, gain: 0.025, duck: false }, go: { notes: [[0, 7, 12, 19]], oct: 1, wave: 'triangle', dur: 0.5, gain: 0.027, duck: false },
+    alert: { notes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], oct: 1, wave: 'triangle', rate: 0.035, dur: 0.1, gain: 0.025 } },
   layers: [
   { seq: [[0, 7, 12], null, null, null, null, null, null, null, [-4, 3, 8], null, null, null, null, null, null, null, [3, 10, 15], null, null, null, null, null, null, null, [-2, 5, 10], null, null, null, null, null, null, null], oct: 1, wave: 'sawtooth', gain: 0.008, dur: 8 },
   { seq: [0, null, 7, null, 12, null, 7, null, -4, null, 3, null, 8, null, 3, null, 3, null, 10, null, 15, null, 10, null, -2, null, 5, null, 10, null, 5, null], oct: 2, wave: 'sine', gain: 0.011, dur: 1.6 },
@@ -152,7 +155,7 @@ export default (function () {
   // effets ponctuels (tous plafonnés) : éclats voxel, étincelles, ondes, éclairs, libellés, traînées coupées, motos qui se dérésolvent, braises de boost
   const voxels = [], sparks = [], rings = [], flashes = [], labels = [], cutGhosts = [], derez = [], embers = [], twinkles = [];
   const deadAt = {}, angView = {}, headPos = {};
-  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, boostHeld = false, killcam = null;
+  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, boostHeld = false, killcam = null;
   let lastFrame = 0, wallFlash = 0, invFlash = 0, lastFw = 0;
   // Ralenti du dernier crash + podium : RL garde les derniers snapshots ; pendant le rejeu le monde est dessiné d'après eux (ni son, ni fx)
   // et la carte DOM de fin attend (pendingEnd). rpOn : rejeu à l'écran pour cette image ; swapBack : vrai snapshot pendant l'échange ;
@@ -412,40 +415,15 @@ export default (function () {
   }
 
   // ───────────────────────── sons (WebAudio, zéro fichier) ─────────────────────────
+  // Bruitages : recettes de ./sons.js (table SONS, une clé par événement), jouées par la boîte partagée sfx.js
+  // (volume 🔊 → compresseur doux → sortie, + réverbération du hangar numérique). Plus aucune onde brute ici.
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
   let sndPan = 0;                                   // pan stéréo du prochain son (posé par psound)
-  const vol = () => (A && typeof A.sfx === 'number') ? A.sfx : 1;
-  function out(node) { if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); node.connect(pn); } else node.connect(actx.destination); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.02); }
-  function sweep(f0, f1, d, ty = 'sawtooth', g = 0.04, dl = 0) { const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + d); gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.02); }
-  function noise(d, type, freq, g, dl = 0, q) {
-    const v = vol(); if (!actx || v <= 0) return;
-    if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) { const sr = actx.sampleRate, b = actx.createBuffer(1, Math.floor(sr * 1.2), sr), dd = b.getChannelData(0); for (let i = 0; i < dd.length; i++) dd[i] = Math.random() * 2 - 1; noiseBuf = b; }
-    const t0 = actx.currentTime + dl, s = actx.createBufferSource(), f = actx.createBiquadFilter(), gg = actx.createGain();
-    s.buffer = noiseBuf; f.type = type; f.frequency.value = freq; if (q) f.Q.value = q;
-    gg.gain.setValueAtTime(0.0001, t0); gg.gain.exponentialRampToValueAtTime(g * v, t0 + Math.min(0.012, d * 0.2)); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-    s.connect(f); f.connect(gg); out(gg); s.start(t0); s.stop(t0 + d + 0.02);
-  }
+  const S = creerSfx(() => actx, () => A, { salle: SALLE, niveau: NIVEAU });   // UNE boîte par instance : elle suit l'actx courant (recréé après chaque teardown)
   function psound(k, gx, arg) { sndPan = Math.max(-1, Math.min(1, (px(gx) / ARENA - 0.5) * 1.7)); sound(k, arg); sndPan = 0; }   // son positionné gauche/droite
-  function sound(k, arg) {
-    if (!actx) return;
-    if (k === 'derez') {                              // dérésolution : grésillement numérique qui s'effondre + choc sourd
-      sweep(1100, 70, 0.42, 'square', 0.028); noise(0.45, 'bandpass', 1800, 0.07, 0, 1.4); tone(92, 0.32, 'sawtooth', 0.045, 0.02);
-      for (let i = 0; i < 4; i++) tone(1320 / (i + 1), 0.05, 'square', 0.02, 0.04 + i * 0.05);
-    } else if (k === 'pickup') {                      // un timbre par bonus
-      if (arg === 'speed') { sweep(400, 1600, 0.18, 'square', 0.028); tone(1320, 0.09, 'triangle', 0.03, 0.12); }
-      else if (arg === 'ghost') { tone(520, 0.4, 'sine', 0.045); tone(527, 0.4, 'sine', 0.045); sweep(900, 420, 0.32, 'triangle', 0.02); }
-      else if (arg === 'cut') { noise(0.04, 'highpass', 4000, 0.14); noise(0.04, 'highpass', 4600, 0.11, 0.07); tone(1800, 0.03, 'square', 0.02, 0.07); }
-      else if (arg === 'blink') { sweep(300, 2400, 0.12, 'sine', 0.05); sweep(2400, 600, 0.14, 'sine', 0.03, 0.12); }
-      else if (arg === 'breaker') { tone(220, 0.25, 'square', 0.028); tone(330, 0.25, 'square', 0.024, 0.03); noise(0.15, 'bandpass', 2500, 0.05); }
-      else if (arg === 'invert') { sweep(900, 300, 0.2, 'sawtooth', 0.028); sweep(300, 900, 0.2, 'sawtooth', 0.028, 0.18); }
-      else { tone(660, 0.07, 'square', 0.05); tone(990, 0.08, 'square', 0.05, 0.06); }
-    } else if (k === 'break') { noise(0.2, 'highpass', 3000, 0.12); noise(0.3, 'bandpass', 5200, 0.06, 0.03, 3); tone(1400, 0.05, 'square', 0.03); tone(700, 0.08, 'square', 0.03, 0.04); }   // verre qui éclate
-    else if (k === 'laser') { sweep(240, 70, 0.55, 'sawtooth', 0.03); noise(0.4, 'bandpass', 320, 0.05, 0, 2); }   // bourdon de la barrière qui avance
-    else if (k === 'boost') { sweep(180, 900, 0.26, 'sawtooth', 0.022); noise(0.3, 'highpass', 2600, 0.035); }
-    else if (k === 'count') { tone(880, 0.08, 'square', 0.035); tone(440, 0.12, 'triangle', 0.03); }
-    else if (k === 'go') { sweep(300, 1200, 0.35, 'sawtooth', 0.026); tone(659.25, 0.3, 'square', 0.022, 0.05); tone(987.77, 0.36, 'triangle', 0.03, 0.1); }
-    else if (k === 'win') { tone(329.63, 0.18, 'triangle', 0.06); tone(493.88, 0.18, 'triangle', 0.06, 0.12); tone(659.25, 0.18, 'triangle', 0.06, 0.24); tone(987.77, 0.45, 'triangle', 0.05, 0.36); }
+  function sound(k, arg, att) {                     // k : clé de SONS (derez, pickup, break, laser, boost, count, go, win) ; att : atténuation 0..1
+    if (!actx || !Object.prototype.hasOwnProperty.call(SONS, k)) return;
+    S.avec(sndPan, att == null ? 1 : att, () => SONS[k](S, arg));
   }
 
   // ───────────────────────── effets ponctuels ─────────────────────────
@@ -1426,7 +1404,7 @@ export default (function () {
     RL.clear(); pendingEnd = false; overT0 = 0; rpOn = false; podSnap = null; podList = null; if (endEl) hideEnd();
     music.stop(); music.dispose(); cancelAnimationFrame(rafId);
     removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); removeEventListener('keyup', onKeyUp); removeEventListener('blur', onBlur);
-    if (actx) { try { actx.close(); } catch {} actx = null; noiseBuf = null; }   // libère le contexte audio (les navigateurs en limitent le nombre) ; unlockAudio() en recrée un au prochain geste
+    if (actx) { try { actx.close(); } catch {} actx = null; }   // libère le contexte audio (les navigateurs en limitent le nombre) ; unlockAudio() en recrée un au prochain geste
   }
 
   return { init, onState, onMessage, onLb, onA11y, teardown };

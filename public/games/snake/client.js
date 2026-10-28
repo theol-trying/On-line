@@ -19,6 +19,8 @@ import { drawPodium, podiumEntries } from '../../podium.js';       // podium de 
 import { createEcranFin } from '../../ecran-fin.js';               // fin de manche en plein écran + boutons « Relancer » / « Accueil »
 import { boutonMatch, texteMatch, balleDeMatch, titreFin, pastillesTexte } from '../../match.js';   // match en N manches (bouton GM, chip, balle de match, titre, pastilles)
 import { creerEcho } from '../../echo-virage.js';                 // chevron immédiat du virage enregistré (file de 2 virages côté serveur)       // écran de fin : longueur au fil de la manche + meilleure action
+import { creerSfx } from '../../sfx.js';                          // boîte à sons partagée : bus compressé + réverbération feutrée du jardin
+import { SONS, SALLE, NIVEAU } from './sons.js';                  // recettes des bruitages (marimba, croc, chute dans la haie…), écoute : /sons.html
 
 // Duel final (crepuscule.js) : quand il ne reste que 2 joueurs ou 2 équipes, la nuit tombe en ~4 s.
 const DUEL = creerDuel();   // Snake annonce déjà son duel final (music.sting + message) : pas de second bandeau
@@ -28,10 +30,11 @@ let GW = GW0, GH = GH0, CELL = CELL0;
 // musique : jardin au printemps — nappe I-vi-IV-V, chants d'oiseaux épars au lobby ; en jeu, marimba
 // pentatonique, basse pincée, shaker ; climax (sprint food-rush / duel) = contre-voix, charleston serré + tempo.
 const MUSIC_THEME = { piste: 'snake', bpm: 102, bpmBoost: 14, vol: 0.42, root: 130.81, len: 32,
-  stingers: { kill: { notes: [7, 4, 0, -5], wave: 'triangle', oct: 1, gain: 0.04, dur: 0.16, rate: 0.07 },
-    win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 11, 14], [12, 16, 19]], gain: 0.035, dur: 0.36, rate: 0.14 },
-    count: { notes: [0], oct: 2, wave: 'triangle', dur: 0.1, gain: 0.045, duck: false }, go: { notes: [[0, 4, 7, 12]], oct: 1, dur: 0.45, gain: 0.045, duck: false },
-    alert: { notes: [0, 4, 7, 12, 7, 12, 16], oct: 1, wave: 'triangle', rate: 0.06, dur: 0.14, gain: 0.038 } },
+  // fanfares adoucies (sinus / triangle seulement, gains en retrait) : les bruitages de sons.js portent le caractère boisé
+  stingers: { kill: { notes: [7, 4, 0, -5], wave: 'sine', oct: 1, gain: 0.032, dur: 0.18, rate: 0.07 },
+    win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 11, 14], [12, 16, 19]], wave: 'triangle', gain: 0.027, dur: 0.36, rate: 0.14 },
+    count: { notes: [0], oct: 2, wave: 'sine', dur: 0.1, gain: 0.034, duck: false }, go: { notes: [[0, 4, 7, 12]], oct: 1, wave: 'sine', dur: 0.45, gain: 0.034, duck: false },
+    alert: { notes: [0, 4, 7, 12, 7, 12, 16], oct: 1, wave: 'triangle', rate: 0.06, dur: 0.14, gain: 0.03 } },
   layers: [
   { seq: [[0, 4, 7], null, null, null, null, null, null, null, [-3, 0, 4], null, null, null, null, null, null, null, [-7, -3, 0], null, null, null, null, null, null, null, [-5, -1, 2], null, null, null, null, null, null, null], wave: 'sine', gain: 0.017, dur: 9 },   // nappe
   { seq: [null, null, null, null, null, 7, 9, 7, null, null, null, null, null, null, null, null, null, null, null, null, null, 12, 9, null, null, null, null, null, null, null, null, null], oct: 3, wave: 'sine', gain: 0.007, dur: 0.4 },   // oiseaux
@@ -176,7 +179,7 @@ export default (function () {
   const headAng = new Float64Array(MAX_SEATS), angSet = new Uint8Array(MAX_SEATS);   // orientation lissée des têtes
   const HX = new Float64Array(MAX_SEATS), HY = new Float64Array(MAX_SEATS), HON = new Uint8Array(MAX_SEATS);
   const HDX = new Int8Array(MAX_SEATS), HDY = new Int8Array(MAX_SEATS), ECHO = creerEcho();   // cap affiché de chaque tête (écho du virage)   // têtes dessinées cette image
-  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0, NOW = 0, sndPan = 0, sndGain = 1;
+  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, lastFrame = 0, NOW = 0, sndPan = 0;
   let rocksRef = null, rocksKey = '';
   // éclairage : flashs éphémères plafonnés + file d'attente (les effets tombent ~90 ms plus tard, avec l'interpolation)
   const LUM = creerLumieres(24), lumPend = [];
@@ -358,7 +361,7 @@ export default (function () {
     dangerT = dangerAhead(m);                        // vignette : recalculée à chaque instantané (12 Hz), lissée à l'affichage
     if (m.gs === 'play') jSample(m, performance.now(), crashed);     // une mort : point forcé, la chute tombe au bon instant
     if (overNow) { jRoundEnd(m, performance.now()); if (!pendingEnd) { sound('win'); music.sting('win'); podT0 = performance.now(); } }
-    if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count'); }
+    if (m.gs === 'countdown' && m.count > 0 && m.count !== lastCount) { music.sting('count'); sound('count', m.count); }   // le bloc de bois monte d'un cran à chaque seconde
     if (m.gs === 'countdown' && bmRound !== m.round) {   // balle de match : annoncée UNE fois par manche, au décompte
       bmRound = m.round;
       const bm = balleDeMatch(m.match, teamName);
@@ -411,36 +414,13 @@ export default (function () {
 
   // ───────────────────────── sons (WebAudio, zéro fichier) ─────────────────────────
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
-  const vol = () => ((A && typeof A.sfx === 'number') ? A.sfx : 1) * sndGain;
-  function out(node) { if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); node.connect(pn); } else node.connect(actx.destination); }
-  function tone(f, d, ty = 'square', g = 0.05, dl = 0) { const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain(); o.type = ty; o.frequency.setValueAtTime(f, t0); gg.gain.setValueAtTime(g * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.02); }
-  function glide(f0, f1, d, ty, g, dl = 0) {        // note glissée (bloup, gémissement de fantôme, choc sourd, gazouillis)
-    const v = vol(); if (!actx || v <= 0) return;
-    const t0 = actx.currentTime + dl, o = actx.createOscillator(), gg = actx.createGain();
-    o.type = ty; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f1, t0 + d);
-    gg.gain.setValueAtTime(0.0001, t0); gg.gain.exponentialRampToValueAtTime(g * v, t0 + Math.min(0.02, d * 0.2)); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-    o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.03);
-  }
-  function noise(d, type, freq, g, dl = 0, q) {
-    const v = vol(); if (!actx || v <= 0) return;
-    if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) { const sr = actx.sampleRate, b = actx.createBuffer(1, Math.floor(sr * 1.5), sr), dd = b.getChannelData(0); for (let i = 0; i < dd.length; i++) dd[i] = Math.random() * 2 - 1; noiseBuf = b; }
-    const t0 = actx.currentTime + dl, s = actx.createBufferSource(), f = actx.createBiquadFilter(), gg = actx.createGain();
-    s.buffer = noiseBuf; f.type = type; f.frequency.value = freq; if (q) f.Q.value = q;
-    gg.gain.setValueAtTime(0.0001, t0); gg.gain.exponentialRampToValueAtTime(g * v, t0 + Math.min(0.012, d * 0.2)); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-    s.connect(f); f.connect(gg); out(gg); s.start(t0); s.stop(t0 + d + 0.02);
-  }
-  function psound(k, gx) { sndPan = Math.max(-1, Math.min(1, (px(gx) / ARENA - 0.5) * 1.7)); sound(k); sndPan = 0; }   // son positionné gauche/droite
-  function sound(k) {
-    if (!actx || rOn()) return;                     // silence pendant le ralenti : les sons ne se rejouent pas
-    if (k === 'eat') { noise(0.05, 'bandpass', 2300, 0.1, 0, 1.4); noise(0.035, 'highpass', 3800, 0.06, 0.028); tone(540, 0.06, 'triangle', 0.04, 0.01); tone(810, 0.09, 'triangle', 0.035, 0.05); }   // croc + pincement
-    else if (k === 'gold') { tone(1046.5, 0.16, 'triangle', 0.04); tone(1318.5, 0.19, 'triangle', 0.04, 0.055); tone(1568, 0.22, 'triangle', 0.04, 0.11); tone(2093, 0.3, 'sine', 0.03, 0.165); noise(0.25, 'highpass', 7000, 0.03, 0.04); }   // carillon
-    else if (k === 'shrink') { glide(640, 170, 0.24, 'sine', 0.09); noise(0.2, 'lowpass', 650, 0.07, 0.03); }   // bloup + pouf de spores
-    else if (k === 'ghost') { glide(330, 660, 0.45, 'sine', 0.05); glide(336, 672, 0.45, 'triangle', 0.018, 0.03); tone(990, 0.3, 'sine', 0.012, 0.2); }   // « ouuuh »
-    else if (k === 'crash') { glide(170, 46, 0.3, 'sine', 0.15); noise(0.12, 'lowpass', 950, 0.12); noise(0.4, 'highpass', 3600, 0.035, 0.07); }   // choc sourd + sifflement
-    else if (k === 'crashMe') { sound('crash'); glide(300, 90, 0.5, 'triangle', 0.05, 0.05); }
-    else if (k === 'count') { tone(760, 0.07, 'triangle', 0.055); noise(0.03, 'bandpass', 1900, 0.05, 0, 3); }   // bloc de bois
-    else if (k === 'go') { tone(523.25, 0.1, 'triangle', 0.05); tone(783.99, 0.16, 'triangle', 0.05, 0.07); noise(0.34, 'highpass', 4200, 0.045, 0.06); }   // « ssss »
-    else if (k === 'win') { tone(523, 0.2, 'triangle', 0.06); tone(659, 0.2, 'triangle', 0.06, 0.12); tone(784, 0.34, 'triangle', 0.06, 0.24); for (let i = 0; i < 3; i++) glide(2300, 3200, 0.07, 'sine', 0.025, 0.5 + i * 0.11); }   // fanfare + merle
+  // Recettes dans ./sons.js (jardin : marimba, croc juteux, chute mate dans la haie), jouées par la boîte partagée sfx.js :
+  // bus compressé + réverbération feutrée de plein air, volume 🔊 (a11y.sfx) lu à chaque son, variation aléatoire d'un coup à l'autre.
+  const S = creerSfx(() => actx, () => A, { salle: SALLE, niveau: NIVEAU });
+  function psound(k, gx, att) { sndPan = Math.max(-1, Math.min(1, (px(gx) / ARENA - 0.5) * 1.7)); sound(k, undefined, att); sndPan = 0; }   // son positionné gauche/droite (att < 1 : en sourdine)
+  function sound(k, arg, att) {
+    if (!actx || rOn() || !Object.prototype.hasOwnProperty.call(SONS, k)) return;   // silence pendant le ralenti : les sons ne se rejouent pas
+    S.avec(sndPan, att == null ? 1 : att, () => SONS[k](S, arg));
   }
 
   // ───────────────────────── effets ponctuels ─────────────────────────
@@ -498,7 +478,7 @@ export default (function () {
     if (f.type === 'eat') {
       const ft = FOOD_TYPES[f.ft] === 1 ? f.ft : 'apple', mine = f.seat === mySeat;
       if (mine) { psound(ft === 'apple' ? 'eat' : ft, f.x); const fm = FOOD_MSG.hasOwnProperty(ft) ? FOOD_MSG[ft] : null; if (fm) msgPerso(fm.i, fm.t, { color: fm.c }); }   // nourriture spéciale ramassée par MOI : on annonce l'effet (les autres n'en sont pas affectés)
-      else if (ft !== 'apple') { sndGain = 0.35; psound(ft, f.x); sndGain = 1; }                                // les nourritures spéciales des autres : en sourdine
+      else if (ft !== 'apple') psound(ft, f.x, 0.35);                                                           // les nourritures spéciales des autres : en sourdine
       jEat(f, ft, now);
       if (A.reduceFx) return;
       const x = px(f.x), y = px(f.y);
@@ -1402,7 +1382,7 @@ export default (function () {
      music.stop(); music.dispose(); cancelAnimationFrame(rafId); removeEventListener('resize', resizeH); removeEventListener('keydown', onKeyDown); parts.length = 0; waves.length = 0; floats.length = 0; flashes.length = 0; LUM.vider(); lumPend.length = 0;
     // Aucune touche « tenue » à relâcher (les virages sont des appuis ponctuels) ; en revanche l'AudioContext doit être libéré : un par visite
     // s'accumulait, et le navigateur en plafonne le nombre. Il est recréé au prochain geste (unlockAudio).
-    if (actx) { const c = actx; actx = null; noiseBuf = null; try { const pr = c.close(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }
+    if (actx) { const c = actx; actx = null; try { const pr = c.close(); if (pr && pr.catch) pr.catch(() => {}); } catch {} }
     STK.reset(); hsAt = 0; dangerT = dangerK = 0; shakeMag = 0;
     pendingEnd = null; RL.clear(); RPLY = false; endGrace = -1e9; podSnap = null; podEnt = []; endShown = false; if (endEl) { endEl.classList.add('hidden'); endBox(false); }   // ralenti et podium repartent propres
     J.fin(); jRound = -1; prevRound = -1; dusk = 0; }   // retour au jeu (autre salle, manche renumérotée) : journal et lumière repartent propres

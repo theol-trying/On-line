@@ -17,6 +17,8 @@
 import { W as W0, H as H0, BALL_R, PAD_W, PAD_OFF, PU_R } from './shared.js';
 let W = W0, H = H0;        // espace logique : agrandi par le serveur selon le nombre de joueurs (snapshot aw/ah)
 import { createMusic } from '../../music.js';
+import { creerSfx } from '../../sfx.js';                           // boîte à sons partagée : bus doux + réverbération + primitives réalistes
+import { SONS, SALLE, NIVEAU } from './sons.js';                    // recettes de bruitages de Pong (arcade néon), écoutables sur /sons.html
 import { pulsation } from '../../piste.js';                          // tempo du morceau audible (pulsations du terrain et du lobby)
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège : lisibles même à 10 ou en mode équipe
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // messages de ramassage : l'icône seule ne parle pas
@@ -117,10 +119,10 @@ for (let c = 0; c < 4; c++) for (let s = 0; s < 16; s++) {
   SEQ.lead.push(LEAD[c][s]);
 }
 const MUSIC_THEME = { piste: 'pong', bpm: 118, bpmBoost: 14, vol: 0.45, root: 110, len: 64,
-  stingers: { kill: { notes: [12, 7, 3, 0], wave: 'square', oct: 1, gain: 0.03, dur: 0.12, rate: 0.06 },
-    win: { base: 220, notes: [[0, 7, 12], [3, 10, 15], [5, 12, 17], [7, 14, 19], [12, 19, 24]], wave: 'square', gain: 0.022, dur: 0.34, rate: 0.12 },
-    count: { notes: [12], oct: 1, wave: 'square', dur: 0.09, gain: 0.04, duck: false }, go: { notes: [[0, 7, 12]], oct: 1, wave: 'sawtooth', dur: 0.45, gain: 0.03, duck: false },
-    alert: { notes: [0, 3, 6, 9, 12, 15, 18], oct: 1, wave: 'sawtooth', rate: 0.05, dur: 0.12, gain: 0.03 } },
+  stingers: { kill: { notes: [12, 7, 3, 0], wave: 'triangle', oct: 1, gain: 0.026, dur: 0.14, rate: 0.06 },   // fanfares adoucies (plus de carré / dent de scie)
+    win: { base: 220, notes: [[0, 7, 12], [3, 10, 15], [5, 12, 17], [7, 14, 19], [12, 19, 24]], wave: 'triangle', gain: 0.019, dur: 0.34, rate: 0.12 },
+    count: { notes: [12], oct: 1, wave: 'sine', dur: 0.09, gain: 0.032, duck: false }, go: { notes: [[0, 7, 12]], oct: 1, wave: 'triangle', dur: 0.45, gain: 0.025, duck: false },
+    alert: { notes: [0, 3, 6, 9, 12, 15, 18], oct: 1, wave: 'triangle', rate: 0.05, dur: 0.12, gain: 0.025 } },
   layers: [
     { seq: SEQ.pad, wave: 'sine', gain: 0.014, dur: 15 },                                   // nappe : un accord par mesure
     { seq: SEQ.arpSoft, oct: 2, wave: 'sine', gain: 0.008, dur: 1.4 },                        // arpège doux (lobby compris)
@@ -213,7 +215,8 @@ export default (function () {
   const rings = [], sparks = [], dots = [], shards = [], pops = [], texts = [], breaks = [], bumpHits = [];
   const edgeFlash = {}, barrierFlash = {}, wallFlash = {};
   const blockSeen = new Map();                             // plots bloqueurs : instant d'apparition (animation d'entrée)
-  let actx = null, noiseBuf = null, sndPan = 0;
+  let actx = null, sndPan = 0;
+  const S = creerSfx(() => actx, () => A, { salle: SALLE, niveau: NIVEAU });   // bruitages : un bus par AudioContext (recréé au geste suivant le teardown)
   let music = createMusic(() => actx, () => A, MUSIC_THEME), musicOff = false;   // musicOff : dispose() appelé au teardown → init() en refait une
   // Exploits (aides partagées) : séries d'éliminations, annonces, arrêt sur image, éclats, danger, pastilles, chrono de la dernière minute
   const streaks = createStreaks({ window: 5000 }), callouts = createCallouts(), hitStop = createHitStop(60);
@@ -587,40 +590,11 @@ export default (function () {
     for (let i = 0; i < b.balls.length; i++) { const d = Math.hypot(b.balls[i].x - a.balls[i].x, b.balls[i].y - a.balls[i].y); if (d > mx) mx = d; }
     return Math.min(1, mx / 16);
   }
-  const vol = () => (A && typeof A.sfx === 'number') ? A.sfx : 1;
-  function out(node) { if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); node.connect(pn); } else node.connect(actx.destination); }
-  // f1 : glissando vers cette fréquence (bips de borne, « zap », « boing »)
-  function tone(freq, dur, type = 'square', gain = 0.05, delay = 0, f1) {
-    const v = vol(); if (!actx || v <= 0) return;
-    const t0 = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
-    o.type = type; o.frequency.setValueAtTime(freq, t0); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
-    g.gain.setValueAtTime(gain * v, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    o.connect(g); out(g); o.start(t0); o.stop(t0 + dur + 0.02);
-  }
-  function noise(d, type, freq, g, dl = 0, q) {
-    const v = vol(); if (!actx || v <= 0) return;
-    if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) { const sr = actx.sampleRate, b = actx.createBuffer(1, Math.floor(sr * 1.2), sr), dd = b.getChannelData(0); for (let i = 0; i < dd.length; i++) dd[i] = Math.random() * 2 - 1; noiseBuf = b; }
-    const t0 = actx.currentTime + dl, s = actx.createBufferSource(), f = actx.createBiquadFilter(), gg = actx.createGain();
-    s.buffer = noiseBuf; f.type = type; f.frequency.value = freq; if (q) f.Q.value = q;
-    gg.gain.setValueAtTime(0.0001, t0); gg.gain.exponentialRampToValueAtTime(g * v, t0 + Math.min(0.01, d * 0.2)); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-    s.connect(f); f.connect(gg); out(gg); s.start(t0); s.stop(t0 + d + 0.02);
-  }
-  function sound(kind, arg) {
-    if (!actx) return;
-    if (kind === 'hit') { const k = arg || 0; tone(440 + 300 * k, 0.07, 'square', 0.035, 0, 520 + 380 * k); tone(880 + 600 * k, 0.045, 'triangle', 0.02); }   // bip qui monte avec la vitesse de l'échange
-    else if (kind === 'death') {                                                                   // décharge du néon qui claque
-      tone(340, 0.36, 'sawtooth', 0.055, 0, 55); noise(0.28, 'lowpass', 900, 0.12);
-      if (arg) { tone(90, 0.6, 'sine', 0.12, 0, 36); for (let i = 0; i < 5; i++) noise(0.05, 'highpass', 3200 + i * 500, 0.07, 0.04 + i * 0.055); }   // élimination : le tube vole en éclats
-    }
-    else if (kind === 'shield') { tone(988, 0.1, 'triangle', 0.04); tone(1319, 0.1, 'triangle', 0.035, 0.035); tone(1760, 0.16, 'triangle', 0.03, 0.07); noise(0.14, 'bandpass', 3200, 0.05, 0, 3); }
-    else if (kind === 'powerup') { tone(523, 0.07, 'square', 0.04); tone(659, 0.07, 'square', 0.04, 0.05); tone(784, 0.07, 'square', 0.04, 0.1); tone(1047, 0.16, 'square', 0.04, 0.15); tone(2093, 0.2, 'triangle', 0.015, 0.15); }
-    else if (kind === 'bad') { tone(440, 0.3, 'sawtooth', 0.045, 0, 110); tone(233, 0.22, 'square', 0.03, 0.05); tone(247, 0.22, 'square', 0.03, 0.05); }   // buzzer d'erreur
-    else if (kind === 'ghost') { tone(900, 0.28, 'sine', 0.035, 0, 280); tone(912, 0.28, 'sine', 0.03, 0.02, 300); }
-    else if (kind === 'bump') { tone(720, 0.13, 'sine', 0.06, 0, 170); tone(1450, 0.035, 'triangle', 0.025); }   // « boing » de flipper
-    else if (kind === 'wallboost') { tone(180, 0.12, 'sawtooth', 0.04, 0, 1250); tone(90, 0.07, 'square', 0.035); }   // relance : zap qui monte
-    else if (kind === 'count') { tone(880, 0.09, 'square', 0.035); tone(1760, 0.05, 'triangle', 0.015); }
-    else if (kind === 'go') { tone(523, 0.08, 'square', 0.04); tone(784, 0.08, 'square', 0.04, 0.06); tone(1047, 0.3, 'square', 0.04, 0.12); noise(0.3, 'highpass', 2500, 0.04, 0.1); }
-    else if (kind === 'win') { tone(523, 0.18, 'triangle', 0.06); tone(659, 0.18, 'triangle', 0.06, 0.12); tone(784, 0.18, 'triangle', 0.06, 0.24); tone(1047, 0.4, 'square', 0.035, 0.36); }
+  // Bruitages : recettes de ./sons.js jouées par la boîte partagée (sfx.js) ; sndPan = position gauche/droite posée par playFx.
+  // att 0..1 : atténuation facultative. Clé inconnue (ex. fx 'timeup', muet) : rien.
+  function sound(k, arg, att) {
+    if (!actx || !Object.prototype.hasOwnProperty.call(SONS, k)) return;
+    S.avec(sndPan, att == null ? 1 : att, () => SONS[k](S, arg));
   }
 
   /* ---- effets d'événements ---- */
@@ -1791,7 +1765,7 @@ export default (function () {
     destroyed = true; cancelAnimationFrame(rafId); music.stop(); music.dispose(); musicOff = true;
     clearTimeout(bannerTimer);
     if (input.up || input.dn) { input.up = input.dn = false; try { send({ t: 'input', up: false, dn: false }); } catch (e) {} }   // touches tenues : relâchées côté serveur (sinon la raquette file seule)
-    if (actx) { const c0 = actx; actx = null; noiseBuf = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {} }   // ferme l'AudioContext (nouveau au prochain geste)
+    if (actx) { const c0 = actx; actx = null; try { const pr = c0.close(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {} }   // ferme l'AudioContext (nouveau au prochain geste)
     EF.suivre('lobby'); accueilFin = false; matchShown = '';   // fin plein écran quittée (body.fin retiré ; destroyed = vrai : pas de redimensionnement)
     if (inGamePrev) { inGamePrev = false; document.body.classList.remove('playing'); }   // changer de jeu pendant une fin plein écran : la page ne doit pas rester en mise en page de partie
     elimFl.length = 0; dangerK = 0; streaks.reset();

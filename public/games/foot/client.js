@@ -4,6 +4,8 @@
 // boue (pluie, flaques), glace (patinoire), flipper (arcade néon, bumpers), tempête (plage, sable, vent).
 import { AR0, MARGE, PR, BR, POST_R, GOAL0, TERRAINS, ITEMS } from './shared.js';
 import { createMusic } from '../../music.js';
+import { creerSfx } from '../../sfx.js';                          // boîte à sons partagée (bus compressé + écho des tribunes)
+import { SONS, SALLE, NIVEAU } from './sons.js';                    // recettes des bruitages du stade
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motif par siège, imprimé sur le maillot
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';
 import { arenaSize } from '../../layout.js';
@@ -20,11 +22,12 @@ import { boutonMatch, texteMatch, balleDeMatch, titreFin, pastillesTexte } from 
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
 
 // musique de tribune : majeur franc, grosse caisse « olé », cuivres en tierces ; climax = tambours serrés
+// (fanfares adoucies : triangle / sinus au lieu de carrés, un cran plus bas)
 const MUSIC_THEME = { piste: 'foot', bpm: 118, bpmBoost: 14, vol: 0.5, root: 98, len: 32,
-  stingers: { kill: { notes: [12, 7, 4, 0], wave: 'square', oct: 1, gain: 0.035, dur: 0.2, rate: 0.08 },
-    win: { base: 392, notes: [[0, 4, 7], [5, 9, 12], [7, 11, 14], [12, 16, 19]], gain: 0.035, dur: 0.4, rate: 0.15 },
-    count: { notes: [0], oct: 2, wave: 'square', dur: 0.12, gain: 0.035, duck: false }, go: { notes: [[0, 4, 7, 12]], oct: 2, wave: 'square', dur: 0.45, gain: 0.04, duck: false },
-    alert: { notes: [0, 4, 7, 12, 7, 12, 16], oct: 1, wave: 'square', rate: 0.07, dur: 0.14, gain: 0.03 } },
+  stingers: { kill: { notes: [12, 7, 4, 0], wave: 'triangle', oct: 1, gain: 0.028, dur: 0.2, rate: 0.08 },
+    win: { base: 392, notes: [[0, 4, 7], [5, 9, 12], [7, 11, 14], [12, 16, 19]], wave: 'triangle', gain: 0.028, dur: 0.4, rate: 0.15 },
+    count: { notes: [0], oct: 2, wave: 'sine', dur: 0.12, gain: 0.03, duck: false }, go: { notes: [[0, 4, 7, 12]], oct: 2, wave: 'triangle', dur: 0.45, gain: 0.032, duck: false },
+    alert: { notes: [0, 4, 7, 12, 7, 12, 16], oct: 1, wave: 'triangle', rate: 0.07, dur: 0.14, gain: 0.025 } },
   layers: [
   { seq: [[0, 7], null, null, null, null, null, null, null, [5, 12], null, null, null, null, null, null, null, [7, 14], null, null, null, null, null, null, null, [0, 7], null, null, null, [7, 11], null, null, null], wave: 'triangle', gain: 0.018, dur: 3.5 },
   { drums: 'K...K...K.K.K...K...K...K.KKS...', gain: 0.9, min: 1 },                                                 // grosse caisse de tribune
@@ -83,7 +86,7 @@ export default (function () {
   let board = [], buf = [];
   let AR = AR0, G = null, GC = { x: AR0 / 2, y: AR0 / 2 }, geoKey = '', formeKey = '', terId = 'stade', znRef = null, znKey = '';
   const puffs = [], waves = [], sparks = [], confs = [], texts = [], drops = [];
-  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, noiseBuf = null, lastFrame = 0;
+  let shakeMag = 0, rafId = 0, destroyed = false, resizeH = null, actx = null, lastFrame = 0;
   let ballSpin = 0, ballPrev = null, trail = [], netHit = {}, lastKill = 0, bumpFlash = {};
   const LUM = creerLumieres(24), J = creerJournal({ pas: 500 });
   let duskV = 0, sdT0 = 0, jRound = -1, jLast = -1e9, serie = {};
@@ -353,51 +356,15 @@ export default (function () {
   }
 
   // ───────────────────────── sons (WebAudio, zéro fichier) ─────────────────────────
+  // Recettes dans ./sons.js (cuir, sifflet d'arbitre, clameur, sols des 5 terrains), jouées par la boîte partagée
+  // ../../sfx.js : bus compressé + écho des tribunes ; toutes s'écoutent sur /sons.html.
   function unlockAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch {} } if (actx && actx.state === 'suspended') actx.resume(); }
   let sndPan = 0;
-  const vol = () => (A && typeof A.sfx === 'number') ? A.sfx : 1;
-  function out(node) { if (sndPan && actx.createStereoPanner) { const pn = actx.createStereoPanner(); pn.pan.value = Math.max(-1, Math.min(1, sndPan)); pn.connect(actx.destination); node.connect(pn); } else node.connect(actx.destination); }
-  function tone(f, d, ty, g, dl, f2) { const v = vol(); if (!actx || v <= 0) return; const t0 = actx.currentTime + (dl || 0), o = actx.createOscillator(), gg = actx.createGain(); o.type = ty || 'square'; o.frequency.setValueAtTime(f, t0); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t0 + d); gg.gain.setValueAtTime((g || 0.05) * v, t0); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d); o.connect(gg); out(gg); o.start(t0); o.stop(t0 + d + 0.02); }
-  function noise(d, type, freq, g, dl, q) {
-    const v = vol(); if (!actx || v <= 0) return;
-    if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) { const sr = actx.sampleRate, b = actx.createBuffer(1, Math.floor(sr * 2), sr), dd = b.getChannelData(0); for (let i = 0; i < dd.length; i++) dd[i] = Math.random() * 2 - 1; noiseBuf = b; }
-    const t0 = actx.currentTime + (dl || 0), s = actx.createBufferSource(), f = actx.createBiquadFilter(), gg = actx.createGain();
-    s.buffer = noiseBuf; f.type = type; f.frequency.value = freq; if (q) f.Q.value = q;
-    gg.gain.setValueAtTime(0.0001, t0); gg.gain.exponentialRampToValueAtTime(g * v, t0 + Math.min(0.08, d * 0.2)); gg.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-    s.connect(f); f.connect(gg); out(gg); s.start(t0); s.stop(t0 + d + 0.02);
-  }
-  // sifflet d'arbitre : deux oscillateurs légèrement désaccordés + trémolo (la bille du sifflet)
-  function whistle(n, long) {
-    const v = vol(); if (!actx || v <= 0) return;
-    for (let i = 0; i < n; i++) {
-      const t0 = actx.currentTime + i * 0.28, d = long && i === n - 1 ? 0.7 : 0.2;
-      for (const f of [2750, 2790]) {
-        const o = actx.createOscillator(), g = actx.createGain(), lfo = actx.createOscillator(), lg = actx.createGain();
-        o.type = 'sine'; o.frequency.value = f; lfo.frequency.value = 38; lg.gain.value = 120; lfo.connect(lg); lg.connect(o.frequency);
-        g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.025 * v, t0 + 0.02); g.gain.setValueAtTime(0.025 * v, t0 + d - 0.04); g.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
-        o.connect(g); out(g); o.start(t0); lfo.start(t0); o.stop(t0 + d + 0.02); lfo.stop(t0 + d + 0.02);
-      }
-    }
-  }
+  const S = creerSfx(() => actx, () => A, { salle: SALLE, niveau: NIVEAU });   // une boîte par instance : suit le contexte recréé à chaque entrée
   function psound(k, x, arg) { sndPan = Math.max(-1, Math.min(1, (x / AR - 0.5) * 1.7)); sound(k, arg); sndPan = 0; }
-  function sound(k, arg) {
-    if (!actx) return;
-    if (k === 'kick') { const f = arg == null ? 0.5 : arg; tone(110 + 90 * f, 0.08 + 0.06 * f, 'sine', 0.12 + 0.14 * f, 0, 55); noise(0.05 + 0.05 * f, 'bandpass', 700 + 700 * f, 0.08 + 0.1 * f); }   // frappe : « poc » sourd + cuir, plus sec quand c'est chargé
-    else if (k === 'canon') { tone(90, 0.3, 'sine', 0.3, 0, 40); noise(0.35, 'lowpass', 600, 0.22); }
-    else if (k === 'miss') noise(0.2, 'lowpass', 500, 0.08);
-    else if (k === 'grab') tone(210, 0.05, 'sine', 0.06, 0, 120);
-    else if (k === 'slide') noise(0.28, 'bandpass', 2600, 0.07, 0, 0.8);                                          // glissade dans l'herbe
-    else if (k === 'tackle') { tone(110, 0.12, 'sine', 0.14, 0, 55); noise(0.08, 'lowpass', 700, 0.1); }
-    else if (k === 'post') { tone(1480, 0.5, 'sine', 0.05); tone(2220, 0.35, 'sine', 0.03); tone(180, 0.1, 'sine', 0.1); }   // « poing » métallique
-    else if (k === 'wall') tone(130, 0.07, 'sine', 0.06 + 0.1 * (arg || 0), 0, 80);
-    else if (k === 'bump') { tone(520, 0.12, 'square', 0.05, 0, 980); tone(1040, 0.08, 'triangle', 0.04, 0.03); }   // bumper de flipper
-    else if (k === 'wind') noise(1.4, 'bandpass', 380, 0.08, 0, 0.6);
-    else if (k === 'pickup') { tone(660, 0.1, 'triangle', 0.05); tone(990, 0.16, 'triangle', 0.05, 0.07); }
-    else if (k === 'malus') { tone(330, 0.14, 'sawtooth', 0.035); tone(220, 0.22, 'sawtooth', 0.035, 0.1); }
-    else if (k === 'goal') { noise(2.2, 'bandpass', 700, 0.16, 0, 0.5); noise(1.6, 'bandpass', 1300, 0.08, 0.1, 0.6); tone(261.63, 0.3, 'square', 0.03, 0.05); tone(329.63, 0.3, 'square', 0.03, 0.2); tone(392, 0.5, 'square', 0.03, 0.35); }   // clameur du public + fanfare
-    else if (k === 'ooh') noise(1.2, 'bandpass', 480, 0.08, 0, 0.9);
-    else if (k === 'count') tone(880, 0.1, 'square', 0.03);
-    else if (k === 'win') { tone(392, 0.25, 'square', 0.04); tone(523.25, 0.25, 'square', 0.04, 0.14); tone(659.25, 0.25, 'square', 0.04, 0.28); tone(783.99, 0.55, 'square', 0.04, 0.42); noise(2, 'bandpass', 800, 0.12, 0.1, 0.5); }
+  function sound(k, arg, att) {
+    if (!actx || !Object.prototype.hasOwnProperty.call(SONS, k)) return;
+    S.avec(sndPan, att == null ? 1 : att, () => SONS[k](S, arg));
   }
 
   // ───────────────────────── effets ponctuels ─────────────────────────
@@ -421,11 +388,11 @@ export default (function () {
       if (!A.reduceFx) { LUM.ajouter(f.x, f.y, 30 + 40 * pw, f.c ? '#ff9a4a' : '#fff4d0', 200, 0.25 + 0.3 * pw); if (pw > 0.8) shakeMag = Math.max(shakeMag, f.c ? 6 : 2.5); }
       return;
     }
-    if (f.type === 'miss') { psound('miss', f.x); grass(f.x, f.y, 6, 1); if (f.seat === mySeat) msgPerso('👟', 'Tacle raté : à terre !', { bad: true }); return; }
+    if (f.type === 'miss') { psound('miss', f.x, terId); grass(f.x, f.y, 6, 1); if (f.seat === mySeat) msgPerso('👟', 'Tacle raté : à terre !', { bad: true }); return; }
     if (f.type === 'grab') { if (snap && snap.ball) psound('grab', snap.ball.x); return; }
-    if (f.type === 'slide') { psound('slide', f.x); grass(f.x, f.y, 10, 1.6); return; }
+    if (f.type === 'slide') { psound('slide', f.x, terId); grass(f.x, f.y, 10, 1.6); return; }
     if (f.type === 'tackle') {
-      psound('tackle', f.x); grass(f.x, f.y, f.steal ? 14 : 8, 2);
+      psound('tackle', f.x, { ter: terId, vol: f.steal ? 1 : 0 }); grass(f.x, f.y, f.steal ? 14 : 8, 2);
       if (!A.reduceFx) { shakeMag = Math.max(shakeMag, f.seat === mySeat || f.by === mySeat ? 5 : 2); waves.push({ x: f.x, y: f.y, r0: 6, r1: 34, born: now, life: 320, col: '242,246,238', lw: 3 }); }
       if (f.seat === mySeat) msgPerso('💫', f.steal ? 'Taclé : assommé, ballon perdu !' : 'Taclé : assommé 1 s', { bad: true });
       else if (f.by === mySeat) msgPerso('👟', f.steal ? 'Porteur assommé : le ballon est libre !' : 'Adversaire assommé', { color: K.gold });
@@ -433,8 +400,8 @@ export default (function () {
       return;
     }
     if (f.type === 'deflect') { psound('grab', f.x); return; }
-    if (f.type === 'post') { psound('post', f.x); if (!A.reduceFx) { sparks.push({ x: f.x, y: f.y, born: now, life: 300 }); LUM.ajouter(f.x, f.y, 36, '#ffffff', 240, 0.5); } if ((f.f || 0) > 0.35) { banner('POTEAU !', K.chalk); sound('ooh'); } return; }
-    if (f.type === 'wall') { psound('wall', f.x, f.f); return; }
+    if (f.type === 'post') { psound('post', f.x, f.f); if (!A.reduceFx) { sparks.push({ x: f.x, y: f.y, born: now, life: 300 }); LUM.ajouter(f.x, f.y, 36, '#ffffff', 240, 0.5); } if ((f.f || 0) > 0.35) { banner('POTEAU !', K.chalk); sound('ooh'); } return; }
+    if (f.type === 'wall') { psound('wall', f.x, { f: f.f, ter: terId }); return; }   // le bord sonne selon le terrain (panneaux, bande, caoutchouc)
     if (f.type === 'bump') { psound('bump', f.x); bumpFlash[f.i] = now; if (!A.reduceFx) { LUM.ajouter(f.x, f.y, 70, (f.i % 2) ? '#7ae8ff' : '#ff4fd8', 260, 0.6); waves.push({ x: f.x, y: f.y, r0: 18, r1: 44, born: now, life: 260, col: (f.i % 2) ? '122,232,255' : '255,79,216', lw: 3 }); } return; }
     if (f.type === 'wind') {
       if (f.warn) msgGlobal('🌪', 'Le vent va tourner ' + flecheVent(f.x, f.y) + ' !', { color: '#e4cc93' });
@@ -472,7 +439,7 @@ export default (function () {
       return;
     }
     if (f.type === 'out') { if (now - lastKill > 150) { lastKill = now; music.sting('kill'); } if (f.seat === mySeat) msgPerso('✖', 'Ta cage est fermée : éliminé', { bad: true }); return; }
-    if (f.type === 'whistle') { whistle(f.k === 'end' ? 3 : f.k === 'kick' ? 1 : 2, f.k === 'end' || f.k === 'go'); return; }
+    if (f.type === 'whistle') { sound('whistle', f.k); return; }   // start / go / kick / end : le motif est dans sons.js
   }
   function flecheVent(x, y) { const a = Math.atan2(y, x), i = Math.round(((a + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8; return ['→', '↘', '↓', '↙', '←', '↖', '↑', '↗'][i]; }
 
@@ -1229,7 +1196,7 @@ export default (function () {
     if (chargeOn) { chargeOn = false; try { send({ t: 'charge', on: false, cancel: true }); } catch {} }
     if (sprintOn) { sprintOn = false; try { send({ t: 'sprint', on: false }); } catch {} }
     music.stop(); music.dispose(); music = NOMUSIC;      // ordonnanceur + écouteur visibilitychange
-    if (actx) { try { actx.close(); } catch { try { actx.suspend(); } catch {} } actx = null; noiseBuf = null; }   // recréé au prochain geste (unlockAudio)
+    if (actx) { try { actx.close(); } catch { try { actx.suspend(); } catch {} } actx = null; }   // recréé au prochain geste (unlockAudio)
     flashes.length = 0; bulbT0 = 0; sdCue = 0; dangerK = 0; dangerE = null;
     RL.clear(); CAM.reset(); pendEnd = false; frzT0 = 0; podSnap = null; podEnt = null; liveSnap = null; if (endEl) endEl.style.top = ''; endEl.style.justifyContent = '';
   }
