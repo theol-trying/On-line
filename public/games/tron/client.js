@@ -26,7 +26,7 @@ const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', {
 
 // musique : synthwave en mi mineur (i–VI–III–VII) — nappe en dents de scie, basse en croches à l'octave,
 // arpège carré, batterie 4 temps ; lobby = nappe + arpège sinus ; climax (duel final) = charley serré + lead.
-const MUSIC_THEME = { bpm: 118, bpmBoost: 14, vol: 0.5, root: 82.41, len: 32,
+const MUSIC_THEME = { piste: 'tron', bpm: 118, bpmBoost: 14, vol: 0.5, root: 82.41, len: 32,
   stingers: { kill: { notes: [12, 7, 3, -5], wave: 'square', oct: 1, gain: 0.03, dur: 0.12, rate: 0.045 },   // dérésolution : arpège qui s'effondre
     win: { base: 164.81, notes: [[0, 7, 12], [3, 10, 15], [5, 12, 17], [7, 12, 19, 24]], wave: 'sawtooth', gain: 0.028, dur: 0.36, rate: 0.14 },
     count: { notes: [12], oct: 2, wave: 'square', dur: 0.08, gain: 0.03, duck: false }, go: { notes: [[0, 7, 12, 19]], oct: 1, wave: 'sawtooth', dur: 0.5, gain: 0.032, duck: false },
@@ -326,7 +326,7 @@ export default (function () {
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 quand il ne reste qu'un duel (parmi 3+)
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length; if (tot >= 3 && alive <= 2) inten = 2; }
-      music.setIntensity(inten); }
+      music.setIntensity(inten, m.gs); }
     if (me && me.playing && me.alive && m.gs === 'play') buildOcc(); else occ = null;
     refreshHUD();
     if (m.gs === 'over') { if (!endShown) { endShown = true; if (replay) pendingEnd = true; else showEndscreen(m); } }

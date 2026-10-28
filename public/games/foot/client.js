@@ -20,7 +20,7 @@ import { boutonMatch, texteMatch, balleDeMatch, titreFin, pastillesTexte } from 
 const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', { color: '#ff5a3c' });
 
 // musique de tribune : majeur franc, grosse caisse « olé », cuivres en tierces ; climax = tambours serrés
-const MUSIC_THEME = { bpm: 118, bpmBoost: 14, vol: 0.5, root: 98, len: 32,
+const MUSIC_THEME = { piste: 'foot', bpm: 118, bpmBoost: 14, vol: 0.5, root: 98, len: 32,
   stingers: { kill: { notes: [12, 7, 4, 0], wave: 'square', oct: 1, gain: 0.035, dur: 0.2, rate: 0.08 },
     win: { base: 392, notes: [[0, 4, 7], [5, 9, 12], [7, 11, 14], [12, 16, 19]], gain: 0.035, dur: 0.4, rate: 0.15 },
     count: { notes: [0], oct: 2, wave: 'square', dur: 0.12, gain: 0.035, duck: false }, go: { notes: [[0, 4, 7, 12]], oct: 2, wave: 'square', dur: 0.45, gain: 0.04, duck: false },
@@ -299,7 +299,7 @@ export default (function () {
     prevGs = m.gs;
     { let inten = 0;
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const camps = {}; let nc = 0; m.players.forEach(p => { if (p.playing && p.alive && !camps[p.team]) { camps[p.team] = 1; nc++; } }); if (m.sd || ((m.nteams || 0) >= 3 && nc <= 2)) inten = 2; }
-      music.setIntensity(inten); }
+      music.setIntensity(inten, m.gs); }
     refreshHUD(); syncOptPanel(m);
     if (matchBtn) matchBtn.maj(m.match, m.gs);
     if (m.gs === 'over') { if (!endShown && !pendEnd) { showEndscreen(m); endShown = true; podT0 = performance.now(); } }

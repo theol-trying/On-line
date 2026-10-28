@@ -9,7 +9,7 @@
 | Micro Machines | **1 à 10** | Course de voitures-jouets sur 7 circuits (tables, plateau de jeu, circuits-jouets), dans les deux sens, avec objets à ramasser : la grille de départ en accueille 10 |
 
 L'arène grandit automatiquement avec le nombre de participants (bots compris).
-Serveur Node.js **autoritatif**, **zéro dépendance npm**, **aucun fichier binaire** (graphismes dessinés au canvas, musique générée en WebAudio).
+Serveur Node.js **autoritatif**, **zéro dépendance npm**, **aucun fichier binaire** hormis les morceaux de musique (graphismes dessinés au canvas, bruitages synthétisés en WebAudio ; une musique de menu et une de partie par jeu, en mp3 sans métadonnées).
 
 Une seule partie active à la fois : les joueurs choisissent le jeu dans un lobby commun, un appareil = un joueur.
 
@@ -37,7 +37,9 @@ games/<id>/server.js       Logique autoritative d'un jeu
 public/games/<id>/client.js  Rendu canvas, HUD, sons, contrôles
 public/games/<id>/shared.js  Constantes partagées serveur ↔ client
 public/app.js        Shell client : réseau, lobby, réglages, avatars, tournoi, chargement du jeu actif
-public/music.js      Moteur de musique générative partagé (WebAudio, zéro asset)
+public/music.js      Moteur de musique partagé (morceaux en fichiers, musique générée en repli)
+public/piste.js      Lecteur des morceaux : un seul contexte audio pour toute la page, boucles en fondu
+public/music/        Les 18 morceaux (menu + partie pour chaque jeu)
 ```
 
 **Ajouter un jeu** : créer `games/<id>/server.js` + `public/games/<id>/{client.js,shared.js}`, puis l'importer dans l'objet `GAMES` de `hub.js`. Rien d'autre.

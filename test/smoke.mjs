@@ -14,7 +14,8 @@
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { mkdtempSync, rmSync, readFileSync } from 'fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, statSync } from 'fs';
+import { createHash } from 'crypto';
 import { tmpdir } from 'os';
 import net from 'net';
 import http from 'http';
@@ -342,6 +343,52 @@ async function httpStatique() {
   ok('POST / est refusé (405)', r3.status === 405, 'statut ' + r3.status);
 }
 
+/* ---------- musiques en fichiers (27/10) : fichiers propres, noms = empreinte, cache immutable, boucle ---------- */
+async function musique() {
+  console.log('\n▶ musiques : fichiers sans métadonnées, nom = empreinte, servis en cache immutable, calcul de boucle');
+  const { PISTES, FONDU_BOUCLE, positionA, instantPour } = await import('../public/pistes.js');
+  const { tramesMp3 } = await import('../outils/mp3.mjs');
+  const DOSSIER = join(ROOT, 'public', 'music'), cites = new Set();
+  const jeux = ['pong', 'tron', 'tank', 'bomb', 'snake', 'sumo', 'foot', 'patate', 'micro'];
+  ok('les 9 jeux ont un morceau de menu et un de partie', jeux.every(id => PISTES[id] && PISTES[id].menu && PISTES[id].jeu),
+    jeux.filter(id => !(PISTES[id] && PISTES[id].menu && PISTES[id].jeu)).join(', '));
+  ok('chaque jeu branche ses morceaux (THEME.piste)', jeux.every(id => readFileSync(join(ROOT, 'public', 'games', id, 'client.js'), 'utf8').includes(`piste: '${id}'`)));
+  let defauts = [];
+  for (const id of Object.keys(PISTES)) for (const role of ['menu', 'jeu']) {
+    const p = PISTES[id][role], nom = p.f; cites.add(nom);
+    let b; try { b = readFileSync(join(DOSSIER, nom)); } catch { defauts.push(nom + ' absent'); continue; }
+    const h = createHash('sha1').update(b).digest('hex').slice(0, 8);
+    if (!new RegExp(`^${id}-${role}\\.${h}\\.mp3$`).test(nom)) defauts.push(nom + ' : empreinte ' + h);
+    const tr = tramesMp3(b);                           // que des trames audio, du premier au dernier octet : aucune place pour une étiquette
+    if (tr.debut !== 0 || tr.fin !== b.length || tr.trames < 100) defauts.push(nom + ` : ${b.length - (tr.fin - tr.debut)} octet(s) hors trames audio`);
+    if (!(p.debut >= 0 && p.fin - p.debut > 3 * FONDU_BOUCLE)) defauts.push(nom + ' : boucle ' + p.debut + '→' + p.fin);
+  }
+  ok('fichiers présents, nommés par leur empreinte, faits uniquement de trames audio (ni ID3, ni APE, ni C2PA)', defauts.length === 0, defauts.slice(0, 3).join(' | '));
+  const enTetes = [];
+  for (const nom of cites) {
+    const r = await requeteHttp('HEAD', '/music/' + nom);
+    if (r.status !== 200 || r.headers['content-type'] !== 'audio/mpeg' || r.headers['cache-control'] !== 'public, max-age=31536000, immutable') enTetes.push(nom + ' ' + r.status);
+  }
+  ok('les 18 morceaux sont servis en audio/mpeg et cache immutable', enTetes.length === 0, enTetes.slice(0, 3).join(' | '));
+  const orphelins = readdirSync(DOSSIER).filter(f => !cites.has(f));
+  ok('aucun fichier orphelin dans public/music/', orphelins.length === 0, orphelins.join(', '));
+  const f = PISTES.pong.menu.f, taille = String(statSync(join(DOSSIER, f)).size);
+  const r1 = await requeteHttp('GET', '/music/' + f);
+  ok('un morceau est servi en audio/mpeg, en entier', r1.status === 200 && r1.headers['content-type'] === 'audio/mpeg' && r1.headers['content-length'] === taille,
+    r1.status + ' ' + r1.headers['content-type'] + ' ' + r1.headers['content-length']);
+  ok('… avec un cache d\'un an sans revalidation', r1.headers['cache-control'] === 'public, max-age=31536000, immutable', String(r1.headers['cache-control']));
+  const r2 = await requeteHttp('GET', '/music/' + f, { 'If-None-Match': r1.headers.etag });
+  ok('… et un 304 qui garde ce cache', r2.status === 304 && r2.headers['cache-control'] === r1.headers['cache-control'], r2.status + ' ' + r2.headers['cache-control']);
+  const r3 = await requeteHttp('GET', '/index.html');
+  ok('les autres statiques restent en no-cache', r3.headers['cache-control'] === 'no-cache', String(r3.headers['cache-control']));
+  // calcul de boucle (piste.js) : voix partie à t=10 s depuis 0,5 s, vitesse 1 -> 1,06 entre t=20 et t=20,6
+  const v = { t0: 20, t1: 20.6, r0: 1, r1: 1.06, pos0: 10.5 };
+  const p30 = positionA(v, 30), t40 = instantPour(v, 40), tRampe = instantPour(v, 10.8);
+  ok('position et instant de bouclage cohérents, rampe de vitesse comprise',
+    Math.abs(p30 - (10.5 + 0.6 * 1.03 + 9.4 * 1.06)) < 1e-9 && Math.abs(positionA(v, t40) - 40) < 1e-9 && Math.abs(positionA(v, tRampe) - 10.8) < 1e-9 && tRampe > 20 && tRampe < 20.6,
+    `p30 ${p30} · t40 ${t40} · tRampe ${tRampe}`);
+}
+
 /* ---------- compléments du 25/09 : rafale de pings, sièges de bots, sauvegarde à l'arrêt ---------- */
 // Socket WebSocket écrite à la main : l'API WebSocket ne sait pas envoyer de trames ping.
 function socketBrute() {
@@ -476,6 +523,7 @@ await arriveeEnCours();
 await protections();
 await robustesse();
 await httpStatique();
+await musique();
 await complements();
 await terrainsFoot();
 await matchEnN();

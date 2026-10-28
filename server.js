@@ -2,6 +2,8 @@
 import http from 'http';
 import os from 'os';
 import { readFile, stat } from 'fs/promises';
+import { createReadStream } from 'fs';
+import { pipeline } from 'stream';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import { initLeaderboard, board, history, flush } from './leaderboard.js';
@@ -9,7 +11,11 @@ import { attach, GAME_META } from './hub.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.mp3': 'audio/mpeg' };
+// Morceaux de public/music/ : le nom porte l'empreinte du contenu (pistes.js), donc un fichier ne change jamais
+// sous le même nom -> cache navigateur d'un an, sans revalidation (rien n'est re-téléchargé après un déploiement,
+// alors que l'ETag taille+mtime des autres statiques change à chaque déploiement Render).
+const MUSIQUE_RE = /^\/music\/[a-z]+-(?:menu|jeu)\.[0-9a-f]{8}\.mp3$/;
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 // ETag des statiques : taille+mtime, calculé une seule fois par fichier puis mis en cache (revalidé si mtime/taille changent).
@@ -98,20 +104,26 @@ async function servir(req, res) {
     const st = await stat(full);
     if (!st.isFile()) throw new Error('pas un fichier');   // un dossier (/games/) : 404, pas un 200 vide en HEAD
     const etag = etagDe(full, st);
+    const cache = MUSIQUE_RE.test(url) ? 'public, max-age=31536000, immutable' : 'no-cache';
     const entetes = {
       'Content-Type': TYPES[extname(url)] || 'application/octet-stream',
       'Content-Length': String(st.size),
       ETag: etag,
-      'Cache-Control': 'no-cache',
+      'Cache-Control': cache,
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'same-origin',
     };
     if (req.headers['if-none-match'] === etag) {   // revalidation : le fichier n'a pas changé, pas de corps à renvoyer
-      res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin' });
+      res.writeHead(304, { ETag: etag, 'Cache-Control': cache, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin' });
       res.end();
       return;
     }
     if (req.method === 'HEAD') { res.writeHead(200, entetes); res.end(); return; }
+    if (cache !== 'no-cache') {                    // morceau de musique (jusqu'à 2,5 Mo) : envoyé en flux, pas copié en mémoire par requête
+      res.writeHead(200, entetes);
+      pipeline(createReadStream(full), res, () => {});   // pipeline : le fichier est refermé si le client coupe en route
+      return;
+    }
     const buf = await readFile(full);
     res.writeHead(200, entetes);
     res.end(buf);

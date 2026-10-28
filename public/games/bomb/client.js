@@ -30,7 +30,7 @@ const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', {
 
 // musique : cartoon enjoué — basse bondissante, mélodie espiègle, célesta sucré, woodblock + caisse claire ;
 // climax (mort subite) = motif chromatique + grosse caisse + tempo
-const MUSIC_THEME = { bpm: 134, bpmBoost: 16, vol: 0.48, root: 130.81, len: 32,
+const MUSIC_THEME = { piste: 'bomb', bpm: 134, bpmBoost: 16, vol: 0.48, root: 130.81, len: 32,
   stingers: { kill: { notes: [12, 7, 3, 0], wave: 'square', oct: 0, gain: 0.035, dur: 0.13, rate: 0.06 },
     win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 12, 16], [12, 16, 19, 24]], gain: 0.035, dur: 0.32, rate: 0.13 },
     count: { notes: [0], oct: 2, wave: 'triangle', dur: 0.1, gain: 0.05, duck: false }, go: { notes: [[0, 4, 7, 12]], oct: 1, wave: 'square', dur: 0.42, gain: 0.045, duck: false },
@@ -444,7 +444,7 @@ export default (function () {
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 dès la mort subite
       if (m.gs === 'play' || m.gs === 'countdown') inten = m.sd ? 2 : 1;
-      music.setIntensity(inten); }
+      music.setIntensity(inten, m.gs); }
     refreshHUD();
     if (m.gs === 'over') { if (!endShown) { endShown = true; if (rp) pendingEnd = m; else showEndscreen(m); } }   // rejeu : carte DOM de fin différée jusqu'à sa fin
     else { endShown = false; pendingEnd = null; efH = null; endEl.classList.add('hidden'); podOn = false; applyEndLayout(); }

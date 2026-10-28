@@ -42,7 +42,11 @@ leaderboard.js         Persistance générique { gameId:{board,history} } ; boar
 games/<id>/server.js          Logique autoritative du jeu <id> : create(room) -> instance ; default { meta, create }
 public/games/<id>/shared.js   Constantes géométriques du jeu (servies au navigateur ET importées par Node côté serveur)
 public/games/<id>/client.js   Module client du jeu : init/onState/onMessage/onLb/onA11y/teardown ; rendu, HUD, sons, inputs
-public/music.js               Moteur de musique générative PARTAGÉ (WebAudio, zéro asset) ; thème + intensité par jeu
+public/music.js               Moteur de musique PARTAGÉ : thème + intensité par jeu ; délègue aux fichiers si THEME.piste
+public/piste.js               Lecteur des morceaux en fichiers (un AudioContext pour toute la page, boucle en fondu, climax)
+public/pistes.js              Table des morceaux (nom = empreinte, points de boucle) + calcul de position (pur, testé)
+public/music/                 Les 18 mp3 (menu + partie × 9 jeux), sans métadonnées, servis en cache immutable
+outils/                       Hors site : importer-musique.mjs (nettoie + nomme), points-de-boucle.js (console navigateur)
 public/app.js          SHELL client : réseau (WS+token), pseudo, menu de jeux, accessibilité, panneaux modaux,
                        import dynamique du module actif + délégation (tampon des messages le temps du chargement)
 public/index.html      Chrome shell + une racine .game-root par jeu (#pong-root #tron-root #tank-root #bomb-root)
@@ -412,7 +416,8 @@ en QWERTY, et W A S D reste valable. Textes d'aide mis à jour (« Z Q S D (W A 
   Le sélecteur de thème global (Néon/CRT/Clair) ne pilote plus que le **shell** + Pong/Tron. `reduceFx` (réduire les effets) et la palette daltonien restent appliqués dans tous les jeux.
 - **Accessibilité** (⚙️ shell, persisté localStorage `pong-lan-a11y`) : thèmes Néon/CRT/Clair, musique (tous les jeux), palette daltonien,
   contraste, réduction des effets. Pseudo persistant `pong-lan-name`, token `pong-lan-token`.
-- **Musique générative par jeu** (`public/music.js`, moteur PARTAGÉ zéro dépendance — aucun fichier audio) : séquenceur WebAudio
+- **Musique générative par jeu** — remplacée depuis le 27/10 par des morceaux en fichiers (voir « Musiques en fichiers ») ;
+  elle reste le **repli** si un morceau ne se charge pas (`public/music.js`, moteur PARTAGÉ zéro dépendance) : séquenceur WebAudio
   à fenêtre d'avance (double-croches sur l'horloge audio), thèmes **data-driven** (`MUSIC_THEME` en tête de chaque client :
   bpm/bpmBoost/vol/root + couches `{seq|drums, wave, oct, gain, dur, min}` ; drums `K`=grosse caisse `S`=caisse `H`=charley).
   **Intensité 0/1/2** pilotée par `onState` : 0 = lobby/pause/fin (couches calmes), 1 = en jeu, 2 = **climax** (+tempo `bpmBoost`,
@@ -1256,6 +1261,59 @@ Corrigé ensuite en 2 vagues (commits « Audit 28/09, vague 1 / vague 2 ») :
     autres) ; à la fin tout le monde est « hors jeu » (chat de nouveau là sur téléphone) ; la barre « Prêt » est masquée en
     mode docké pendant la fin (elle restait à moitié sous le plateau). Tests : 11 vérifications « écran de fin » dans
     `test/fins-de-manche.mjs`.
+
+## Musiques en fichiers (27/10/2026)
+Demande : une musique de menu et une musique de partie par jeu, fournies en mp3, à la place de la musique générée,
+en gardant bruitages et fanfares. Choix de l'utilisateur : musique **activée pour tous** (bascule unique `musV: 2`
+dans `app.js`, 🎵 la recoupe ensuite durablement), **+6 %** de vitesse au climax, morceau de **partie gardé** sur
+l'écran de fin.
+- **Fichiers** : 18 mp3 de ~62 s (Bomberman et Foot partie : ~100 s), 192 kbit/s, 27,8 Mo au total, générés par une IA
+  de Google (filigrane SynthID inaudible). Ils portaient chacun un **certificat C2PA** (ID3 GEOB, identifiants uniques) :
+  retiré, comme toute métadonnée, par `outils/importer-musique.mjs`. Exception assumée à la règle « aucun fichier
+  binaire », limitée à `public/music/`. Le garde-fou `~/.garde-git` refuse un binaire contenant un motif interdit et tout
+  fichier audio avec ID3 / APE / C2PA.
+- **Lecteur partagé `public/piste.js`** : UN AudioContext pour toute la page, créé au premier geste (touchend / click /
+  keydown… — iOS) et conservé. Il survit aux changements de jeu : quand le meneur change de jeu, la musique enchaîne en
+  fondu chez tous, sans nouveau geste. Graphe : voix → fondu de boucle → bus de piste → feutre → ducking → sortie.
+  Les jeux gardent leur propre contexte pour les bruitages et les fanfares.
+- **Phases** (`music.setIntensity(inten, m.gs)` dans les 9 clients) : `lobby` → menu ; `countdown`/`play` → partie ;
+  `paused` → partie étouffée (passe-bas 700 Hz) ; `over` → partie tant que le joueur n'a pas choisi « ⌂ Accueil » / ✕,
+  puis menu tout de suite (`accueilChoisi()` / `quandFinChange()` d'`ecran-fin.js` : le serveur, lui, reste en `over`
+  jusqu'à la manche suivante) ; intensité 2 → **climax** = vitesse ×1,06 (≈ +1 demi-ton) en rampe de 0,6 s, sur le
+  seul morceau de partie. Passage d'une piste à l'autre : fondu de 1,2 s. Jeu sans morceaux ou chargement de jeu en
+  échec : `piste.silence()` (le morceau du jeu quitté s'efface).
+- **Pong** : les pulsations du terrain et le défilement du sol du lobby suivent le tempo du morceau audible
+  (`piste.pulsation()`, `bpm`/`temps` mesurés dans `pistes.js` : menu 123,05, partie 149,8 ; ×1,06 au climax), sinon
+  l'ancien tempo de `MUSIC_THEME`.
+- **Boucle** : les morceaux finissent par ~2,5 s de silence et la moitié s'arrêtent net → boucle sur [`debut`, `fin`]
+  (table de `pistes.js`, calculée par `outils/points-de-boucle.js` : silence de tête retiré, queue < -12 dB coupée) avec
+  **fondu enchaîné à puissance constante de 2 s** (deux voix se chevauchent). Le moment du bouclage suit la vitesse réelle
+  (`positionA` / `instantPour`, rampe comprise) : mesuré 5,63 s pour 5,63 s attendus avec une boucle raccourcie au climax.
+- **Niveau** : morceaux masterisés à ~-14,5 dBFS RMS (crêtes 0 dBFS) contre ~-27 dBFS pour les bruitages synthétisés →
+  `VOL = 0,17` × volume musique (0,7 par défaut) ≈ -33,5 dBFS RMS : sous les bruitages. Fanfare = ducking à 40 %.
+- **Réseau / mémoire** : rien n'est téléchargé tant que 🎵 est coupé ; avant le premier geste, seul le morceau affiché est
+  téléchargé (décodé au premier geste) ; l'autre morceau du jeu est préchargé ensuite. Seuls les 2 morceaux du jeu
+  affiché restent décodés (~24 Mo chacun en PCM, ~40 Mo pour les longs), y compris avant le premier geste (mp3 bruts).
+  🎵 coupé plus de 3 s : voix arrêtées, tampons libérés, contexte audio **suspendu** (repris quand 🎵 revient). Échec de
+  chargement : la piste audible s'efface (jamais deux musiques à la fois), musique générée en attendant, nouvel essai
+  toutes les 30 s — le repli reste audible pendant l'essai, jusqu'au premier décodage réussi.
+- **Cache** : `server.js` sert `/music/<jeu>-<menu|jeu>.<sha1:8>.mp3` en `audio/mpeg` avec
+  `Cache-Control: public, max-age=31536000, immutable` (les autres statiques restent en `no-cache` : leur ETag change à
+  chaque déploiement). Un appareil télécharge donc chaque morceau UNE fois (≈ 2,9 Mo par jeu, quota Render 5 Go/mois).
+  Envoi en flux (`createReadStream`) : un client lent n'immobilise plus 2,5 Mo de mémoire par requête.
+- **Tests** (`test/smoke.mjs`, bloc « musiques ») : 9 jeux × 2 morceaux, nom = empreinte réelle, fichier fait
+  UNIQUEMENT de trames audio du premier au dernier octet (`outils/mp3.mjs` : aucune place pour une étiquette), aucun
+  orphelin, en-têtes HTTP des 18 fichiers (200, 304, immutable), calcul de position/bouclage. Vérifié au navigateur :
+  boucle, climax, pause, fin de manche puis « Accueil », retour au menu, changement de jeu (tampons libérés), 🎵
+  coupé/remis (contexte suspendu/repris), bascule `musV`, échec simulé d'un morceau (404) puis reprise.
+- **Revue contradictoire** (workflow, 4 angles : Web Audio/iOS, états, réseau/mémoire, conventions ; chaque constat
+  contre-vérifié) : 2 défauts importants corrigés (double musique sur échec de chargement ; morceau de partie qui
+  restait après « Accueil »), plus 6 mineurs (repli coupé pendant un nouvel essai, mp3 bruts jamais libérés avant le
+  premier geste, `readFile` par requête, étiquettes APE/ID3 de fin mal retirées par l'importeur, tempo des pulsations
+  de Pong, référence de test erronée).
+- **Remplacer un morceau** : `node outils/importer-musique.mjs <dossier>` → reporter le nom dans `pistes.js` → coller
+  `outils/points-de-boucle.js` dans la console sur localhost → reporter `debut`/`fin` → supprimer l'ancien fichier.
+- Non vérifiable ici : le rendu sur iPhone (déverrouillage audio iOS, mode silencieux qui coupe Web Audio).
 
 ## Limites connues (assumées)
 - ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».

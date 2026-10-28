@@ -22,7 +22,7 @@ const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', {
 
 // musique : gamme pentatonique japonaise in-sen (0,1,5,7,8) — bourdon de quinte, pincements de koto,
 // taiko graves en jeu, flûte (shakuhachi) douce ; climax (mort subite / duel final) = taiko serrés + tempo.
-const MUSIC_THEME = { bpm: 92, bpmBoost: 16, vol: 0.5, root: 73.42, len: 32,
+const MUSIC_THEME = { piste: 'sumo', bpm: 92, bpmBoost: 16, vol: 0.5, root: 73.42, len: 32,
   stingers: { kill: { notes: [12, 8, 7, 0], wave: 'triangle', oct: 1, gain: 0.05, dur: 0.24, rate: 0.08 },
     win: { base: 293.66, notes: [[0, 7], [5, 12], [7, 12, 19], [12, 19, 24]], gain: 0.035, dur: 0.42, rate: 0.16 },
     count: { notes: [0], oct: 2, wave: 'triangle', dur: 0.14, gain: 0.045, duck: false }, go: { notes: [[0, 7, 12]], oct: 2, wave: 'triangle', dur: 0.5, gain: 0.05, duck: false },
@@ -280,7 +280,7 @@ export default (function () {
     prevGs = m.gs;
     { let inten = 0;                                      // musique : 1 en jeu, 2 en mort subite ou au duel final (parmi 3+)
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length; if (m.sd || (tot >= 3 && alive <= 2)) inten = 2; }
-      music.setIntensity(inten); }
+      music.setIntensity(inten, m.gs); }
     if (matchBtn) matchBtn.maj(m.match, m.gs);          // bouton « 🏆 Premier à N » : grisé hors lobby / fin de manche
     refreshHUD();
     if (m.gs === 'over') { if (!endShown && !pendingEnd) { showEndscreen(m); endShown = true; overT0 = performance.now(); } }

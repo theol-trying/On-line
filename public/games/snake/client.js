@@ -27,7 +27,7 @@ let GW = GW0, GH = GH0, CELL = CELL0;
 
 // musique : jardin au printemps — nappe I-vi-IV-V, chants d'oiseaux épars au lobby ; en jeu, marimba
 // pentatonique, basse pincée, shaker ; climax (sprint food-rush / duel) = contre-voix, charleston serré + tempo.
-const MUSIC_THEME = { bpm: 102, bpmBoost: 14, vol: 0.42, root: 130.81, len: 32,
+const MUSIC_THEME = { piste: 'snake', bpm: 102, bpmBoost: 14, vol: 0.42, root: 130.81, len: 32,
   stingers: { kill: { notes: [7, 4, 0, -5], wave: 'triangle', oct: 1, gain: 0.04, dur: 0.16, rate: 0.07 },
     win: { base: 261.63, notes: [[0, 4, 7], [5, 9, 12], [7, 11, 14], [12, 16, 19]], gain: 0.035, dur: 0.36, rate: 0.14 },
     count: { notes: [0], oct: 2, wave: 'triangle', dur: 0.1, gain: 0.045, duck: false }, go: { notes: [[0, 4, 7, 12]], oct: 1, dur: 0.45, gain: 0.045, duck: false },
@@ -375,7 +375,7 @@ export default (function () {
         else { const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length;
           if (tot >= 3 && alive <= 2) { inten = 2; if (alive === 2 && !duelAlerted) { duelAlerted = true; music.sting('alert'); msgGlobal('⚔', 'Duel final : deux survivants'); } } }
       }
-      music.setIntensity(inten); }
+      music.setIntensity(inten, m.gs); }
     refreshHUD();
     if (m.gs === 'over') { if (!endShown && !pendingEnd) { showEndscreen(m); endShown = true; } }   // rejeu en cours : la carte attend (cf. endReplay)
     else { endShown = false; pendingEnd = null; RL.skip(); endEl.classList.add('hidden'); endBox(false); }

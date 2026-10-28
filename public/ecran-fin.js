@@ -52,6 +52,11 @@
 
 let courant = null;                              // instance du jeu affiché (la dernière à avoir reçu un état) : cible du ✕ de la coque
 export function quitterFin() { return courant ? courant.quitter() : false; }
+// Musique (music.js) : à 'over', le morceau de partie reste tant que le joueur n'a pas choisi « Accueil » (ou ✕) ;
+// ensuite c'est le morceau de menu, même si le serveur reste en 'over' jusqu'à la manche suivante.
+const abonnes = [];
+export function accueilChoisi() { return !!(courant && courant.accueilChoisi()); }
+export function quandFinChange(fn) { abonnes.push(fn); }
 
 const GARDE_MS = 2100;                           // hub.js jette tout `start` moins de 2 s (GARDE_FIN) après la fin : Relancer grisé d'ici là
 
@@ -67,12 +72,17 @@ export function createEcranFin(opts) {
   };
   const maj = (nvFin, nvChoix) => {
     const ch = nvFin !== fin || nvChoix !== choixAccueil;
+    const vientDeChoisir = nvChoix && !choixAccueil;
     fin = nvFin; choixAccueil = nvChoix; classe();
     if (ch && aChange) aChange();
+    // Seul le CHOIX « Accueil » est signalé : sa remise à zéro vient d'un nouvel état (le jeu repasse alors lui-même
+    // sa phase) ou d'un teardown, où re-pousser la musique du jeu quitté ramènerait son morceau de partie.
+    if (vientDeChoisir) abonnes.forEach(fn => { try { fn(); } catch (e) {} });
   };
 
   const api = {
     enJeu,
+    accueilChoisi: () => choixAccueil,
     suivre(gs) {
       courant = api;
       if (gs === 'over' && gsPrec !== 'over') tFin = Date.now();

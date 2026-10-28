@@ -58,6 +58,12 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
 - Un **fx poussé depuis `onMessage`** est perdu si le `tick()` du jeu repart d'un tableau neuf : passer par la file
   `pend` du jeu ou poser un drapeau consommé dans le tick (objet d'un humain à Micro Machines, corrigé le 23/10 : seuls
   les bots, qui agissent dans le tick, produisaient l'effet visuel).
+- **Musique = fichiers** (`public/music/`, seule exception à « aucun binaire ») : un nouveau morceau passe TOUJOURS par
+  `node outils/importer-musique.mjs <dossier>` (retire ID3/APE/C2PA, nomme par empreinte), puis nom + `debut`/`fin` dans
+  `public/pistes.js` (`outils/points-de-boucle.js` dans la console). Jamais de mp3 déposé à la main : le cache est
+  `immutable`, un contenu changé sous le même nom ne serait jamais re-téléchargé. Un jeu branche ses morceaux par
+  `MUSIC_THEME.piste = '<id>'` et appelle `music.setIntensity(inten, m.gs)` (la phase menu/partie vient de `gs`).
+  `stop()` / `dispose()` ne coupent pas le morceau : le jeu suivant enchaîne dessus (`public/piste.js`, contexte unique).
 - **Joystick analogique** : un jeu qui veut le vecteur du stick (et non des boutons) exporte `joyAna(dx, dy, fin)` dans son
   module ; `app.js` le passe à `joystickPour(id, mod.joy, mod.joyAna)` (Micro Machines : cap absolu).
 

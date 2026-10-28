@@ -2,7 +2,8 @@
 // gestion des panneaux modaux, et délégation du rendu/inputs au module du jeu actif (games/<id>/client.js).
 import { initJoystick, joystickPour } from './joystick.js';   // manette tactile des 5 jeux (téléphone)
 import { creerVitrine } from './vitrine.js';                  // accueil : les 6 jeux en cartes animées
-import { quitterFin } from './ecran-fin.js';                  // ✕ pendant la fin plein écran = « ⌂ Accueil » (même module que les jeux)
+import { quitterFin } from './ecran-fin.js';
+import { silence } from './piste.js';                         // musique en fichiers : coupure si le jeu suivant ne se charge pas                  // ✕ pendant la fin plein écran = « ⌂ Accueil » (même module que les jeux)
 
 let ws = null;
 // Jeton PROPRE À L'ONGLET (sessionStorage : survit au F5, pas partagé avec un autre onglet). En localStorage, deux
@@ -36,8 +37,11 @@ const setMvol = document.getElementById('setMvol');
 const setPad = document.getElementById('setPad');
 
 /* ---------- accessibilité (partagée, persistée) ---------- */
-const a11y = Object.assign({ palette: 'normal', contrast: false, reduceFx: false, theme: 'neon', music: false, sfx: 1, mvol: 0.7, pad: 'joy' },
+const a11y = Object.assign({ palette: 'normal', contrast: false, reduceFx: false, theme: 'neon', music: true, sfx: 1, mvol: 0.7, pad: 'joy' },
   lireJSON(lireLS('pong-lan-a11y') || lireLS('pong-a11y') || '{}', {}));
+// Musiques en fichiers (27/10/2026) : la musique repasse à « activée » UNE fois pour tout le monde, même pour
+// qui l'avait coupée du temps de la musique générée ; 🎵 la recoupe ensuite durablement (musV reste à 2).
+if (a11y.musV !== 2) { a11y.music = true; a11y.musV = 2; ecrireLS('pong-lan-a11y', JSON.stringify(a11y)); }
 function applyA11y() {
   document.body.classList.toggle('flat', a11y.reduceFx);
   document.body.classList.remove('theme-neon', 'theme-crt', 'theme-light');
@@ -505,7 +509,7 @@ async function loadModule(id) {
     const p = pend[id];                           // vider le tampon de ce jeu
     if (p) { p.msgs.forEach(x => mod.onMessage && mod.onMessage(x)); if (p.lb && mod.onLb) mod.onLb(p.lb); if (p.state && mod.onState) mod.onState(p.state); delete pend[id]; }
     xfadeHide();                                  // révèle le nouveau jeu
-  } catch (e) { loadingId = null; xfadeHide(); msgTxt.textContent = 'Jeu « ' + id + ' » indisponible'; }
+  } catch (e) { loadingId = null; xfadeHide(); silence(); msgTxt.textContent = 'Jeu « ' + id + ' » indisponible'; }   // silence : le morceau du jeu quitté ne boucle pas sous l'erreur
 }
 
 /* ---------- transitions thématiques (changement de jeu ET changement de manche) ---------- */

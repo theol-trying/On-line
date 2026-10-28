@@ -1,13 +1,38 @@
-// Moteur de musique générative PARTAGÉ — WebAudio uniquement, zéro dépendance, aucun fichier audio.
+// Moteur de musique PARTAGÉ — WebAudio, zéro dépendance.
 // Chaque jeu définit un THÈME data-driven (tempo + couches basse/mélodie/nappe/percussions) et pilote
 // une INTENSITÉ : 0 = lobby/calme (couches min:0), 1 = en jeu, 2 = climax (mort subite, duel final…).
 // Le moteur lit a11y.music en continu : le réglage 🎵 du shell (dé)coupe la musique de tous les jeux.
 //
-// API : const m = createMusic(() => actx, () => a11y, THEME); m.start(); m.setIntensity(0|1|2); m.stop();
-// THÈME : { bpm, bpmBoost? (ajouté au bpm en climax), vol? (master 0..1), root (Hz), len? (pas, 16 = 1 mesure),
+// MUSIQUE EN FICHIERS : si THEME.piste désigne un jeu de pistes.js, la musique vient de ses deux morceaux
+// (menu / partie), joués par le lecteur partagé piste.js ; les couches générées se taisent. Les fanfares
+// (sting) restent synthétisées par-dessus, et la musique générée revient si un morceau ne se charge pas.
+// Phase : 'lobby' -> morceau de menu ; 'countdown' / 'play' / 'paused' / 'over' -> morceau de partie
+// (gardé sur l'écran de fin jusqu'au choix « Accueil » / ✕, étouffé en pause, accéléré de 6 % en climax).
+//
+// API : const m = createMusic(() => actx, () => a11y, THEME); m.start(); m.setIntensity(0|1|2, m.gs?); m.stop();
+// THÈME : { piste?, bpm, bpmBoost? (ajouté au bpm en climax), vol? (master 0..1), root (Hz), len? (pas, 16 = 1 mesure),
 //   layers: [ { seq:[demi-tons | null | [accord]], wave?, oct?, gain?, dur? (en pas), min? (intensité mini) }
 //             { drums:'K.H.S…' (K=grosse caisse, S=caisse claire, H=charley, .=silence), gain?, min? } ] }
+import * as piste from './piste.js';
+import { accueilChoisi, quandFinChange } from './ecran-fin.js';
+
+let pousserActif = null;                               // pousser() de l'instance du jeu affiché
+quandFinChange(function () { if (pousserActif) pousserActif(); });   // « Accueil » à la fin : morceau de menu tout de suite
+
 export function createMusic(getCtx, getA11y, theme) {
+  const fichier = theme.piste && piste.aDesPistes(theme.piste) ? theme.piste : null;
+  let gs = null, actif = false;
+  function phase() {
+    if (gs === 'lobby') return 'menu';
+    if (gs === 'over') return accueilChoisi() ? 'menu' : 'jeu';
+    if (gs === 'countdown' || gs === 'play' || gs === 'paused') return 'jeu';
+    return intensity >= 1 ? 'jeu' : 'menu';
+  }
+  function pousser() {
+    if (!fichier || !actif || disposed) return;
+    piste.regler({ id: fichier, phase: phase(), climax: intensity >= 2 && gs !== 'paused', pause: gs === 'paused' }, getA11y);
+  }
+  function generee() { return !fichier || piste.enErreur(fichier, phase()); }   // couches synthétisées audibles ?
   let timer = null, ctx = null, master = null, noiseBuf = null;
   let nextT = 0, step = 0, intensity = 0;
   const LEN = theme.len || 32;
@@ -60,6 +85,7 @@ export function createMusic(getCtx, getA11y, theme) {
     const vol = (theme.vol == null ? 0.5 : theme.vol) * (A && A.mvol != null ? A.mvol : 1);   // volume musique séparé (réglages 🎵)
     if (master && c) master.gain.setTargetAtTime(on ? vol : 0, c.currentTime, 0.12);
     if (!on) { nextT = 0; return; }
+    if (!generee()) { nextT = 0; return; }             // le morceau joue : le master ne sert plus qu'aux fanfares
     const spb = 60 / (theme.bpm + (intensity >= 2 ? (theme.bpmBoost || 0) : 0)) / 4;   // durée d'une double-croche
     if (!nextT || nextT < c.currentTime) { nextT = c.currentTime + 0.08; step = 0; }
     while (nextT < c.currentTime + 0.22) { playStep(nextT, step, spb); step = (step + 1) % LEN; nextT += spb; }
@@ -68,6 +94,7 @@ export function createMusic(getCtx, getA11y, theme) {
     const c = ensure(), A = getA11y();
     const st = theme.stingers && theme.stingers[kind];
     if (!st || !c || c.state !== 'running' || !A || !A.music) return;
+    if (fichier && st.duck !== false) piste.baisser();
     if (master && st.duck !== false) { const v = (theme.vol == null ? 0.5 : theme.vol) * (A.mvol != null ? A.mvol : 1); master.gain.cancelScheduledValues(c.currentTime); master.gain.setValueAtTime(Math.min(master.gain.value || v, v * 0.35), c.currentTime); }   // ducking : la musique s'efface brièvement (l'ordonnanceur la remonte en ~300 ms)
     const t0 = c.currentTime + 0.02, rate = st.rate || 0.075, base = st.base || theme.root * Math.pow(2, st.oct == null ? 1 : st.oct);
     st.notes.forEach((n, i) => { (Array.isArray(n) ? n : [n]).forEach(s => osc(t0 + i * rate, base * Math.pow(2, s / 12), st.dur || 0.16, st.wave || 'triangle', st.gain || 0.05)); });
@@ -77,14 +104,19 @@ export function createMusic(getCtx, getA11y, theme) {
   function onVis() { if (disposed) return; const c = getCtx(); if (!c) return; try { if (document.hidden) c.suspend(); else c.resume(); } catch {} }
   document.addEventListener('visibilitychange', onVis);
   return {
-    start() { if (!timer) timer = setInterval(sched, 90); },
-    stop() { if (timer) { clearInterval(timer); timer = null; } if (master && ctx) master.gain.setTargetAtTime(0, ctx.currentTime, 0.06); nextT = 0; },
-    setIntensity(v) { intensity = Math.max(0, Math.min(2, v | 0)); },
+    start() {
+      if (!timer) timer = setInterval(sched, 90);
+      actif = true; pousserActif = pousser;
+      if (fichier) pousser(); else piste.silence();    // jeu sans morceaux : celui du jeu précédent s'efface
+    },
+    // stop / dispose ne coupent PAS le morceau en cours : le jeu suivant enchaîne dessus en fondu.
+    stop() { actif = false; if (pousserActif === pousser) pousserActif = null; if (timer) { clearInterval(timer); timer = null; } if (master && ctx) master.gain.setTargetAtTime(0, ctx.currentTime, 0.06); nextT = 0; },
+    setIntensity(v, etat) { intensity = Math.max(0, Math.min(2, v | 0)); if (etat !== undefined) gs = etat; pousser(); },
     sting,
     // Teardown (changement de jeu) : arrête l'ordonnanceur et retire l'écouteur — sinon il relançait
     // (c.resume()) l'AudioContext d'un jeu déjà quitté au retour sur l'onglet.
     dispose() {
-      disposed = true;
+      disposed = true; actif = false; if (pousserActif === pousser) pousserActif = null;
       if (timer) { clearInterval(timer); timer = null; }
       if (master && ctx) { try { master.gain.setTargetAtTime(0, ctx.currentTime, 0.06); } catch {} }
       document.removeEventListener('visibilitychange', onVis);

@@ -23,7 +23,7 @@ const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final !', {
 
 // musique : valse de guinguette au pique-nique — basse pizzicato (oum-pa-pa), mélodie pentatonique majeure à l'accordéon-jouet,
 // caisse claire en balais en jeu ; climax (duel final / mèche à bout) = tempo accéléré, arpèges serrés et roulement.
-const MUSIC_THEME = { bpm: 118, bpmBoost: 34, vol: 0.5, root: 98, len: 32,
+const MUSIC_THEME = { piste: 'patate', bpm: 118, bpmBoost: 34, vol: 0.5, root: 98, len: 32,
   stingers: { kill: { notes: [12, 7, 3, -2], wave: 'triangle', oct: 1, gain: 0.05, dur: 0.22, rate: 0.07 },
     win: { base: 392, notes: [[0, 7], [4, 12], [7, 12, 16], [12, 19, 24]], gain: 0.035, dur: 0.4, rate: 0.15 },
     count: { notes: [0], oct: 2, wave: 'triangle', dur: 0.14, gain: 0.045, duck: false }, go: { notes: [[0, 7, 12]], oct: 2, wave: 'triangle', dur: 0.5, gain: 0.05, duck: false },
@@ -275,7 +275,7 @@ export default (function () {
     prevGs = m.gs;
     { let inten = 0;                                      // musique : 1 en jeu, 2 au duel final (parmi 3+) ou quand la mèche touche à sa fin
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive).length; if ((tot >= 3 && alive <= 2) || (m.pt || []).some(o => o && (o.lv | 0) >= 3)) inten = 2; }
-      music.setIntensity(inten); }
+      music.setIntensity(inten, m.gs); }
     refreshHUD();
     if (m.gs === 'over') { if (!endShown && !pendingEnd) { showEndscreen(m); endShown = true; overT0 = performance.now(); } }
     else { endShown = false; pendingEnd = null; if (endPod) { endPod = false; layoutEnd(); } endEl.classList.add('hidden'); }

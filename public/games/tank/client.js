@@ -29,7 +29,7 @@ let G = G0, ARENA = ARENA0;
 
 // musique : désert militaire — bourdon grave, luth pincé en mode phrygien dominant (0,1,4,5,7,8,10),
 // caisse claire de marche + ostinato de basse en jeu ; climax (1 vie / duel final) = cuivres + roulements, tempo.
-const MUSIC_THEME = { bpm: 100, bpmBoost: 14, vol: 0.55, root: 73.42, len: 32,
+const MUSIC_THEME = { piste: 'tank', bpm: 100, bpmBoost: 14, vol: 0.55, root: 73.42, len: 32,
   stingers: { kill: { notes: [0, -5, -7], wave: 'sawtooth', oct: 0, gain: 0.05, dur: 0.28, rate: 0.11 },
     win: { base: 261.63, notes: [[0, 7], [0, 7], [4, 12], [7, 12, 16], [12, 16, 19]], gain: 0.034, dur: 0.3, rate: 0.14 },   // fanfare de clairon
     count: { notes: [7], oct: 2, wave: 'square', dur: 0.08, gain: 0.028, duck: false }, go: { notes: [[0, 7, 12]], oct: 1, wave: 'sawtooth', dur: 0.45, gain: 0.045, duck: false },
@@ -394,7 +394,7 @@ export default (function () {
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 si un tank est à 1 vie ou duel final (parmi 3+)
       if (m.gs === 'play' || m.gs === 'countdown') { inten = 1; const tot = m.players.filter(p => p.playing).length, alive = m.players.filter(p => p.playing && p.alive); if ((tot >= 3 && alive.length <= 2) || alive.some(p => p.lives === 1)) inten = 2; }
-      music.setIntensity(inten); }
+      music.setIntensity(inten, m.gs); }
     refreshHUD();
     if (m.gs === 'over') {
       if (!endShown) { endShown = true; if (!replayed) { podT0 = performance.now(); showEndscreen(m); } }   // rejeu lancé : showEndscreen + podium sont déclenchés par draw() à sa fin

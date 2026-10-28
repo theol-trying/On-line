@@ -22,7 +22,7 @@ const DUEL = creerDuel(), duelAnnonce = () => msgGlobal('⚔', 'Duel final : plu
 
 // musique : rock'n'roll de salle de jeux — basse « boogie » en croches, riff pentatonique au synthé-jouet, charleston serré ;
 // climax (dernier tour / duel) : tempo plus vif, roulement et arpège montant.
-const MUSIC_THEME = { bpm: 152, bpmBoost: 26, vol: 0.5, root: 110, len: 32,
+const MUSIC_THEME = { piste: 'micro', bpm: 152, bpmBoost: 26, vol: 0.5, root: 110, len: 32,
   stingers: { kill: { notes: [7, 3, 0, -5], wave: 'square', oct: 1, gain: 0.04, dur: 0.18, rate: 0.06 },
     win: { base: 440, notes: [[0, 4, 7], [5, 9, 12], [7, 11, 14], [12, 16, 19, 24]], gain: 0.032, dur: 0.42, rate: 0.14 },
     count: { notes: [0], oct: 1, wave: 'square', dur: 0.16, gain: 0.04, duck: false }, go: { notes: [[0, 7, 12]], oct: 2, wave: 'square', dur: 0.55, gain: 0.045, duck: false },
@@ -272,7 +272,7 @@ export default (function () {
         if (m.formule === 'elim') { let n = 0; m.players.forEach(p => { if (p.playing && p.alive) n++; }); if (n <= 2 && m.players.filter(p => p.playing).length >= 3) inten = 2; }
         else if ((lead && lead.lap >= m.laps && m.laps > 1) || m.finT != null || (me && me.playing && me.lap >= m.laps && m.laps > 1)) inten = 2;
       }
-      music.setIntensity(inten); }
+      music.setIntensity(inten, m.gs); }
     refreshHUD();
     if (m.gs === 'over') { if (!endShown && !pendingEnd) { showEndscreen(m); endShown = true; overT0 = now; } }
     else { endShown = false; pendingEnd = null; if (endPod) { endPod = false; layoutEnd(); } endEl.classList.add('hidden'); }

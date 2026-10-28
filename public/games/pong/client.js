@@ -17,6 +17,7 @@
 import { W as W0, H as H0, BALL_R, PAD_W, PAD_OFF, PU_R } from './shared.js';
 let W = W0, H = H0;        // espace logique : agrandi par le serveur selon le nombre de joueurs (snapshot aw/ah)
 import { createMusic } from '../../music.js';
+import { pulsation } from '../../piste.js';                          // tempo du morceau audible (pulsations du terrain et du lobby)
 import { seatPattern, SEAT_GLYPH } from '../../patterns.js';   // motifs par siège : lisibles même à 10 ou en mode équipe
 import { initGameMsg, msgPerso, msgGlobal } from '../../gamemsg.js';   // messages de ramassage : l'icône seule ne parle pas
 import { arenaSize } from '../../layout.js';   // taille du plateau : commune aux jeux (mode plein écran compris)
@@ -115,7 +116,7 @@ for (let c = 0; c < 4; c++) for (let s = 0; s < 16; s++) {
   SEQ.arp.push(a); SEQ.arpSoft.push(s % 2 === 0 ? a : null);
   SEQ.lead.push(LEAD[c][s]);
 }
-const MUSIC_THEME = { bpm: 118, bpmBoost: 14, vol: 0.45, root: 110, len: 64,
+const MUSIC_THEME = { piste: 'pong', bpm: 118, bpmBoost: 14, vol: 0.45, root: 110, len: 64,
   stingers: { kill: { notes: [12, 7, 3, 0], wave: 'square', oct: 1, gain: 0.03, dur: 0.12, rate: 0.06 },
     win: { base: 220, notes: [[0, 7, 12], [3, 10, 15], [5, 12, 17], [7, 14, 19], [12, 19, 24]], wave: 'square', gain: 0.022, dur: 0.34, rate: 0.12 },
     count: { notes: [12], oct: 1, wave: 'square', dur: 0.09, gain: 0.04, duck: false }, go: { notes: [[0, 7, 12]], oct: 1, wave: 'sawtooth', dur: 0.45, gain: 0.03, duck: false },
@@ -536,7 +537,7 @@ export default (function () {
     prevGs = m.gs;
     { let inten = 0;                                  // musique : 1 en jeu, 2 quand les échanges deviennent rapides
       if (m.gs === 'play' || m.gs === 'countdown') inten = (m.gs === 'play' && musicIntensity() > 0.55) ? 2 : 1;
-      curInten = inten; music.setIntensity(inten); }
+      curInten = inten; music.setIntensity(inten, m.gs); }
     refreshHUD(); refreshTimer(m); refreshMatch(m);
     if (m.gs === 'over') { if (!endShown && !endPend) { showEndscreen(m); endShown = true; } }   // pendant le ralenti : carte différée (finRalenti)
     else { endShown = false; $('endscreen').classList.add('hidden'); podLayout(null); }
@@ -1080,7 +1081,8 @@ export default (function () {
 
   /* ---- dessin : terrain ---- */
   function beat(now) {                                                   // 1 → 0 à chaque noire (tempo de la musique)
-    const bpm = MUSIC_THEME.bpm + (curInten >= 2 ? MUSIC_THEME.bpmBoost : 0), ph = (now / 60000 * bpm) % 1;
+    const pu = pulsation();                                              // morceau en fichier : ses temps (climax ×1,06 compris)
+    const bpm = MUSIC_THEME.bpm + (curInten >= 2 ? MUSIC_THEME.bpmBoost : 0), ph = pu !== null ? pu - Math.floor(pu) : (now / 60000 * bpm) % 1;
     return (1 - ph) * (1 - ph) * (1 - ph);
   }
   function polyPath(E) { ctx.beginPath(); for (let i = 0; i < E.length; i++) { const e = E[i]; i ? ctx.lineTo(e.ax, e.ay) : ctx.moveTo(e.ax, e.ay); } ctx.closePath(); }
@@ -1424,7 +1426,8 @@ export default (function () {
     ensureLobby();
     ctx.drawImage(lobbyCv, 0, 0, 500, 500);
     // sol en perspective : les lignes défilent vers le joueur au rythme de la musique
-    const bpm = MUSIC_THEME.bpm, sh = A.reduceFx ? 0 : (now / 60000 * bpm / 2) % 1, N = 12;
+    const pu = pulsation(), bpm = MUSIC_THEME.bpm, N = 12;
+    const sh = A.reduceFx ? 0 : (pu !== null ? pu / 2 - Math.floor(pu / 2) : (now / 60000 * bpm / 2) % 1);
     ctx.save(); ctx.beginPath(); ctx.rect(0, HY, 500, 500 - HY); ctx.clip(); ctx.lineCap = 'butt';
     const gridPass = (wm, am) => {
       for (let i = 0; i < N; i++) { const d = (i + sh) / N, y = HY + (500 - HY) * d * d; ctx.globalAlpha = am * (0.1 + 0.75 * d); ctx.lineWidth = (0.5 + 1.5 * d) * wm; seg(0, y, 500, y); }
