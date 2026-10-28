@@ -1314,6 +1314,10 @@ l'écran de fin.
 - **Remplacer un morceau** : `node outils/importer-musique.mjs <dossier>` → reporter le nom dans `pistes.js` → coller
   `outils/points-de-boucle.js` dans la console sur localhost → reporter `debut`/`fin` → supprimer l'ancien fichier.
 - Non vérifiable ici : le rendu sur iPhone (déverrouillage audio iOS, mode silencieux qui coupe Web Audio).
+- **Déploiement par GitHub Actions (28/10)** : la mise en ligne de ce lot n'est pas partie toute seule (connexion
+  GitHub de Render perdue avec la recréation du dépôt du 26/10) et a été lancée à la main. Désormais
+  `.github/workflows/deploy.yml` (copie de celui de Soirée) : `npm test` sur Node 24, puis Deploy Hook Render
+  (secret `RENDER_DEPLOY_HOOK`) ; tests en échec = pas de déploiement. Auto-déploiement natif de Render à couper.
 
 ## Limites connues (assumées)
 - ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».

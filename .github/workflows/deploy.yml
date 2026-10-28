@@ -1,0 +1,43 @@
+# Déploiement automatique vers Render (même mécanisme que Soirée).
+#
+# Pourquoi ce fichier : depuis la recréation du dépôt (26/10/2026), l'auto-déploiement natif de Render ne se
+# déclenchait plus au push (le déploiement du 28/10 a dû être lancé à la main). Plutôt que de dépendre de la
+# connexion GitHub de Render, c'est GitHub qui prévient Render, via un « Deploy Hook ».
+#
+# Mise en route (une seule fois) :
+#   1. Render → le service On-line → Settings → Deploy Hook → copier l'URL secrète.
+#   2. GitHub → le dépôt → Settings → Secrets and variables → Actions →
+#      New repository secret → nom : RENDER_DEPLOY_HOOK, valeur : cette URL.
+#   3. Render → Settings → Build & Deploy → Auto-Deploy : « Off » (sinon un push déploierait deux fois,
+#      et l'auto-déploiement natif n'attend pas les tests).
+#
+# Tant que le secret n'existe pas, ce workflow ne fait rien et ne casse rien.
+# Le déploiement n'est déclenché QUE si npm test passe (test de fumée des 9 jeux + fins de manche).
+name: deploy
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24 # même version que la prod (.node-version)
+      - name: Tests (on ne déploie pas du code cassé)
+        run: npm test
+      - name: Déclencher le déploiement Render
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::warning::Secret RENDER_DEPLOY_HOOK absent — déploiement non déclenché."
+            echo "Voir les instructions en haut de .github/workflows/deploy.yml"
+            exit 0
+          fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$HOOK")
+          echo "Render a répondu $code"
+          # Render renvoie 200 (ou 201) quand le déploiement est accepté.
+          case "$code" in 200|201) echo "Déploiement déclenché ✓" ;; *) exit 1 ;; esac

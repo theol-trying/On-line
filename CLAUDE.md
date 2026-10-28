@@ -20,6 +20,10 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
 - Repo GitHub : `theol-trying/On-line` · prod : https://on-line.onrender.com
   (le `name: pong-line` du `render.yaml` est un reste, ce n'est pas le service live).
 - `buildCommand: node --version` — no-op volontaire, **surtout pas** `npm install`.
+- **Déploiement** (depuis le 28/10/2026, comme Soirée) : un push sur `main` lance `.github/workflows/deploy.yml`,
+  qui fait `npm test` puis appelle le Deploy Hook de Render (secret GitHub `RENDER_DEPLOY_HOOK`). Un push dont les
+  tests échouent n'est **pas** déployé. L'auto-déploiement natif de Render ne se déclenchait plus depuis la
+  recréation du dépôt (26/10) : il doit rester coupé (sinon double déploiement, sans attendre les tests).
 - Hub **autoritatif**, une seule salle et une seule partie active à la fois, état **en
   mémoire** → une seule instance Render.
 - **Ajouter un jeu** = `games/<id>/server.js` + `public/games/<id>/{client.js,shared.js}`,
