@@ -21,15 +21,19 @@ const VMAX = 11.5, ACC = 0.42, BRAKE = 0.8, REV = 0.32, VREV = 4.2, TURN = 0.105
 const SURF = [
   { vmax: 1, acc: 1, grip: 0.36, drag: 0.012 },          // 0 piste
   { vmax: 0.6, acc: 0.75, grip: 0.3, drag: 0.04 },       // 1 hors piste (table, feutre, moquette, cahier)
-  { vmax: 1, acc: 0.5, grip: 0.035, drag: 0.006 },       // 2 glisse (lait, encre)
+  { vmax: 1, acc: 0.75, grip: 0.14, drag: 0.006 },       // 2 glisse (lait, encre, huile) — 29/10 : 0,035 → 0,14, on garde la main (trop punitif)
   { vmax: 0.45, acc: 0.6, grip: 0.42, drag: 0.08 },      // 3 freine (sucre, gomme, craie)
 ];
 const ZONE_SURF = { lait: 2, encre: 2, huile: 2, sucre: 3, gomme: 3, craie: 3, sciure: 3 };
 const SENS = ['normal', 'inverse', 'hasard'];          // sens de course (« hasard » : tiré à chaque manche)
-const MOB_E = 0.3, MOB_KICK = 0.8;                       // obstacles mobiles : rebond mou + petite poussée (ils ne s'arrêtent pas pour vous)
+const MOB_E = 0.3, MOB_KICK = 0.8, MOB_SLIP = 0.6;       // obstacles mobiles : rebond mou + petite poussée (ils ne s'arrêtent pas pour vous)
 const HIT_GRACE = 75;                                    // 2,5 s après un choc violent, revenir « plus loin » sur la piste n'est pas un raccourci
 const BOOST_V = 1.42, BOOST_CD = 30;                     // flèche turbo (circuit-jouet) : +42 % d'un coup, une fois par passage
-const REST = { bande: 0.6, plinthe: 0.35, rail: 0.25 };  // rebond des murs (défaut 0.3) : les bandes du billard renvoient fort
+// Murs (29/10, jugés trop punitifs) : rebond moitié moins fort, la voiture glisse le long du mur au lieu d'y freiner, et le
+// contact ne la fait presque plus tourner ni décrocher. Mesuré (banc d'essai, mur abordé à 45° à pleine vitesse) : renvoi vers
+// l'extérieur 39° → 2°, retard sur 2 s 100 u → 49 u.
+const REST = { bande: 0.35, plinthe: 0.2, rail: 0.12 };  // rebond des murs (défaut E_MUR) : les bandes du billard renvoient plus
+const E_MUR = 0.15, E_ROC = 0.2, SLIP_MUR = 0.3, ROT_MUR = 0.35, FROT_MUR = 0.03;
 const GRACE_S = 12;                                      // Course : temps laissé aux autres après le premier à l'arrivée
 const ELIM_SHRINK_S = 60, ELIM_OUT = 6;                  // Élimination : la fenêtre rétrécit en 1 min, puis encore (mort subite) ; 0,2 s dehors = éliminé
 const ELIM_HW2 = 170, ELIM_CAP_S = 150;                  // demi-côté au bout de 2 min (mort subite) ; filet : 2 min 30, le meneur gagne
@@ -324,7 +328,7 @@ export function createMicro(room) {
     let c = Math.cos(p.a), s = Math.sin(p.a);
     const vf0 = p.vx * c + p.vy * s, k = Math.min(1, Math.abs(vf0) / TURN_V);
     p.a = wrapA(p.a + p.steer * TURN * k * (vf0 >= 0 ? 1 : -1) * (Math.abs(vf0) > VMAX * 0.92 ? 0.9 : 1) + p.w);   // + rotation reçue d'un choc
-    p.w *= p.slip > 0 ? 0.93 : 0.84;
+    p.w *= p.slip > 0 ? 0.9 : 0.8;                       // rotation reçue d'un choc : s'éteint plus vite qu'avant (29/10 : 0,93 / 0,84)
     c = Math.cos(p.a); s = Math.sin(p.a);
     let vf = p.vx * c + p.vy * s, vr = -p.vx * s + p.vy * c;
     const tb = p.tbT > tick;                             // turbo (bonus) : plafond et reprise relevés ; escargot : plafond abaissé
@@ -334,7 +338,7 @@ export function createMicro(room) {
     else vf *= COAST;
     vf *= 1 - S.drag;
     if (vf > cap) vf -= (vf - cap) * 0.07;               // trop vite pour la surface (sucre, hors piste) : ça freine
-    vr *= 1 - S.grip * (p.slip > 0 ? 0.12 : 1);          // après un choc, les pneus décrochent : la voiture glisse où on l'a poussée
+    vr *= 1 - S.grip * (p.slip > 0 ? GRIP_CHOC : 1);     // après un choc, les pneus décrochent : la voiture glisse où on l'a poussée
     if (p.slip > 0) p.slip--;
     p.vx = c * vf - s * vr; p.vy = s * vf + c * vr;
     p.drift = Math.abs(vr);
@@ -348,7 +352,9 @@ export function createMicro(room) {
   // pendant ce temps les pneus ne « mangent » plus la poussée latérale — la voiture glisse là où on l'a envoyée (jusqu'au
   // bord de la table). Avant, l'adhérence effaçait la poussée en quelques ticks : « on touche, il ne se passe rien ».
   const CC_OFF = CAR_L * 0.25, CC_R = CAR_W * 0.5, INERTIE = (CAR_L * CAR_L + CAR_W * CAR_W) / 12;
-  const E_CAR = 0.9, ROT_K = 0.55, W_MAX = 0.32, SLIP_K = 3.2, SLIP_MAX = 32, RAM_K = 0.18;
+  // 29/10 (jugés trop punitifs) : choc latéral à 10 u/tick sur une voiture à 8 — déport 244 u → ~55 u, rotation 177° → 16°,
+  // retard sur 2 s 355 u → ~100 u. On se bouscule toujours, on ne se fait plus retourner ni éjecter de la table.
+  const E_CAR = 0.6, ROT_K = 0.3, W_MAX = 0.16, SLIP_K = 1.8, SLIP_MAX = 18, RAM_K = 0.1, GRIP_CHOC = 0.3;
   const CA = [[0, 0], [0, 0]], CB = [[0, 0], [0, 0]];   // centres des disques (réutilisés : aucune allocation par tick)
   function disques(p, out) {
     const c = Math.cos(p.a), s = Math.sin(p.a);
@@ -356,13 +362,13 @@ export function createMicro(room) {
     return out;
   }
   // impulsion j (u/tick, déjà par unité de masse) appliquée au point (cx, cy) le long de (nx, ny) : vitesse, rotation, glisse
-  function impulsion(p, cx, cy, nx, ny, j, slipK) {
+  function impulsion(p, cx, cy, nx, ny, j, slipK, rot) {
     p.vx += nx * j; p.vy += ny * j;
     const rx = cx - p.x, ry = cy - p.y;
-    p.w = clamp(p.w + clamp((rx * ny - ry * nx) * j / INERTIE * ROT_K, -W_MAX, W_MAX), -W_MAX, W_MAX);
+    p.w = clamp(p.w + clamp((rx * ny - ry * nx) * j / INERTIE * ROT_K * (rot == null ? 1 : rot), -W_MAX, W_MAX), -W_MAX, W_MAX);
     const sl = Math.min(SLIP_MAX, Math.round(Math.abs(j) * slipK));
     if (sl > p.slip) p.slip = sl;
-    if (Math.abs(j) > 3) p.hitT = tick;               // choc violent : voir porteSautee
+    if (Math.abs(j) > 2.5) p.hitT = tick;             // choc violent : voir porteSautee (seuil abaissé avec les chocs plus doux)
   }
   // obstacle fixe (mur, objet, bumper) : chaque disque de la voiture est repoussé ; rebond `e`, frottement, petit couple
   function pousser(p, cx, cy, nx, ny, pen, e, kick) {
@@ -370,9 +376,9 @@ export function createMicro(room) {
     const vn = p.vx * nx + p.vy * ny;
     if (vn < 0 || kick) {
       const j = (vn < 0 ? -(1 + e) * vn : 0) + (kick || 0);
-      impulsion(p, cx, cy, nx, ny, j, kick ? 2.4 : 0.8);
-      const tx = -ny, ty = nx, vt = p.vx * tx + p.vy * ty; p.vx -= vt * 0.08 * tx; p.vy -= vt * 0.08 * ty;
-      if ((j > 2.2 || kick) && tick >= p.bumpFx) { p.bumpFx = tick + 5; fx.push({ type: 'bump', a: p.seat, b: -1, x: r1(cx - nx * CC_R), y: r1(cy - ny * CC_R), i: r2(Math.min(1, j / 9)), k: kick ? 1 : 0 }); }
+      impulsion(p, cx, cy, nx, ny, j, kick ? 2.4 : SLIP_MUR, kick ? 1 : ROT_MUR);
+      const tx = -ny, ty = nx, vt = p.vx * tx + p.vy * ty; p.vx -= vt * FROT_MUR * tx; p.vy -= vt * FROT_MUR * ty;
+      if ((j > 1.9 || kick) && tick >= p.bumpFx) { p.bumpFx = tick + 5; fx.push({ type: 'bump', a: p.seat, b: -1, x: r1(cx - nx * CC_R), y: r1(cy - ny * CC_R), i: r2(Math.min(1, j / 9)), k: kick ? 1 : 0 }); }
     }
   }
   function murs(p) {
@@ -385,14 +391,14 @@ export function createMicro(room) {
           const r = C.rocks[id - 10000], dx = px - r[0], dy = py - r[1], dd = Math.hypot(dx, dy), rr = r[2] + CC_R;
           if (dd < rr && dd > 1e-6) {
             const bump = Object.hasOwn(BUMPERS, r[3]);     // bumper (punaise, pion, tampon…) : il RENVOIE (coup de pied en plus du rebond)
-            pousser(p, px - dx / dd * CC_R, py - dy / dd * CC_R, dx / dd, dy / dd, rr - dd, bump ? 0.6 : 0.35, bump ? BUMPER_KICK : 0);
+            pousser(p, px - dx / dd * CC_R, py - dy / dd * CC_R, dx / dd, dy / dd, rr - dd, bump ? 0.6 : E_ROC, bump ? BUMPER_KICK : 0);
             disques(p, CA);
           }
         } else {
           const w = C.walls[id], ex = w[2] - w[0], ey = w[3] - w[1], l2 = ex * ex + ey * ey || 1;
           const u = clamp(((px - w[0]) * ex + (py - w[1]) * ey) / l2, 0, 1), qx = w[0] + ex * u, qy = w[1] + ey * u;
           const dx = px - qx, dy = py - qy, dd = Math.hypot(dx, dy), rr = w[4] + CC_R;
-          if (dd < rr && dd > 1e-6) { pousser(p, qx + dx / dd * w[4], qy + dy / dd * w[4], dx / dd, dy / dd, rr - dd, Object.hasOwn(REST, w[5]) ? REST[w[5]] : 0.3, 0); disques(p, CA); }
+          if (dd < rr && dd > 1e-6) { pousser(p, qx + dx / dd * w[4], qy + dy / dd * w[4], dx / dd, dy / dd, rr - dd, Object.hasOwn(REST, w[5]) ? REST[w[5]] : E_MUR, 0); disques(p, CA); }
         }
       }
       for (let k = 0; k < MOBP.length; k++) {           // obstacles mobiles : masse « infinie », ils emportent la voiture
@@ -401,7 +407,7 @@ export function createMicro(room) {
         const nx = dx / dd, ny = dy / dd;
         p.x += nx * (rr - dd); p.y += ny * (rr - dd);
         const vn = (p.vx - o.vx) * nx + (p.vy - o.vy) * ny;
-        if (vn < 0.5) { const j = -(1 + MOB_E) * Math.min(0, vn) + MOB_KICK; impulsion(p, o.x + nx * C.mobs[k].r, o.y + ny * C.mobs[k].r, nx, ny, j, 1.2); if (tick >= p.bumpFx) { p.bumpFx = tick + 6; fx.push({ type: 'bump', a: p.seat, b: -1, x: r1(o.x + nx * C.mobs[k].r), y: r1(o.y + ny * C.mobs[k].r), i: r2(Math.min(1, j / 8)), k: 1 }); } }
+        if (vn < 0.5) { const j = -(1 + MOB_E) * Math.min(0, vn) + MOB_KICK; impulsion(p, o.x + nx * C.mobs[k].r, o.y + ny * C.mobs[k].r, nx, ny, j, MOB_SLIP); if (tick >= p.bumpFx) { p.bumpFx = tick + 6; fx.push({ type: 'bump', a: p.seat, b: -1, x: r1(o.x + nx * C.mobs[k].r), y: r1(o.y + ny * C.mobs[k].r), i: r2(Math.min(1, j / 8)), k: 1 }); } }
         disques(p, CA);
       }
     }
@@ -518,7 +524,8 @@ export function createMicro(room) {
   //   3 Boule de papier 📄 (tirée devant, rebondit 3 fois, fait tourner la voiture touchée)
   //   4 Bouclier 🛡 5 s (ni huile, ni boule, ni escargot ; les chocs le secouent à peine)   5 Escargot 🐌 (tous ceux de devant ×0,62, 2,5 s)
   const BOX_R = 24, BOX_T = 4 * TICK_HZ, TURBO_T = 45, TURBO_V = 1.4, TURBO_A = 1.6, SHIELD_T = 5 * TICK_HZ;
-  const SLOW_T = 75, SLOW_V = 0.62, OIL_R = 44, OIL_T = 12 * TICK_HZ, OIL_SLIP = 24, BALL_V = 15, BALL_R = 9, BALL_T = 3 * TICK_HZ;
+  // flaque d'huile (29/10, jugée trop punitive) : glisse 24 → 14 ticks, embardée 0,14 → 0,08 rad/tick (rotation 16° → 8°)
+  const SLOW_T = 75, SLOW_V = 0.62, OIL_R = 44, OIL_T = 12 * TICK_HZ, OIL_SLIP = 14, OIL_SPIN = 0.08, BALL_V = 15, BALL_R = 9, BALL_T = 3 * TICK_HZ;
   const ITEMS = ['turbo', 'triple', 'huile', 'boule', 'bouclier', 'escargot'];
   let bonusOn = true, boxT = [], flaques = [], boules = [], nextId = 1;
   // COUP DE POUCE (option `pouce`) : plus on est loin derrière le meneur, plus la voiture va vite (plafond et reprise),
@@ -572,7 +579,7 @@ export function createMicro(room) {
       if (q.oilIn === f.id || (q.seat === f.o && tick < f.ot)) continue;
       q.oilIn = f.id;
       if (protege(q)) { fx.push({ type: 'pare', seat: q.seat }); continue; }
-      q.slip = Math.max(q.slip, OIL_SLIP); q.w += (Math.random() < 0.5 ? -1 : 1) * 0.14;
+      q.slip = Math.max(q.slip, OIL_SLIP); q.w += (Math.random() < 0.5 ? -1 : 1) * OIL_SPIN;
       if (f.o !== q.seat && players[f.o] && players[f.o].team !== q.team) { q.bumpBy = f.o; q.bumpT = tick; }
       fx.push({ type: 'glisse', seat: q.seat, by: f.o, x: r1(q.x), y: r1(q.y) });
     }

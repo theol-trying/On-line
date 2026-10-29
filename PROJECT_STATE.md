@@ -391,6 +391,20 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     pénalisée, 14 variantes de circuits) ; navigateur bureau + téléphone 375 px, pilote automatique par script :
     objets ramassés et utilisés, aucune erreur.
 
+- **Physique adoucie (29/10)** — retour utilisateur : « les circuits avec murs, les collisions et les flaques d'huile sont
+  trop punitifs ». Réglé côté serveur seulement (`games/micro/server.js`), chiffré sur un banc d'essai qui recopie la
+  physique (pilote plein gaz qui ramène au cap) :
+  · **murs** : rebond moitié moins fort (`E_MUR` 0,3 → 0,15 ; bande 0,6 → 0,35 ; plinthe 0,35 → 0,2 ; rail 0,25 → 0,12 ;
+    objets `E_ROC` 0,35 → 0,2), frottement le long du mur 0,08 → 0,03, couple ×0,35 et décrochage 0,8 → 0,3. Mur abordé
+    à 45° à pleine vitesse : renvoi vers l'extérieur 39° → 2°, retard sur 2 s 100 u → 49 u. Bumpers inchangés (voulus).
+  · **chocs entre voitures** : `E_CAR` 0,9 → 0,6, `ROT_K` 0,55 → 0,3, `W_MAX` 0,32 → 0,16, `SLIP_K` 3,2 → 1,8, `SLIP_MAX`
+    32 → 18, `RAM_K` 0,18 → 0,1, adhérence pendant la glisse 12 % → 30 % (`GRIP_CHOC`), rotation reçue amortie plus vite
+    (0,93 / 0,84 → 0,9 / 0,8). Choc latéral à 10 u/tick sur une voiture à 8 : déport 244 u → 55 u, rotation 177° → 16°,
+    retard 355 u → 101 u. On se bouscule toujours ; on ne se fait plus retourner ni éjecter de la table.
+  · **huile** : objet 🛢 glisse 24 → 14 ticks, embardée 0,14 → 0,08 (rotation 16° → 8°) ; zones glissantes (lait, encre,
+    huile) adhérence 0,035 → 0,14 et reprise 0,5 → 0,75 (sortie de trajectoire en virage 121 u → 79 u).
+  · seuil de « choc violent » (`hitT`, grâce anti-raccourci) 3 → 2,5 ; son/étincelles de mur dès j > 1,9 (au lieu de 2,2).
+  · Boule de papier 📄 et escargot 🐌 inchangés. Courses de bots (`fins-de-manche.mjs`) : manche la plus longue 405 s → 255 s.
 ## ZQSD / WASD dans tous les jeux (25/09)
 Les 7 jeux lisent le clavier par `e.code` (position PHYSIQUE) : `KeyW`/`KeyA` sont les touches Z/Q d'un clavier
 AZERTY, donc ZQSD marchait déjà en AZERTY. `KeyZ`/`KeyQ` ajoutés partout : Z Q S D marche aussi sur un clavier réglé
