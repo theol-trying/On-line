@@ -21,6 +21,8 @@ h1{ font-size:20px; margin:0 0 4px; }
 .carte p{ margin:0 0 8px; color:var(--muted); }
 .carte canvas{ display:block; width:100%; height:auto; border-radius:8px; background:#000; }
 .chiffres{ font-size:12px; color:var(--muted); margin-top:6px; }
+body.nu{ padding:0; } body.nu h1, body.nu .sous, body.nu .carte h2, body.nu .carte p, body.nu .chiffres{ display:none; }
+body.nu .carte{ padding:0; border:0; margin:0; border-radius:0; } body.nu .carte canvas{ border-radius:0; }
 </style>
 </head>
 <body>
@@ -31,32 +33,52 @@ h1{ font-size:20px; margin:0 0 4px; }
 import { CIRCUITS, circuitParId, mobile } from './games/micro/shared.js';
 import { peindreCircuit, mobileDessin } from './games/micro/rendu.js';
 const liste = document.getElementById('liste'), vues = [];
+// ?id=jardin,noel : seulement ces circuits (dessinés plus grand) ; ?inv=1 : sens inverse
+const qs = new URLSearchParams(location.search), choix = (qs.get('id') || '').split(',').filter(Boolean), inv = qs.get('inv') === '1';
+if (qs.get('nu') === '1') document.body.className = 'nu';   // ?nu=1 : le dessin seul, sans titres (captures d'écran)
 for (const d of CIRCUITS) {
-  const c = circuitParId(d.id, false), carte = document.createElement('section'); carte.className = 'carte';
+  if (choix.length && choix.indexOf(d.id) < 0) continue;
+  const c = circuitParId(d.id, inv), carte = document.createElement('section'); carte.className = 'carte';
   const h = document.createElement('h2'); h.textContent = d.emoji + ' ' + d.nom;
   const p = document.createElement('p'); p.textContent = d.sous;
   const cv = document.createElement('canvas'), ch = document.createElement('div'); ch.className = 'chiffres';
   ch.textContent = 'Longueur ' + Math.round(c.L) + ' u · piste ' + 2 * c.W + ' u de large · ' + c.gates.length + ' portes · ' + c.mobs.length + ' obstacle(s) mobile(s) · ' + c.rocks.length + ' obstacle(s) fixe(s)';
   carte.appendChild(h); carte.appendChild(p); carte.appendChild(cv); carte.appendChild(ch); liste.appendChild(carte);
   // décor pré-rendu une fois, à la résolution de l'écran (plafonné), puis recopié à chaque image sous les mobiles
-  const larg = Math.min(1400, Math.max(320, carte.clientWidth - 24)) * Math.min(2, window.devicePixelRatio || 1);
-  const q = larg / c.w, fond = document.createElement('canvas');
-  fond.width = Math.round(c.w * q); fond.height = Math.round(c.h * q);
-  const g = fond.getContext('2d'); g.setTransform(q, 0, 0, q, 0, 0); peindreCircuit(g, c, {});
+  const larg = +qs.get('larg') || Math.min(choix.length ? 2400 : 1400, Math.max(320, carte.clientWidth - 24)) * Math.min(2, window.devicePixelRatio || 1);   // ?larg=3000 : résolution imposée
+  // ?vue=x0,y0,x1,y1 : seulement ce rectangle du monde (u), en grand — pour regarder un décor de près
+  const vu = (qs.get('vue') || '').split(',').map(Number), rect = vu.length === 4 && vu[2] > vu[0] && vu[3] > vu[1] ? vu : [0, 0, c.w, c.h];
+  const q = larg / (rect[2] - rect[0]), ox = -rect[0] * q, oy = -rect[1] * q, fond = document.createElement('canvas');
+  fond.width = Math.round((rect[2] - rect[0]) * q); fond.height = Math.round((rect[3] - rect[1]) * q);
+  const g = fond.getContext('2d'); g.setTransform(q, 0, 0, q, ox, oy);
+  const t0 = performance.now(); peindreCircuit(g, c, {}); const ms = performance.now() - t0;
+  ch.textContent += ' · décor dessiné en ' + Math.round(ms) + ' ms (' + fond.width + ' × ' + fond.height + ' px)';
+  if (qs.get('repere') === '1') {                      // ?repere=1 : ligne médiane + fractions du tour (0.05 en 0.05), pour placer obstacles et zones
+    g.strokeStyle = 'rgba(255,0,200,0.8)'; g.lineWidth = 3; g.beginPath();
+    for (let i = 0; i <= c.n; i++) { const j = i % c.n; if (i) g.lineTo(c.sx[j], c.sy[j]); else g.moveTo(c.sx[j], c.sy[j]); }
+    g.stroke(); g.font = 'bold 34px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (let k = 0; k < 20; k++) {
+      const i = Math.round(k / 20 * c.n) % c.n, x = c.sx[i] - c.nx[i] * (c.W + 40), y = c.sy[i] - c.ny[i] * (c.W + 40);
+      g.fillStyle = 'rgba(255,0,200,0.9)'; g.beginPath(); g.arc(c.sx[i], c.sy[i], 9, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#000'; g.fillRect(x - 46, y - 22, 92, 44); g.fillStyle = '#fff'; g.fillText((k / 20).toFixed(2), x, y);
+    }
+  }
   cv.width = fond.width; cv.height = fond.height;
-  vues.push({ c, cv, fond, q });
+  vues.push({ c, cv, fond, q, ox, oy });
 }
 const o = { x: 0, y: 0, vx: 0, vy: 0, a: 0 };
-function image(now) {
+function dessiner(now) {
   for (const v of vues) {
     const g = v.cv.getContext('2d');
     g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(v.fond, 0, 0);
-    g.setTransform(v.q, 0, 0, v.q, 0, 0);
+    g.setTransform(v.q, 0, 0, v.q, v.ox, v.oy);
     for (const m of v.c.mobs) { mobile(m, now / 1000, o); mobileDessin(g, v.c, m, o, now, false); }
   }
-  requestAnimationFrame(image);
 }
-requestAnimationFrame(image);
+// ?t=12.5 : image figée à cet instant (s) ; sinon animation. Une première image tout de suite (onglet en arrière-plan : pas de rAF)
+const fige = qs.get('t');
+dessiner(fige ? +fige * 1000 : performance.now());
+if (!fige) { const image = now => { dessiner(now); requestAnimationFrame(image); }; requestAnimationFrame(image); }
 </script>
 </body>
 </html>

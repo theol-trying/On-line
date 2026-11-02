@@ -43,7 +43,8 @@ const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
    pts : ligne médiane (sens de course), le départ est sur le premier point (ligne droite avant ET après : sens inverse).
    make(H) : ajoute murs, obstacles, zones et décor à partir des échantillons (H.at(f) = point à la fraction f du tour).
    mobs : obstacles mobiles — seg [[x1,y1],[x2,y2]] (aller-retour adouci), cer [cx, cy, R] (tour complet) ou chemin
-          [[x,y]…] (boucle fermée lissée, vitesse constante) ; r = rayon de collision ; per = période (s).
+          [[x,y]…] (boucle fermée lissée, vitesse constante) ; r = rayon de collision ; per = période (s) ;
+          dec = décalage de phase en fraction de période (plusieurs mobiles sur le même trajet : wagons, file de billes).
    boxes : fractions du tour où poser une rangée de boîtes de bonus (3 en travers de la piste).
    bumpers : ['type'…] obstacles ronds de CE circuit qui renvoient (comme les plots de flipper).
    zonesPhysiques : { kind: 'glisse' | 'frein' } pour les zones propres au circuit (sinon : lait/encre/huile glissent,
@@ -178,7 +179,7 @@ function construire(def, inverse) {
   if (def.make) def.make(H);
   for (const f of def.boxes || []) for (const lat of [-0.5, 0, 0.5]) { const p = H.at(f, lat); c.boxes.push([p.x, p.y]); }   // rangées de 3 boîtes
   c.mobs = (def.mobs || []).map(m => {
-    const o = { type: m.type, r: m.r, per: m.per, seg: m.seg || null, cer: m.cer || null, chemin: null };
+    const o = Object.assign({}, m, { dec: m.dec || 0, seg: m.seg || null, cer: m.cer || null, chemin: null });   // propriétés libres gardées (couleur, n° de wagon…) pour le dessin
     if (m.chemin && m.chemin.length >= 3) {             // boucle lissée, rééchantillonnée : vitesse constante sur tout le trajet
       const rs = resample(catmull(m.chemin, 12), 6), P = rs.pts, cum = [0];
       for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; cum.push(cum[i] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
@@ -276,6 +277,7 @@ export function zoneA(c, x, y) {                                  // zone (ellip
 }
 // obstacle mobile au temps de course t (s) : aller-retour adouci le long d'un segment, ou tour complet d'un cercle
 export function mobile(m, t, out) {
+  t += (m.dec || 0) * m.per;                            // décalage de phase (fraction de période) : wagons d'un train, billes en file
   const w = TAU / m.per;
   if (m.chemin) {                                       // boucle fermée à vitesse constante (recherche dichotomique du tronçon)
     const ch = m.chemin, s = ((t / m.per) % 1 + 1) % 1 * ch.L, P = ch.P, n = P.length;
