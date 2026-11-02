@@ -19,6 +19,7 @@ import { createHash } from 'crypto';
 import { tmpdir } from 'os';
 import net from 'net';
 import http from 'http';
+import { CIRCUITS, circuitParId } from '../public/games/micro/shared.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.SMOKE_PORT || 3999);
@@ -517,7 +518,9 @@ cadences.tank = await jouer('tank', 8, { arene: { lire: s => 'grille ' + s.ag, v
 cadences.bomb = await jouer('bomb', 8, { arene: { lire: s => 'grille ' + s.gw, valeur: 'grille 17' } });
 cadences.foot = await jouer('foot', 10, { arene: { lire: s => 'arène ' + s.ar + ' · ' + (s.geo && s.geo.e ? s.geo.e.length : 0) + ' côtés', valeur: 'arène 1123 · 10 côtés' } });   // un côté (une cage) par joueur
 cadences.sumo = await jouer('sumo', 10, { arene: { lire: s => 'arène ' + s.ar, valeur: 'arène 1080' } });   // k = 1.8 → 600 × 1.8
-cadences.micro = await jouer('micro', 10, { arene: { lire: s => 'circuit ' + s.circuit + ' · ' + s.K + ' portes · ' + s.laps + ' tours · ' + s.formule, valeur: 'circuit dejeuner · 42 portes · 3 tours · course' } });   // géométrie partagée (shared.js) : seul l'identifiant du circuit voyage
+// Micro : circuit tiré au sort par défaut (« hasard ») ; seul son identifiant voyage, le nombre de portes doit être celui de shared.js
+const circuitVu = s => CIRCUITS.some(d => d.id === s.circuit) && circuitParId(s.circuit, s.inv).gates.length === s.K ? 'circuit connu' : 'circuit ' + s.circuit + ' (' + s.K + ' portes)';
+cadences.micro = await jouer('micro', 10, { arene: { lire: s => circuitVu(s) + ' · choix ' + s.choix + ' · ' + s.laps + ' tours · ' + s.formule, valeur: 'circuit connu · choix hasard · 3 tours · course' } });
 cadences.patate = await jouer('patate', 10, { arene: { lire: s => 'arène ' + s.ar + ' · ' + (s.pil || []).length + ' piliers · R ' + Math.round(s.R0), valeur: 'arène 1123 · 5 piliers · R 532' } });   // k = 1.56 → 720 × 1.56 ; rayon utile = 1123/2 − 30
 await arriveeEnCours();
 await protections();

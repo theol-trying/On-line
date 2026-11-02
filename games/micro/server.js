@@ -27,6 +27,11 @@ const SURF = [
 // zones : glisse (surface 2) ou freine (surface 3) — listes de shared.js, complétées par chaque circuit (zonesPhysiques)
 const surfZone = k => Object.hasOwn(ZONE_GLISSE, k) ? 2 : Object.hasOwn(ZONE_FREIN, k) ? 3 : 1;
 const SENS = ['normal', 'inverse', 'hasard'];          // sens de course (« hasard » : tiré à chaque manche)
+// GRAND PRIX (02/11) : plusieurs courses d'affilée, une par circuit (tous différents, tirés au sort ; le circuit choisi,
+// s'il y en a un, ouvre la série). Points selon la place à chaque course ; le total décide du vainqueur (équipes : somme
+// de leurs pilotes ; à égalité, le plus de victoires). Exclusif avec le match « premier à N » de games/match.js.
+const GP_COURSES = [0, 3, 5, -1];                       // 0 = course simple ; sinon nombre de courses (-1 = tous les circuits)
+const GP_POINTS = [15, 12, 10, 8, 6, 5, 4, 3, 2, 1];    // points de la 1re à la 10e place
 const MOB_E = 0.3, MOB_KICK = 0.8, MOB_SLIP = 0.6;       // obstacles mobiles : rebond mou + petite poussée (ils ne s'arrêtent pas pour vous)
 const HIT_GRACE = 75;                                    // 2,5 s après un choc violent, revenir « plus loin » sur la piste n'est pas un raccourci
 const BOOST_V = 1.42, BOOST_CD = 30;                     // flèche turbo (circuit-jouet) : +42 % d'un coup, une fois par passage
@@ -72,7 +77,9 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 export function createMicro(room) {
   let players, gameState, tick, round, countdownUntil, winner, fx, pend, mode, nteams, nParts, endTick, botCount, botDiff;
   let circuit, C, laps, formule, finCount, finDeadline, leader, leadT, cam, lastBest;
-  let circChoix = CIRCUITS[0].id, sensChoix = 'normal', inverse = false;   // choix du game master (« hasard » possible) / circuit et sens joués
+  let circChoix = 'hasard', sensChoix = 'normal', inverse = false;   // choix du game master (« hasard » par défaut) / circuit et sens joués
+  let sac = [];                                          // « Hasard » : circuits pas encore tirés (tous passent avant qu'un revienne)
+  let gpChoix = 0, gpSeq = [], gpFait = 0, gpGagnants = [];   // Grand Prix : réglage, circuits de la série, courses courues, sièges vainqueurs
   const MOBP = [];                                       // positions des obstacles mobiles au tick courant
   let seatByMid = {}, clk = 0;                          // clk : horloge continue (le tick repart de 0 au départ)
 
@@ -117,22 +124,56 @@ export function createMicro(room) {
       lane: 0, forme: 1, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0,
       gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
       item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, oilIn: 0, pouce: 1, useReq: false,
-      rs: 0, place: 0, elimTick: -1, score: 0,
+      rs: 0, place: 0, elimTick: -1, score: 0, gpPts: 0, gpDer: 0, gpWins: 0,
     }));
   }
   const match = creerMatch();
   function setCircuit(id, inv) { circuit = id; inverse = !!inv; C = circuitParId(id, inverse); MOBP.length = 0; for (const m of C.mobs) MOBP.push(mobile(m, 0, {})); }
-  // circuit et sens de la manche : le choix du game master, ou un tirage quand il a choisi « 🎲 Hasard »
+  function melange(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+  const sensDe = () => (sensChoix === 'hasard' ? Math.random() < 0.5 : sensChoix === 'inverse');
+  // circuit et sens de la manche : le choix du game master, ou un tirage quand il a choisi « 🎲 Hasard » (jamais deux fois de suite)
   function tirerCircuit() {
-    const id = circChoix === 'hasard' ? CIRCUITS[Math.floor(Math.random() * CIRCUITS.length)].id : circChoix;
-    setCircuit(id, sensChoix === 'hasard' ? Math.random() < 0.5 : sensChoix === 'inverse');
+    let id = circChoix;
+    if (circChoix === 'hasard') {
+      if (!sac.length) { sac = melange(CIRCUITS.map(c => c.id)); if (sac.length > 1 && sac[0] === circuit) sac.push(sac.shift()); }
+      id = sac.shift();
+    }
+    setCircuit(id, sensDe());
+  }
+  /* ---------- Grand Prix ---------- */
+  const gpTotal = () => Math.min(CIRCUITS.length, gpChoix < 0 ? CIRCUITS.length : gpChoix);
+  const gpEnCours = () => gpChoix !== 0 && gpSeq.length > 0 && gpFait < gpSeq.length;
+  function gpAnnuler() { gpSeq = []; gpFait = 0; gpGagnants = []; for (const p of players) { p.gpPts = 0; p.gpDer = 0; p.gpWins = 0; } }
+  function gpNouveau() {                                 // nouvelle série : circuits tous différents, le circuit choisi en premier
+    gpAnnuler();
+    const ids = melange(CIRCUITS.map(c => c.id).filter(id => id !== circChoix));
+    if (circChoix !== 'hasard') ids.unshift(circChoix);
+    gpSeq = ids.slice(0, gpTotal());
+  }
+  function gpPoints(ps) {                                // fin d'une course du Grand Prix : points de la place, puis vainqueur après la dernière
+    for (const p of ps) { p.gpDer = p.place >= 1 ? (GP_POINTS[p.place - 1] || 0) : 0; p.gpPts += p.gpDer; if (p.place === 1) p.gpWins++; }
+    gpFait++;
+    if (gpFait < gpSeq.length) return;
+    const ins = players.filter(p => p.playing || p.gpPts > 0);
+    if (nteams < nParts) {                               // équipes (celles de la dernière course) : somme des points de leurs pilotes
+      const tot = {}, vic = {};
+      for (const p of ins) if (p.playing) { tot[p.team] = (tot[p.team] || 0) + p.gpPts; vic[p.team] = (vic[p.team] || 0) + p.gpWins; }
+      const eq = Object.keys(tot).map(Number).sort((a, b) => tot[b] - tot[a] || vic[b] - vic[a]);
+      const nul = eq.length > 1 && tot[eq[0]] === tot[eq[1]] && vic[eq[0]] === vic[eq[1]];
+      gpGagnants = eq.length && !nul ? ins.filter(p => p.playing && p.team === eq[0]).map(p => p.seat) : [];
+    } else {
+      const tri = ins.slice().sort((a, b) => b.gpPts - a.gpPts || b.gpWins - a.gpWins);
+      const nul = tri.length > 1 && tri[0].gpPts === tri[1].gpPts && tri[0].gpWins === tri[1].gpWins;
+      gpGagnants = tri.length && !nul ? [tri[0].seat] : [];
+    }
   }
   function fullReset() {
     match.reinit();
     players = makePlayers();
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; pend = [];
     mode = 'ffa'; nteams = 0; nParts = 0; endTick = 0; botCount = 0; botDiff = 1; seatByMid = {};
-    circChoix = CIRCUITS[0].id; sensChoix = 'normal'; setCircuit(CIRCUITS[0].id, false); laps = 3; formule = 'course';
+    circChoix = 'hasard'; sensChoix = 'normal'; setCircuit(CIRCUITS[0].id, false); laps = 3; formule = 'course';
+    sac = []; gpChoix = 0; gpSeq = []; gpFait = 0; gpGagnants = [];
     finCount = 0; finDeadline = 0; leader = -1; leadT = -1e9; cam = null; lastBest = null;
   }
 
@@ -157,7 +198,8 @@ export function createMicro(room) {
     parts.forEach((p, i) => { if (p.bot) p.name = '🤖 Bot ' + (i + 1); });
     if (!parts.length) return;
     match.debutManche(players);
-    tirerCircuit();                                    // « Hasard » : un nouveau circuit / sens à chaque manche
+    if (gpChoix) { if (!gpEnCours()) gpNouveau(); setCircuit(gpSeq[gpFait], sensDe()); }   // Grand Prix : la course suivante de la série
+    else tirerCircuit();                               // « Hasard » : un nouveau circuit / sens à chaque manche
     const N = parts.length;
     if (!validModes(N).includes(mode)) mode = 'ffa';
     nteams = numTeamsFor(mode, N);
@@ -183,6 +225,7 @@ export function createMicro(room) {
   function backToLobby() {            // abandon : retour au lobby en pleine partie
     if (gameState !== 'play' && gameState !== 'countdown' && gameState !== 'paused') return;
     gameState = 'lobby'; winner = null; fx = []; pend = []; cam = null; flaques = []; boules = [];
+    gpAnnuler();                                         // abandon en pleine course : le Grand Prix repart de zéro
     for (const p of players) { p.playing = false; p.alive = false; p.vx = 0; p.vy = 0; }
   }
 
@@ -231,6 +274,7 @@ export function createMicro(room) {
     if (winner >= 0) players.forEach(p => { if (p.playing && p.team === winner) p.score++; });
     match.apresManche(players, winner);
     classerManche(players, winner, { score: p => p.rs });   // places : une seule vérité, commune aux jeux (games/fin-manche.js)
+    if (gpEnCours()) gpPoints(ps);
     recordRound();
   }
 
@@ -715,6 +759,8 @@ export function createMicro(room) {
       bx: bonusOn ? (boxT.length === C.boxes.length ? boxT.map(t => (t > tick && gameState !== 'lobby' ? '0' : '1')).join('') : '1'.repeat(C.boxes.length)) : '',
       fl: flaques.map(f => [r1(f.x), r1(f.y)]), pj: boules.map(b => [r1(b.x), r1(b.y)]), opt: { bonus: bonusOn ? 1 : 0, pouce: pouceOn ? 1 : 0 },
       match: match.etat(players),
+      // Grand Prix : n courses, k déjà courues, circuits de la série, f = terminé, ws = sièges vainqueurs (null = course simple)
+      gp: gpChoix ? { n: gpSeq.length || gpTotal(), k: gpFait, seq: gpSeq, f: gpSeq.length && gpFait >= gpSeq.length ? 1 : 0, ws: gpGagnants } : null,
       stats: gameState === 'over' ? { durationSec: Math.round(endTick / TICK_HZ), nParts, circuit, laps, formule, match: match.gagne } : null,
       players: players.map(p => ({
         seat: p.seat, name: p.name, team: p.team, connected: !!p.member, playing: p.playing, alive: p.alive, bot: !!p.bot,
@@ -724,6 +770,7 @@ export function createMicro(room) {
         lap: Math.max(1, Math.min(laps, p.lap || 1)), pos: p.pos, fin: p.fin, ft: p.fin ? r2(p.ftick / TICK_HZ) : 0,
         bl: p.best ? r2(p.best / TICK_HZ) : 0, ll: p.last ? r2(p.last / TICK_HZ) : 0, pg: p.pg,
         bumps: p.bumps, kos: p.kos, falls: p.falls, cuts: p.cuts, pen: p.penT > tick, it: p.item, iu: p.iu, tb: p.tbT > tick, sh: p.shT > tick, sl: p.slowT > tick, score: p.score, place: p.place, elimTick: p.elimTick,
+        gpp: p.gpPts, gpd: p.gpDer,
       })),
     };
   }
@@ -731,6 +778,7 @@ export function createMicro(room) {
   /* ---- contrat plateforme ---- */
   function repriseSiegeBot(p) {
     p.playing = false; p.alive = false; p.place = 0; p.kos = 0; p.falls = 0; p.bumps = 0; p.fin = 0; p.best = 0;
+    p.gpPts = 0; p.gpDer = 0; p.gpWins = 0;
     if ('score' in p) p.score = 0;
   }
   function onJoin(member) {
@@ -742,6 +790,7 @@ export function createMicro(room) {
     if (seat < 0) return { role: 'spectator', hello: { t: 'welcome', seat: -1 } };
     const p = players[seat];
     if (p.bot) repriseSiegeBot(p);
+    else if (rid !== seat) { p.gpPts = 0; p.gpDer = 0; p.gpWins = 0; }   // siège laissé par un autre : ses points de Grand Prix ne passent pas au nouveau venu
     p.member = member; p.bot = false; p.mid = member.id; p.name = member.name || '';
     seatByMid[member.id] = seat;
     return { role: 'player', seat, hello: { t: 'welcome', seat } };
@@ -782,13 +831,15 @@ export function createMicro(room) {
       if (editable()) {
         const ids = CIRCUITS.map(c => c.id).concat(['hasard']);
         circChoix = typeof m.id === 'string' && ids.includes(m.id) ? m.id : cycle(ids, circChoix);
+        gpAnnuler(); sac = [];                           // la série du Grand Prix est tirée à nouveau avec ce choix
         if (circChoix !== 'hasard') setCircuit(circChoix, sensChoix === 'hasard' ? inverse : sensChoix === 'inverse');
       }
     }
     else if (m.t === 'sens') { if (editable()) { sensChoix = cycle(SENS, sensChoix); if (sensChoix !== 'hasard') setCircuit(circuit, sensChoix === 'inverse'); } }
     else if (m.t === 'laps') { if (editable()) laps = cycle(LAPS, laps); }
     else if (m.t === 'formule') { if (editable()) formule = cycle(FORMULES, formule); }
-    else if (m.t === 'match') { if (editable()) match.changer(players); }
+    else if (m.t === 'match') { if (editable()) { match.changer(players); if (match.cible > 1) { gpChoix = 0; gpAnnuler(); } } }
+    else if (m.t === 'gp') { if (editable()) { gpChoix = cycle(GP_COURSES, gpChoix); gpAnnuler(); if (gpChoix) match.regler(1, players); } }
     else if (m.t === 'lbreset') reset(GID);
   }
   function tick_() { clk++; for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }

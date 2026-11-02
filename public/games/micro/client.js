@@ -4,7 +4,7 @@
 // Géométrie des circuits : ./shared.js (la même que le serveur — rien ne voyage sur le réseau que l'identifiant).
 // Structure calquée sur la Patate chaude (HUD, écran de fin, câblage unique des écouteurs, briques partagées).
 // iOS 15 : ni ?. ni ??, ni roundRect / ctx.filter / ctx.ellipse / letterSpacing / OffscreenCanvas.
-import { TICK_HZ, CAR_L, CAR_W, VIEW, CIRCUITS, BUMPERS, circuitParId, mobile } from './shared.js';
+import { TICK_HZ, CAR_L, CAR_W, VIEW, CIRCUITS, BUMPERS, circuitParId, cleRecord, mobile } from './shared.js';
 import { peindreCircuit, mobileDessin, couleurHors, couleurTraces, trackPath, hexRgb, rgbStr, mix, rng, oval, rr } from './rendu.js';   // dessin des circuits
 import { createMusic } from '../../music.js';
 import { creerSfx } from '../../sfx.js';
@@ -88,7 +88,7 @@ export default (function () {
   let pendingEnd = null, overT0 = 0, eatUntil = 0, homeChoice = false, goT0 = -1e9, lastFinishAt = -1e9;
   let podSrc = null, podList = [], endPod = false;
   let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, diffBtn, formBtn, circBtn, lapsBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl, hornBtn;
-  let sensBtn, bonusBtn, pouceBtn, itemBtn, ckey = '', VRT = 0, lastItemMsg = -1e9;
+  let sensBtn, bonusBtn, pouceBtn, itemBtn, gpBtn, ckey = '', VRT = 0, lastItemMsg = -1e9;
   const bumpFlash = {};                                   // bumpers qui viennent de renvoyer quelqu'un : éclat (index d'obstacle → instant)
   let matchBtn = null, matchChip = null;
   const lastRear = new Array(MAX_SEATS).fill(null);    // dernière position des roues arrière (traces de pneus)
@@ -115,7 +115,36 @@ export default (function () {
   }
 
   // ───────────────────────── HUD (cartes DOM), classement, écran de fin ─────────────────────────
-  const relanceLabel = (m, def) => m && m.match ? (m.match.f ? 'Nouveau match' : 'Manche suivante') : def;
+  const relanceLabel = (m, def) => {
+    if (m && m.gp) return m.gp.f ? 'Nouveau Grand Prix' : m.gp.k ? 'Course suivante (' + (m.gp.k + 1) + '/' + m.gp.n + ')' : 'Lancer le Grand Prix';
+    return m && m.match ? (m.match.f ? 'Nouveau match' : 'Manche suivante') : def;
+  };
+  // Grand Prix (m.gp = { n, k, seq, f, ws }, null en course simple) : « Grand Prix · course 2/5 »
+  function texteGP(m) {
+    if (!m || !m.gp) return '';
+    const g = m.gp;
+    if (g.f) return 'Grand Prix terminé';
+    if (m.gs === 'play' || m.gs === 'paused' || m.gs === 'countdown') return 'Grand Prix · course ' + (g.k + 1) + '/' + g.n;
+    return g.k ? 'Grand Prix · ' + g.k + '/' + g.n + ' courses' : 'Grand Prix en ' + g.n + ' courses';
+  }
+  function vainqueurGP(m) {                              // nom du vainqueur du Grand Prix ('' : égalité)
+    const ws = (m.gp && m.gp.ws) || [], p = ws.length ? m.players[ws[0]] : null;
+    if (!p) return '';
+    return teamMode ? 'Équipe ' + (TEAM_LETTER[p.team] || '?') : (p.name || ('P' + (p.seat + 1)));
+  }
+  function blocGP(m) {                                   // classement du Grand Prix (écran de fin) + prochain circuit
+    const g = m.gp, medals = ['🥇', '🥈', '🥉'];
+    const ins = m.players.filter(p => p.playing || (p.gpp | 0) > 0).slice().sort((a, b) => (b.gpp | 0) - (a.gpp | 0) || (a.place || 99) - (b.place || 99) || a.seat - b.seat);
+    const rows = ins.map((p, i) => {
+      const rang = i > 0 && (p.gpp | 0) === (ins[i - 1].gpp | 0) ? 0 : i + 1;
+      return `<div class="erow ${g.f && (g.ws || []).indexOf(p.seat) >= 0 ? 'win' : ''}"><span class="eplace">${rang ? (g.f ? medals[rang - 1] || ('#' + rang) : '#' + rang) : ''}</span>
+        <span class="ename" style="color:${colSeat(p.seat)}">${esc(p.name || ('P' + (p.seat + 1)))}${teamMode ? ` <small>Éq.${TEAM_LETTER[p.team]}</small>` : ''}</span>
+        <span class="estat" title="points de cette course">+${p.gpd | 0}</span><span class="eres"><b>${p.gpp | 0}</b> pts</span></div>`;
+    }).join('');
+    const suite = !g.f && g.seq && g.seq[g.k] ? circuitParId(g.seq[g.k]) : null;
+    return `<div class="emeta">🏎 <b>Grand Prix</b> — ${g.f ? 'classement final' : 'après ' + g.k + ' course' + (g.k > 1 ? 's' : '') + ' sur ' + g.n}</div><div class="elist">${rows}</div>` +
+      (suite ? `<div class="emeta">Prochaine course : ${suite.emoji} <b>${esc(suite.nom)}</b></div>` : '');
+  }
   function matchTeamName(t) {
     if (teamMode) return 'Équipe ' + (TEAM_LETTER[t] || (t + 1));
     const p = snap && snap.players.find(q => q.playing && q.team === t);
@@ -133,7 +162,7 @@ export default (function () {
   }
   function refreshHUD() {
     if (!snap) return;
-    if (matchChip) { const tx = texteMatch(snap.match); if (matchChip._t !== tx) { matchChip._t = tx; matchChip.textContent = tx ? '🏆 ' + tx : ''; } matchChip.style.display = tx ? '' : 'none'; }
+    if (matchChip) { const tg = texteGP(snap), tm = texteMatch(snap.match), tx = tg ? '🏎 ' + tg : tm ? '🏆 ' + tm : ''; if (matchChip._t !== tx) { matchChip._t = tx; matchChip.textContent = tx; } matchChip.style.display = tx ? '' : 'none'; }
     snap.players.forEach((p, i) => {
       const shown = p.connected || p.playing;
       cards[i].classList.toggle('hidden', !shown);
@@ -148,7 +177,7 @@ export default (function () {
       if (p.bot) tags.push(`<span class="badge" style="background:${col}28;color:${col}">BOT</span>`);
       else if (i === mySeat) tags.push(`<span class="badge" style="background:${col}28;color:${col}">VOUS</span>`);
       const glyph = SEAT_GLYPH[i % SEAT_GLYPH.length];
-      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}<span class="sg" style="opacity:.8">${glyph}</span> ${esc(p.name || ('P' + (i + 1)))} <span class="sc" title="voitures envoyées dans le décor">${p.kos | 0} 💥</span> ${snap.match ? `<span class="sc" title="manches gagnées" style="letter-spacing:1px">${pastillesTexte(p.score, snap.match.n)}</span> ` : ''}${tags.join('')}`;
+      const pnH = `${(window.__AV && window.__AV(p.name)) || ''}<span class="sg" style="opacity:.8">${glyph}</span> ${esc(p.name || ('P' + (i + 1)))} <span class="sc" title="voitures envoyées dans le décor">${p.kos | 0} 💥</span> ${snap.match ? `<span class="sc" title="manches gagnées" style="letter-spacing:1px">${pastillesTexte(p.score, snap.match.n)}</span> ` : ''}${snap.gp ? `<span class="sc" title="points du Grand Prix">${p.gpp | 0} pts</span> ` : ''}${tags.join('')}`;
       if (cards[i]._pn !== pnH) { cards[i]._pn = pnH; cards[i].querySelector('.pn').innerHTML = pnH; }
       const lv = cards[i].querySelector('.lv'); lv.style.color = col;
       const t = etatTxt(p, snap); if (cards[i]._lv !== t) { cards[i]._lv = t; lv.textContent = t; }
@@ -157,9 +186,10 @@ export default (function () {
   function renderLB() {
     if (!lbBody) return;
     if (!board.length) { lbBody.innerHTML = '<div class="lbnote">Aucune course enregistrée.</div>'; return; }
-    lbBody.innerHTML = board.slice().sort((a, b) => (b.wins || 0) - (a.wins || 0) || (b.podiums || 0) - (a.podiums || 0) || ((a.bestLap || 1e9) - (b.bestLap || 1e9))).map(e =>
+    const cr = cleRecord(cid), cd = circuitParId(cid), rec = e => (e.bl && Object.prototype.hasOwnProperty.call(e.bl, cr) && e.bl[cr] > 0 ? e.bl[cr] : 0);
+    lbBody.innerHTML = `<div class="lbnote">⏱ record du tour sur ${cd.emoji} ${esc(cd.nom)}</div>` + board.slice().sort((a, b) => (b.wins || 0) - (a.wins || 0) || (b.podiums || 0) - (a.podiums || 0) || ((a.bestLap || 1e9) - (b.bestLap || 1e9))).map(e =>
       `<div class="lbrow"><span class="lbn">${esc(e.name)}</span><span title="courses">🎮${e.games || 0}</span><span title="victoires">🏆${e.wins || 0}</span><span title="podiums">🥉${e.podiums || 0}</span>` +
-      `<span title="voitures envoyées dans le décor">💥${e.kos || 0}</span>` + (e.bestLap ? `<span title="meilleur tour (tous circuits)">⏱${fmtT(e.bestLap)}</span>` : '') + '</div>').join('');
+      `<span title="voitures envoyées dans le décor">💥${e.kos || 0}</span>` + (rec(e) ? `<span title="record du tour : ${esc(cd.nom)}">⏱${fmtT(rec(e))}</span>` : '') + '</div>').join('');
   }
   const podFrac = () => (cv && cv.clientWidth < 460 ? 0.46 : 0.4);
   function layoutEnd() {
@@ -171,7 +201,10 @@ export default (function () {
   function podEntries(m) {
     if (podSrc !== m) {
       podSrc = m; podList = m ? podiumEntries(m.players, colSeat) : [];
-      if (m && m.match && m.match.f && podList.length) {
+      if (m && m.gp && m.gp.f && podList.length) {
+        podList.sort((a, b) => (b.gpp | 0) - (a.gpp | 0) || a.place - b.place || a.seat - b.seat);
+        podList.forEach((e, i) => { e.place = i > 0 && (e.gpp | 0) === (podList[i - 1].gpp | 0) ? podList[i - 1].place : i + 1; });
+      } else if (m && m.match && m.match.f && podList.length) {
         podList.sort((a, b) => (b.score | 0) - (a.score | 0) || a.place - b.place || a.seat - b.seat);
         podList.forEach((e, i) => { e.place = i > 0 && (e.score | 0) === (podList[i - 1].score | 0) ? podList[i - 1].place : i + 1; });
       }
@@ -189,8 +222,8 @@ export default (function () {
     const who = esc(whoRaw);
     const sc = [], vu = {}; parts.forEach(p => { const k = 't' + p.team; if (!vu[k]) { vu[k] = 1; sc.push(p.score | 0); } });
     const T = titreFin(m.match, whoRaw, sc);
-    const solo = m.stats.nParts === 1;
-    const title = solo ? (parts[0] && parts[0].fin ? '🏁 Course bouclée en ' + fmtT(parts[0].ft) : 'Fin de la balade') :
+    const solo = m.stats.nParts === 1, gpFin = !!(m.gp && m.gp.f), gpNom = gpFin ? vainqueurGP(m) : '';
+    const title = gpFin ? (gpNom ? '🏆 ' + esc(gpNom) + ' remporte le Grand Prix !' : 'Grand Prix : égalité au sommet') : solo ? (parts[0] && parts[0].fin ? '🏁 Course bouclée en ' + fmtT(parts[0].ft) : 'Fin de la balade') :
       T.titre ? esc(T.titre) + (who ? ' — ' + who : '') : (champ ? (elim ? who + ' reste seul à l\'écran !' : '🏁 ' + who + ' remporte la course !') : (elim ? 'Égalité — personne ne décroche' : 'Égalité sur la ligne'));
     const subLine = T.titre ? `<div class="emeta">${esc(T.sous)}</div>` : '';
     const cdef = circuitParId(m.stats.circuit);
@@ -211,8 +244,8 @@ export default (function () {
     const bestLine = best ? `<div class="emeta">⏱ Meilleur tour : <b style="color:${colSeat(best.seat)}">${esc(best.name || ('P' + (best.seat + 1)))}</b> — ${fmtT(best.bl)}</div>` : '';
     const koLine = ko ? `<div class="emeta">💥 Chauffard : <b style="color:${colSeat(ko.seat)}">${esc(ko.name || ('P' + (ko.seat + 1)))}</b> — ${ko.kos} voiture${ko.kos > 1 ? 's' : ''} dans le décor</div>` : '';
     const wrapO = endPod ? '<div style="width:100%;flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;align-items:center;gap:8px">' : '', wrapC = endPod ? '</div>' : '';
-    endEl.innerHTML = wrapO + `<div class="etitle" style="color:${champ ? colSeat(champ.seat) : K.cream}">${title}</div>
-      ${subLine}<div class="emeta">${cdef.emoji} ${esc(cdef.nom)} · ${elim ? '💥 Élimination' : '🏁 ' + m.stats.laps + ' tour' + (m.stats.laps > 1 ? 's' : '')} · ⏱ ${m.stats.durationSec} s · ${m.stats.nParts} pilote${m.stats.nParts > 1 ? 's' : ''}</div>${bestLine}${koLine}<div class="elist">${rows}</div>${jRound === m.round ? blocFin(J, { titre: elim ? 'Positions (éliminés à zéro)' : 'Positions au fil de la course', couleur: s => colSeat(s), nom: s => nameOf(s) }) : ''}<div class="ehint">${TOUCH ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>` + wrapC;
+    endEl.innerHTML = wrapO + `<div class="etitle" style="color:${gpFin ? (gpNom ? colSeat(m.gp.ws[0]) : K.cream) : champ ? colSeat(champ.seat) : K.cream}">${title}</div>
+      ${subLine}<div class="emeta">${cdef.emoji} ${esc(cdef.nom)} · ${elim ? '💥 Élimination' : '🏁 ' + m.stats.laps + ' tour' + (m.stats.laps > 1 ? 's' : '')} · ⏱ ${m.stats.durationSec} s · ${m.stats.nParts} pilote${m.stats.nParts > 1 ? 's' : ''}</div>${m.gp ? blocGP(m) : ''}${bestLine}${koLine}<div class="elist">${rows}</div>${jRound === m.round ? blocFin(J, { titre: elim ? 'Positions (éliminés à zéro)' : 'Positions au fil de la course', couleur: s => colSeat(s), nom: s => nameOf(s) }) : ''}<div class="ehint">${TOUCH ? 'Touche pour rejouer' : 'Espace / clic pour rejouer'}</div>` + wrapC;
     EF.boutons(endEl, { relancer: () => { unlockAudio(); send({ t: 'start' }); }, libelle: relanceLabel(m, 'Relancer'), accueil: () => { homeChoice = true; endEl.classList.add('hidden'); } });
     if (champ && FX()) confettiAt(cam.x, cam.y, 60);
   }
@@ -299,6 +332,7 @@ export default (function () {
       if (itemBtn._t !== tx) { itemBtn._t = tx; itemBtn.textContent = tx; }
       itemBtn.style.opacity = d ? '' : '0.45'; itemBtn.style.display = bon ? '' : 'none';
     }
+    if (gpBtn) { gpBtn.disabled = !idle; gpBtn.textContent = '🏎 Grand Prix : ' + (m.gp ? m.gp.n + ' courses' : 'non'); gpBtn.classList.toggle('on', !!m.gp); }
     if (lapsBtn) { lapsBtn.disabled = !idle || m.formule === 'elim'; lapsBtn.textContent = '🔁 ' + m.laps + ' tour' + (m.laps > 1 ? 's' : ''); }
   }
   // suivi de MA course : tours, dépassements, mauvais sens, record (messages et annonces)
@@ -847,9 +881,11 @@ export default (function () {
     const n = snap.connected || 0, nb = snap.botCount || 0, tot = n + nb, y0 = c + 40, f1 = readable(16, cv, HUDW, 11), f2 = readable(14, cv, HUDW, 10);
     ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = 'bold ' + f1.toFixed(1) + 'px system-ui, sans-serif'; ctx.fillStyle = K.cream;
-    ctx.fillText((snap.choix === 'hasard' ? '🎲 Circuit au hasard' : cd.emoji + ' ' + cd.nom) + ' · ' + (snap.formule === 'elim' ? '💥 Élimination' : '🏁 Course en ' + snap.laps + ' tour' + (snap.laps > 1 ? 's' : '')), c, y0);
+    const gp = snap.gp, frm = snap.formule === 'elim' ? '💥 Élimination' : '🏁 Course en ' + snap.laps + ' tour' + (snap.laps > 1 ? 's' : '');
+    ctx.fillText((gp ? '🏎 Grand Prix en ' + gp.n + ' courses' : snap.choix === 'hasard' ? '🎲 Circuit au hasard' : cd.emoji + ' ' + cd.nom) + ' · ' + frm, c, y0);
     ctx.font = f2.toFixed(1) + 'px system-ui, sans-serif'; ctx.fillStyle = 'rgba(255,246,224,.78)';
-    ctx.fillText(snap.choix === 'hasard' ? 'Un des ' + CIRCUITS.length + ' circuits, tiré au sort à chaque manche' : cd.sous, c, y0 + f1 * 1.5);
+    ctx.fillText(gp ? 'Un circuit différent à chaque course' + (snap.choix === 'hasard' ? ', tiré au sort' : ', en commençant par ' + cd.emoji + ' ' + cd.nom)
+      : snap.choix === 'hasard' ? 'Un des ' + CIRCUITS.length + ' circuits, tiré au sort à chaque manche' : cd.sous, c, y0 + f1 * 1.5);
     ctx.fillText(`${n} pilote${n > 1 ? 's' : ''}${nb ? ' + ' + nb + ' bot' + (nb > 1 ? 's' : '') : ''}${teamMode ? ' · ' + (MODE_NAME[snap.mode] || snap.mode) : ''}`, c, y0 + f1 * 1.5 + f2 * 1.5);
     const opt = snap.opt || {}, ex = [snap.sens === 'inverse' ? SENS_NAME.inverse : snap.sens === 'hasard' ? SENS_NAME.hasard : '', opt.bonus ? '🎁 Bonus' : '', opt.pouce ? '🤝 Coup de pouce' : ''].filter(Boolean).join(' · ');
     if (ex) ctx.fillText(ex, c, y0 + f1 * 1.5 + f2 * 3);
@@ -996,7 +1032,10 @@ export default (function () {
     hud.insertBefore(matchChip, hud.firstChild);
     startBtn = $('mmStart'); pauseBtn = $('mmPause'); modeBtn = $('mmMode'); botsBtn = $('mmBots'); diffBtn = $('mmDiff'); formBtn = $('mmFormule'); circBtn = $('mmCircuit'); lapsBtn = $('mmLaps'); pauseFloat = $('mmPauseFloat');
     lbBtn = $('mmLbBtn'); lbPanel = $('mmLbPanel'); lbBody = $('mmLbBody'); hornBtn = $('mmHorn');
-    sensBtn = $('mmSens'); bonusBtn = $('mmBonus'); pouceBtn = $('mmPouce'); itemBtn = $('mmItem');
+    sensBtn = $('mmSens'); bonusBtn = $('mmBonus'); pouceBtn = $('mmPouce'); itemBtn = $('mmItem'); gpBtn = $('mmGp');
+    if (gpBtn) gpBtn.onclick = () => send({ t: 'gp' });
+    const aideC = $('mmHelpCircuits');                  // circuits de l'aide : tirés des définitions (jamais en retard d'un circuit)
+    if (aideC) aideC.innerHTML = CIRCUITS.map(d => `<div class="legrow"><span>${d.emoji}</span><b>${esc(d.nom)}</b> — ${esc(d.sous)}</div>`).join('');
     if (sensBtn) sensBtn.onclick = () => send({ t: 'sens' });
     if (bonusBtn) bonusBtn.onclick = () => send({ t: 'bonus' });
     if (pouceBtn) pouceBtn.onclick = () => send({ t: 'pouce' });

@@ -591,7 +591,8 @@
       <button id="mmStart" class="primary" disabled>▶ Démarrer</button>
       <button id="mmPause" disabled>⏸ Pause</button>
       <span class="sep"></span>
-      <button class="gm" id="mmCircuit">🥣 Petit-déjeuner</button>
+      <button class="gm" id="mmCircuit">🎲 Circuit au hasard</button>
+      <button class="gm" id="mmGp">🏎 Grand Prix : non</button>
       <button class="gm" id="mmFormule">🏁 Course</button>
       <button class="gm" id="mmSens">➡️ Sens normal</button>
       <button class="gm" id="mmLaps">🔁 3 tours</button>
@@ -642,16 +643,11 @@
         <h4>Formules (game master)</h4>
         <div class="legrow"><span>🏁</span><b>Course</b> — 1, 3 ou 5 tours. Il faut passer les portes de contrôle dans l'ordre : couper à travers la table ne sert à rien. Quand le premier franchit la ligne, les autres ont 12 s pour finir, puis sont classés à leur progression</div>
         <div class="legrow"><span>💥</span><b>Élimination</b> — comme les Micro Machines d'origine : un seul écran pour tous, centré sur le meneur, qui rétrécit. Qui en sort est éliminé ; le dernier dans le cadre gagne</div>
+        <div class="legrow"><span>🏎</span><b>Grand Prix</b> — 3, 5 ou toutes les courses d'affilée, une par circuit, jamais deux fois le même. Chaque course rapporte des points selon la place (15, 12, 10, 8, 6, 5, 4, 3, 2, 1) ; le total désigne le vainqueur (à égalité : le plus de victoires)</div>
         <h4>Circuits</h4>
-        <div class="legrow"><span>🥣</span><b>Petit-déjeuner</b> — table de cuisine : bol de céréales, tasse, lait renversé, sucre. Bords de table dangereux</div>
-        <div class="legrow"><span>✏️</span><b>Bureau d'écolier</b> — cahier quadrillé, crayons et règles en bordure, taches d'encre</div>
-        <div class="legrow"><span>🎱</span><b>Billard</b> — les bandes renvoient fort, les billes barrent la route, les poches avalent</div>
-        <div class="legrow"><span>🏁</span><b>Circuit-jouet</b> — piste orange à rails sur la moquette : pas de chute, flèches turbo, plots rebondissants</div>
-        <div class="legrow"><span>🔧</span><b>Établi du garage</b> — étau, marteau, écrous et vis ; tampons en caoutchouc qui renvoient comme un flipper, flaques d'huile et sciure</div>
-        <div class="legrow"><span>🎲</span><b>Jeu de société</b> — sur le plateau : dés, sablier, pions rebondissants et une toupie qui tourne au milieu</div>
-        <div class="legrow"><span>♾️</span><b>Circuit en 8</b> — tapis de jeu d'enfant avec un croisement : attention aux collisions au milieu</div>
-        <div class="legrow"><span>🐭</span><b>Obstacles mobiles</b> — la souris mécanique (petit-déjeuner), la bille (billard) et la toupie (jeu de société) bougent : elles bousculent fort</div>
-        <div class="legrow"><span>↩️</span><b>Sens et hasard</b> — le game master peut faire courir chaque circuit à l'envers, ou tirer le circuit (🎲) et le sens au hasard à chaque manche</div>
+        <div id="mmHelpCircuits"></div>
+        <div class="legrow"><span>🐭</span><b>Obstacles mobiles</b> — souris mécanique, billes, toupies, train… ils bougent et bousculent : à contourner</div>
+        <div class="legrow"><span>↩️</span><b>Sens et hasard</b> — par défaut le circuit est tiré au sort (🎲) à chaque manche, sans repasser par le même avant d'avoir vu les autres. Le game master peut choisir un circuit, le faire courir à l'envers ou tirer le sens au hasard</div>
         <div class="note">Les bots ont trois niveaux (Facile, Normale, Difficile). Le meilleur tour de chaque pilote est gardé au classement.</div>
       </div>
     </div>
