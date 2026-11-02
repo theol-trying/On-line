@@ -7,7 +7,7 @@
 // glisser), chocs entre voitures (on se bouscule, on se fait tourner), murs et obstacles, CHUTE quand on quitte la table
 // (ou dans une poche du billard) → réapparition à la dernière porte de contrôle franchie, fantôme 1,2 s.
 // Les tours se comptent par portes de contrôle franchies DANS L'ORDRE : couper à travers la table ne fait rien gagner.
-import { TICK_HZ, CAR_R, CAR_L, CAR_W, FALL_T, GHOST_T, LAPS, FORMULES, ELIM_HW0, ELIM_HW1, CIRCUITS, BUMPERS, circuitParId, proche, surTable, dansTrou, zoneA, grilleDepart, mobile } from '../../public/games/micro/shared.js';
+import { TICK_HZ, CAR_R, CAR_L, CAR_W, FALL_T, GHOST_T, LAPS, FORMULES, ELIM_HW0, ELIM_HW1, CIRCUITS, BUMPERS, ZONE_GLISSE, ZONE_FREIN, cleRecord, circuitParId, proche, surTable, dansTrou, zoneA, grilleDepart, mobile } from '../../public/games/micro/shared.js';
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
 import { creerMatch } from '../match.js';
@@ -24,7 +24,8 @@ const SURF = [
   { vmax: 1, acc: 0.75, grip: 0.14, drag: 0.006 },       // 2 glisse (lait, encre, huile) — 29/10 : 0,035 → 0,14, on garde la main (trop punitif)
   { vmax: 0.45, acc: 0.6, grip: 0.42, drag: 0.08 },      // 3 freine (sucre, gomme, craie)
 ];
-const ZONE_SURF = { lait: 2, encre: 2, huile: 2, sucre: 3, gomme: 3, craie: 3, sciure: 3 };
+// zones : glisse (surface 2) ou freine (surface 3) — listes de shared.js, complétées par chaque circuit (zonesPhysiques)
+const surfZone = k => Object.hasOwn(ZONE_GLISSE, k) ? 2 : Object.hasOwn(ZONE_FREIN, k) ? 3 : 1;
 const SENS = ['normal', 'inverse', 'hasard'];          // sens de course (« hasard » : tiré à chaque manche)
 const MOB_E = 0.3, MOB_KICK = 0.8, MOB_SLIP = 0.6;       // obstacles mobiles : rebond mou + petite poussée (ils ne s'arrêtent pas pour vous)
 const HIT_GRACE = 75;                                    // 2,5 s après un choc violent, revenir « plus loin » sur la piste n'est pas un raccourci
@@ -93,7 +94,8 @@ export function createMicro(room) {
         const s = r2(p.best / TICK_HZ);
         if (!e.bestLap || s < e.bestLap) e.bestLap = s;
         if (!e.bl || typeof e.bl !== 'object') e.bl = {};
-        if (!Object.hasOwn(e.bl, circuit) || !(e.bl[circuit] > 0) || s < e.bl[circuit]) e.bl[circuit] = s;
+        const cr = cleRecord(circuit);                       // record rangé par version du tracé (circuits refaits le 02/11)
+        if (!Object.hasOwn(e.bl, cr) || !(e.bl[cr] > 0) || s < e.bl[cr]) e.bl[cr] = s;
       }
       bumpDaily(p.name, { win, kills: p.kos, game: GID });     // classement du jour (tous jeux)
     }
@@ -310,7 +312,7 @@ export function createMicro(room) {
   function surfaceDe(p) {
     const z = zoneA(C, p.x, p.y);
     let sf;
-    if (z && z[4] !== 'boost') sf = ZONE_SURF[z[4]] || 1;
+    if (z && z[4] !== 'boost') sf = surfZone(z[4]);
     else {
       sf = p.dTrack <= C.W + 4 ? 0 : 1;
     }

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<!-- GALERIE des circuits de Micro Machines : chaque circuit dessiné en entier avec le vrai rendu du jeu
+     (public/games/micro/rendu.js) et ses obstacles mobiles animés. Non liée depuis le site : elle sert à vérifier les
+     décors et à choisir ses circuits. Données : public/games/micro/circuits/<id>.js. -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0a0c16">
+<title>Circuits Micro Machines</title>
+<style>
+:root{ --ground:#0a0c16; --panel:#161a2d; --line:rgba(255,255,255,.10); --ink:#eef0fb; --muted:#8e96b8; --yel:#ffd23a; color-scheme:dark; }
+*{ -webkit-box-sizing:border-box; box-sizing:border-box; }
+html,body{ margin:0; }
+body{ background:var(--ground); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-size:14px; padding:16px; }
+h1{ font-size:20px; margin:0 0 4px; }
+.sous{ color:var(--muted); margin:0 0 16px; line-height:1.4; }
+.carte{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:16px; }
+.carte h2{ font-size:16px; margin:0 0 2px; color:var(--yel); }
+.carte p{ margin:0 0 8px; color:var(--muted); }
+.carte canvas{ display:block; width:100%; height:auto; border-radius:8px; background:#000; }
+.chiffres{ font-size:12px; color:var(--muted); margin-top:6px; }
+</style>
+</head>
+<body>
+<h1>Circuits de Micro Machines</h1>
+<p class="sous">Chaque circuit vu d'en haut, avec son décor et ses obstacles mobiles en mouvement. La ligne à damier est le départ.</p>
+<div id="liste"></div>
+<script type="module">
+import { CIRCUITS, circuitParId, mobile } from './games/micro/shared.js';
+import { peindreCircuit, mobileDessin } from './games/micro/rendu.js';
+const liste = document.getElementById('liste'), vues = [];
+for (const d of CIRCUITS) {
+  const c = circuitParId(d.id, false), carte = document.createElement('section'); carte.className = 'carte';
+  const h = document.createElement('h2'); h.textContent = d.emoji + ' ' + d.nom;
+  const p = document.createElement('p'); p.textContent = d.sous;
+  const cv = document.createElement('canvas'), ch = document.createElement('div'); ch.className = 'chiffres';
+  ch.textContent = 'Longueur ' + Math.round(c.L) + ' u · piste ' + 2 * c.W + ' u de large · ' + c.gates.length + ' portes · ' + c.mobs.length + ' obstacle(s) mobile(s) · ' + c.rocks.length + ' obstacle(s) fixe(s)';
+  carte.appendChild(h); carte.appendChild(p); carte.appendChild(cv); carte.appendChild(ch); liste.appendChild(carte);
+  // décor pré-rendu une fois, à la résolution de l'écran (plafonné), puis recopié à chaque image sous les mobiles
+  const larg = Math.min(1400, Math.max(320, carte.clientWidth - 24)) * Math.min(2, window.devicePixelRatio || 1);
+  const q = larg / c.w, fond = document.createElement('canvas');
+  fond.width = Math.round(c.w * q); fond.height = Math.round(c.h * q);
+  const g = fond.getContext('2d'); g.setTransform(q, 0, 0, q, 0, 0); peindreCircuit(g, c, {});
+  cv.width = fond.width; cv.height = fond.height;
+  vues.push({ c, cv, fond, q });
+}
+const o = { x: 0, y: 0, vx: 0, vy: 0, a: 0 };
+function image(now) {
+  for (const v of vues) {
+    const g = v.cv.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(v.fond, 0, 0);
+    g.setTransform(v.q, 0, 0, v.q, 0, 0);
+    for (const m of v.c.mobs) { mobile(m, now / 1000, o); mobileDessin(g, v.c, m, o, now, false); }
+  }
+  requestAnimationFrame(image);
+}
+requestAnimationFrame(image);
+</script>
+</body>
+</html>
