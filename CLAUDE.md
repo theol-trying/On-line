@@ -73,6 +73,11 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
   `stop()` / `dispose()` ne coupent pas le morceau : le jeu suivant enchaîne dessus (`public/piste.js`, contexte unique).
 - **Joystick analogique** : un jeu qui veut le vecteur du stick (et non des boutons) exporte `joyAna(dx, dy, fin)` dans son
   module ; `app.js` le passe à `joystickPour(id, mod.joy, mod.joyAna)` (Micro Machines : cap absolu).
+- **Circuits de Micro Machines** : un fichier par circuit, `public/games/micro/circuits/<id>.js`, inscrit dans
+  `circuits/index.js` ; ses dessins propres vont dans sa propriété `dessin` (points d'accroche en tête de `rendu.js`).
+  Tout circuit nouveau ou retouché passe `node outils/verifier-circuits.mjs <id>` (géométrie + courses de bots dans les deux
+  sens) et se regarde sur `/circuits.html?id=<id>` (options en tête de la page). Un tracé modifié prend `v: n + 1` : les
+  records de tour sont rangés par `id@v`, l'ancien record ne vaut plus.
 
 ## Lancer et tester
 

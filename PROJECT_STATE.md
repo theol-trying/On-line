@@ -405,6 +405,46 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     huile) adhérence 0,035 → 0,14 et reprise 0,5 → 0,75 (sortie de trajectoire en virage 121 u → 79 u).
   · seuil de « choc violent » (`hitT`, grâce anti-raccourci) 3 → 2,5 ; son/étincelles de mur dès j > 1,9 (au lieu de 2,2).
   · Boule de papier 📄 et escargot 🐌 inchangés. Courses de bots (`fins-de-manche.mjs`) : manche la plus longue 405 s → 255 s.
+
+- **Circuits v3 + Grand Prix (02-03/11, en cours)** — demande : « circuits plus longs et plus variés, zones plus larges, plus
+  de courbes, des zones d'accélération droites, obstacles fixes et mouvants, décors plus travaillés, une dizaine minimum ;
+  par défaut l'option aléatoire ; plusieurs courses d'affilée sur différents circuits, 1 course par circuit ».
+  - **Un fichier par circuit** : `public/games/micro/circuits/<id>.js` (`export default` de la définition), liste ordonnée
+    dans `circuits/index.js` (= ordre du bouton Circuit). Format en tête de `shared.js` ; nouveautés : `v` (version du
+    tracé : les records de tour sont rangés par `cleRecord(id)` = `id@v`), `bumpers` et `zonesPhysiques` propres au
+    circuit, mobile **`chemin`** (boucle lissée à vitesse constante) et **`dec`** (décalage de phase : wagons, billes en
+    file ; les propriétés libres d'un mobile sont gardées pour son dessin), aides `H.boostAt`, `H.droites`, `H.railsDe`.
+  - **Rendu** sorti de `client.js` dans **`public/games/micro/rendu.js`** (`peindreCircuit`, `mobileDessin`…), avec des
+    **points d'accroche** par circuit (propriété `dessin` : sol, plateau, piste, bord, zones, decor, objets, murs, mobiles,
+    final, rails, hors, traces, poussiere — liste en tête du fichier). Ni le serveur ni la physique ne lisent `dessin`.
+    Budget du décor pré-rendu côté client : 8 M pixels (mondes jusqu'à 9,6 M u²).
+  - **Barrière d'acceptation** : `node outils/verifier-circuits.mjs [ids] [--geo]` — géométrie (L 9000-14500 u, W 80-115,
+    monde ≤ 9,6 M u², tronçons à ≥ 2W + 40, rayon ≥ 1,25 W, départ en ligne droite, ≥ 2 droites de 600 u avec turbos,
+    passage libre ≥ 54 u près des obstacles et ≥ 40 u près des mobiles à chaque instant, décor hors piste, types dessinables)
+    puis courses du vrai serveur (5 bots + une voiture scriptée, 3 tours, les deux sens, hasard à graine : tour médian
+    26-62 s, ≤ 0,6 chute et ≤ 0,15 pénalité par tour, aucun bot bloqué). Galerie non liée **`/circuits.html`** :
+    `?id=a,b`, `&repere=1` (ligne médiane + fractions du tour), `&vue=x0,y0,x1,y1`, `&t=12`, `&inv=1`, `&nu=1`, `&larg=3600`
+    (affiche aussi le temps de dessin du décor).
+  - **Refaits (v2), conformes** : 🎲 Jeu de société (jeu de l'oie géant, serpentin de cases, serpents et échelles, 12 710 u,
+    3000×3000), 🔧 Établi (escalier à angles droits, ligne droite du mètre ruban, ponceuse et écrou fou, 10 712 u, 4000×2250),
+    🥣 Petit-déjeuner (grande table familiale, bol géant, chicane de sucres, café et miel, orange qui roule, 13 429 u,
+    3900×2440), ✏️ Bureau d'écolier (monde en portrait, escargot de crayons en double spirale, règles turbo, gomme qui
+    frotte, 12 331 u, 2280×3340), 🎱 Billard (le plus rapide : haricot à deux longues lignes droites le long des bandes, parabolique à trois rayons, épingle autour du triangle de billes, 6 poches, 5 billes qui roulent, 9 851 u, 4000×2400). Tours de bots ~32-45 s.
+  - **Restent** : Circuit-jouet et Circuit en 8 (encore les anciennes versions v1, ~6 400 u), et 5 nouveaux à dessiner
+    (Jardin, Salle de bain, Chambre d'enfant avec train électrique, Bac à sable, Table de Noël) : leurs fichiers sont des
+    emplacements provisoires, **retirés de `circuits/index.js`** tant qu'ils ne sont pas faits. Méthode : un agent par
+    circuit, l'un après l'autre (les ateliers à plusieurs agents coûtaient trop cher), vérification + galerie, commit.
+  - **Hasard par défaut** (`circChoix = 'hasard'`) : tirage « en sac » (tous les circuits passent avant qu'un revienne,
+    jamais deux fois de suite).
+  - **Grand Prix** (msg `gp`, game master ; cycle non / 3 / 5 / tous) : une course par circuit, tous différents (le circuit
+    choisi, s'il y en a un, ouvre la série), points 15-12-10-8-6-5-4-3-2-1 selon la place, total → vainqueur (équipes :
+    somme de leurs pilotes ; à égalité, le plus de victoires). Exclusif avec le match « premier à N » (choisir l'un remet
+    l'autre à zéro). Abandon en pleine course, changement de circuit ou du réglage : la série repart de zéro. Snapshot
+    `gp { n, k (courses courues), seq, f, ws (sièges vainqueurs) }` ou null, joueurs `gpp`, `gpd`. Client : bouton
+    `#mmGp`, pastille « 🏎 Grand Prix · course 2/5 », points sur les cartes, classement du Grand Prix et prochain circuit
+    sur l'écran de fin, « Course suivante (k/n) » / « Nouveau Grand Prix », podium au classement de la série.
+  - Classement : la colonne ⏱ montre le record du tour du circuit affiché (par version du tracé). Aide : la liste des
+    circuits est générée à partir des définitions (`#mmHelpCircuits`).
 ## ZQSD / WASD dans tous les jeux (25/09)
 Les 7 jeux lisent le clavier par `e.code` (position PHYSIQUE) : `KeyW`/`KeyA` sont les touches Z/Q d'un clavier
 AZERTY, donc ZQSD marchait déjà en AZERTY. `KeyZ`/`KeyQ` ajoutés partout : Z Q S D marche aussi sur un clavier réglé
