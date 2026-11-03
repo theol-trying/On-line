@@ -34,7 +34,16 @@ const GP_COURSES = [0, 3, 5, -1];                       // 0 = course simple ; s
 const GP_POINTS = [15, 12, 10, 8, 6, 5, 4, 3, 2, 1];    // points de la 1re à la 10e place
 const MOB_E = 0.3, MOB_KICK = 0.8, MOB_SLIP = 0.6;       // obstacles mobiles : rebond mou + petite poussée (ils ne s'arrêtent pas pour vous)
 const HIT_GRACE = 75;                                    // 2,5 s après un choc violent, revenir « plus loin » sur la piste n'est pas un raccourci
-const BOOST_V = 1.42, BOOST_CD = 30;                     // flèche turbo (circuit-jouet) : +42 % d'un coup, une fois par passage
+// FLÈCHES TURBO des circuits (H.boostAt) — 03/11 : l'ancien à-coup (+42 % d'un coup, retombé en 0,3 s : ~3 % de distance gagnée
+// sur 3 s) ne valait pas le détour. Désormais une vraie fenêtre de turbo. ── RÉGLAGES (tout se règle ici) ──
+const FLECHE = {
+  boost: 0.4,       // +40 % de vitesse de pointe pendant la fenêtre (bots compris)
+  duree: 1.5,       // durée de la fenêtre (s) ; une nouvelle flèche la relance
+  reprise: 2,       // accélération ×2 pendant la fenêtre
+  elan: 0.5,        // à l'entrée sur la flèche, la vitesse comble d'un coup cette part de l'écart avec le nouveau plafond
+  repos: 0.8,       // délai avant qu'une flèche puisse se redéclencher pour la même voiture (s)
+};
+const FL_T = Math.round(FLECHE.duree * TICK_HZ), FL_V = 1 + FLECHE.boost, BOOST_CD = Math.round(FLECHE.repos * TICK_HZ);
 // ASPIRATION (03/11) : rouler dans le sillage d'une voiture remplit une jauge ; pleine, elle donne un gros coup de boost pour la
 // doubler et prendre un peu d'avance. Lancée au-dessus de la vitesse normale, la voiture DÉCROCHE si l'on braque trop fort trop
 // longtemps (glisse + embardée) : le boost se prend en ligne droite. Hors du sillage la jauge redescend doucement.
@@ -142,7 +151,7 @@ export function createMicro(room) {
       bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
       lane: 0, forme: 1, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0,
       gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
-      item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0, aspBr: 0,
+      item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0, aspBr: 0, flT: 0,
       rs: 0, place: 0, elimTick: -1, score: 0, gpPts: 0, gpDer: 0, gpWins: 0,
     }));
   }
@@ -233,7 +242,7 @@ export function createMicro(room) {
         pg: 0, lap: 0, lapStart: 0, best: 0, last: 0, fin: 0, ftick: 0, pos: k + 1, fall: 0, fallHole: 0, ghost: 0, outT: 0,
         wrong: false, surf: 0, drift: 0, boostCd: 0, inZone: null, bumpFx: 0, bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
         lane: ((k * 37) % 9 - 4) / 4 * 0.22, forme: 1 + (Math.random() * 2 - 1) * 0.022, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0, rs: 0, place: 0, elimTick: -1, alive: true, gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
-        item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0, aspBr: 0 });
+        item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0, aspBr: 0, flT: 0 });
       p.inp = { up: false, down: false, left: false, right: false };
     });
     nParts = N; endTick = 0; winner = null; finCount = 0; finDeadline = 0; leader = -1; leadT = -1e9; lastBest = null;
@@ -359,7 +368,7 @@ export function createMicro(room) {
     if (D.err && Math.random() < D.err) p.errT = tick + 6 + Math.floor(Math.random() * 10);   // Facile / Normale : un coup de volant de trop
     p.steer = clamp(d * 3.2 + (D.noise ? p.noise : 0) + (p.errT > tick ? 0.9 : 0), -1, 1);
     // vitesse : la plus basse des vitesses de virage à venir, compte tenu de la distance de freinage
-    let vt = VMAX * (cruise ? 0.7 : D.v * p.forme * (p.aspB > tick ? ASP_V : 1));   // boost d'aspiration : en ligne droite seulement (virages ci-dessous)
+    let vt = VMAX * (cruise ? 0.7 : D.v * p.forme * Math.max(p.aspB > tick ? ASP_V : 1, p.flT > tick ? FL_V : 1));   // aspiration / flèche turbo : en ligne droite seulement (virages ci-dessous)
     for (let k = 0; k < 32; k += 2) {
       const j = (p.si + k) % n, vc = Math.min(VMAX, 0.9 * TURN * C.rayon[j] * D.lat);
       const allow = Math.sqrt(vc * vc + 2 * BRAKE * 0.7 * k * C.step);
@@ -381,7 +390,12 @@ export function createMicro(room) {
     }
     if (z !== p.inZone) {                                // entrée dans une zone : éclaboussure / turbo (une fois par passage)
       p.inZone = z;
-      if (z && z[4] === 'boost' && p.boostCd <= tick) { p.boostCd = tick + BOOST_CD; const c = Math.cos(p.a), s = Math.sin(p.a), vf = p.vx * c + p.vy * s, nv = Math.max(vf, VMAX * BOOST_V); p.vx += c * (nv - vf); p.vy += s * (nv - vf); fx.push({ type: 'boost', seat: p.seat }); }
+      if (z && z[4] === 'boost' && p.boostCd <= tick) {   // flèche turbo : fenêtre de turbo + élan immédiat dans l'axe de la voiture
+        p.boostCd = tick + BOOST_CD; p.flT = tick + FL_T;
+        const c = Math.cos(p.a), s = Math.sin(p.a), vf = p.vx * c + p.vy * s, cible = VMAX * FL_V;
+        if (vf > 0 && vf < cible) { const dv = (cible - vf) * FLECHE.elan; p.vx += c * dv; p.vy += s * dv; }
+        fx.push({ type: 'boost', seat: p.seat });
+      }
       else if (z && z[4] !== 'boost') fx.push({ type: 'splash', seat: p.seat, k: z[4], x: r1(p.x), y: r1(p.y) });
     }
     return sf;
@@ -399,9 +413,10 @@ export function createMicro(room) {
     p.w *= p.slip > 0 ? 0.9 : 0.8;                       // rotation reçue d'un choc : s'éteint plus vite qu'avant (29/10 : 0,93 / 0,84)
     c = Math.cos(p.a); s = Math.sin(p.a);
     let vf = p.vx * c + p.vy * s, vr = -p.vx * s + p.vy * c;
-    const tb = p.tbT > tick, asp = p.aspB > tick;       // turbo (bonus) / aspiration : plafond et reprise relevés ; escargot : plafond abaissé
-    const cap = VMAX * S.vmax * (p.bot && !p.fin ? D.v * p.forme : 1) * (p.penT > tick ? PEN_V : 1) * (tb ? TURBO_V : 1) * (asp ? ASP_V : 1) * (p.slowT > tick ? p.slowV : 1) * (p.pouce || 1);   // forme du jour (±2 %) : deux bots du même niveau finissent par se séparer ; pénalité de coupe
-    if (p.thr > 0 || tb) { if (vf < cap) vf += ACC * S.acc * (tb ? TURBO_A : p.thr) * (asp ? ASPI.reprise : 1) * (p.pouce || 1) * (1 - Math.max(0, vf) / cap * 0.6); }
+    const tb = p.tbT > tick, asp = p.aspB > tick, fl = p.flT > tick;   // turbo (bonus) / aspiration / flèche : plafond et reprise relevés (le plus fort des trois, ils ne se multiplient pas) ; escargot : plafond abaissé
+    const vB = Math.max(tb ? TURBO_V : 1, asp ? ASP_V : 1, fl ? FL_V : 1), aB = Math.max(asp ? ASPI.reprise : 1, fl ? FLECHE.reprise : 1);
+    const cap = VMAX * S.vmax * (p.bot && !p.fin ? D.v * p.forme : 1) * (p.penT > tick ? PEN_V : 1) * vB * (p.slowT > tick ? p.slowV : 1) * (p.pouce || 1);   // forme du jour (±2 %) : deux bots du même niveau finissent par se séparer ; pénalité de coupe
+    if (p.thr > 0 || tb) { if (vf < cap) vf += ACC * S.acc * (tb ? TURBO_A : p.thr) * aB * (p.pouce || 1) * (1 - Math.max(0, vf) / cap * 0.6); }
     else if (p.thr < 0) { if (vf > 0.3) vf -= BRAKE * -p.thr; else if (vf > -VREV) vf -= REV * -p.thr; }
     else vf *= COAST;
     vf *= 1 - S.drag;
@@ -819,7 +834,7 @@ export function createMicro(room) {
         su: p.surf, fa: p.fall ? r2(1 - p.fall / FALL_T) : 0, fh: p.fallHole, gh: p.ghost > 0, ww: !!p.wrong,
         lap: Math.max(1, Math.min(laps, p.lap || 1)), pos: p.pos, fin: p.fin, ft: p.fin ? r2(p.ftick / TICK_HZ) : 0,
         bl: p.best ? r2(p.best / TICK_HZ) : 0, ll: p.last ? r2(p.last / TICK_HZ) : 0, pg: p.pg,
-        bumps: p.bumps, kos: p.kos, falls: p.falls, cuts: p.cuts, pen: p.penT > tick, it: p.item, iu: p.iu, tb: p.tbT > tick, sh: p.shT > tick, sl: p.slowT > tick, score: p.score, place: p.place, elimTick: p.elimTick,
+        bumps: p.bumps, kos: p.kos, falls: p.falls, cuts: p.cuts, pen: p.penT > tick, it: p.item, iu: p.iu, tb: p.tbT > tick || p.flT > tick, sh: p.shT > tick, sl: p.slowT > tick, score: p.score, place: p.place, elimTick: p.elimTick,
         gpp: p.gpPts, gpd: p.gpDer, ap: p.aspB > tick ? 4 : Math.min(3, Math.floor(p.aspC / ASP_CHARGE * 4)),
       })),
     };

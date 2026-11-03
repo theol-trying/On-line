@@ -442,6 +442,12 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     faits (le vérificateur ne connaît que les circuits inscrits). Méthode : un agent par circuit, l'un après l'autre (les
     ateliers à plusieurs agents coûtaient trop cher), vérification + galerie + une course en jeu (serveur local RELANCÉ :
     il garde la géométrie en mémoire), commit.
+- **Flèches turbo (03/11)** — demande : « que les lignes de boost donnent une meilleure accélération, pour que les prendre ait un
+  réel intérêt ». Avant : à-coup à +42 % qui retombait en 0,3 s (~+3 % de distance sur 3 s). Désormais une fenêtre de turbo
+  (champ `flT`) : +40 % de vitesse de pointe et reprise ×2 pendant 1,5 s, élan immédiat (la moitié de l'écart), relançable
+  après 0,8 s. Mesuré : +190 à +285 u sur 3 s (≈ 0,6-0,8 s gagnées par flèche). Réglages : objet `FLECHE` en tête de
+  `games/micro/server.js`. Les boosts (objet turbo, aspiration, flèche) ne se MULTIPLIENT plus : le plus fort l'emporte.
+  Le client montre la flèche comme le turbo (`tb` : lueur et ⚡).
 - **Aspiration et escargot dégressif (03/11)** — demandes : « l'escargot doit ralentir plus le premier et moins les
   derniers » ; « de l'aspiration quand on suit quelqu'un pour pouvoir le doubler (3 s derrière = petit boost) ».
   - **Aspiration** (`aspiration()` du serveur, avant la conduite) : une voiture à moins de 260 u devant, dans l'axe (±44°) et
