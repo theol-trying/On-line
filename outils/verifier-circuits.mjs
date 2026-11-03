@@ -10,7 +10,7 @@
 // boîtes de bonus sur la piste, et chaque type (sol, objet, mur, décor, zone, mobile) dessinable par rendu.js.
 // COURSE (chaque sens) : le vrai serveur (games/micro/server.js) dans une fausse salle, 5 bots « Normale » + une voiture
 // pilotée par un script simple (elle vise un point 150 u devant sur la piste), 3 tours, bonus actifs, hasard à graine.
-// On mesure : arrivées, temps au tour, chutes, pénalités de raccourci (un bot ne doit jamais en prendre), blocages.
+// On mesure : arrivées (un bot encore en course 12 s après le premier est classé, comme en jeu, s'il est dans le dernier tour), temps au tour, chutes, pénalités de raccourci (un bot ne doit jamais en prendre), blocages.
 // Sort en code 1 au moindre défaut.
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -164,6 +164,9 @@ async function course(d, inverse) {
     const nbTours = Math.max(1, tours.length);
     return {
       fini: s && s.gs === 'over', arrives: bots.filter(p => p.fin).length, nb: bots.length,
+      // un bot pas encore arrivé quand la course s'arrête (12 s après le premier) est classé à sa progression, comme en jeu :
+      // seul compte qu'il soit au moins dans le dernier tour (sinon il a calé quelque part), et que le plafond de temps n'ait pas sonné
+      retard: bots.filter(p => !p.fin && p.lap < 3).length, plafond: tk >= (30 + 75 * 3) * TICK_HZ,
       med: tours.length ? tours[Math.floor(tours.length / 2)] : 0, meilleur: tours.length ? tours[0] : 0,
       chutes: bots.reduce((a, p) => a + st(p.seat).falls, 0) / nbTours, coupes: bots.reduce((a, p) => a + st(p.seat).cuts, 0) / nbTours,
       bloques: bots.reduce((a, p) => a + st(p.seat).stuck, 0), duree: Math.round(tk / TICK_HZ),
@@ -178,7 +181,8 @@ for (const d of liste) {
   if (!geoSeul) for (const inv of [false, true]) {
     const r = await course(d, inv), sens = inv ? 'sens inverse' : 'sens normal';
     const txt = `${sens} : ${r.arrives}/${r.nb} bots arrivés en ${r.duree} s, tour médian ${r.med.toFixed(1)} s (meilleur ${r.meilleur.toFixed(1)}), ${r.chutes.toFixed(2)} chute/tour, ${r.coupes.toFixed(2)} pénalité/tour, ${r.bloques} blocage(s)` + (r.script ? ` · voiture scriptée : ${r.script.tours} tour(s), ${r.script.chutes} chute(s)${r.script.fin ? ', arrivée' : ''}` : '');
-    if (!r.fini || r.arrives < r.nb) D.push(`${sens} : course non terminée (${r.arrives}/${r.nb} bots arrivés)`);
+    if (!r.fini || r.plafond) D.push(`${sens} : course non terminée (${r.arrives}/${r.nb} bots arrivés)`);
+    if (r.retard) D.push(`${sens} : ${r.retard} bot(s) pas encore dans le dernier tour à la fin de la course`);
     if (r.med && (r.med < B.lapMin || r.med > B.lapMax)) D.push(`${sens} : tour médian ${r.med.toFixed(1)} s hors ${B.lapMin}..${B.lapMax} s`);
     if (r.chutes > B.chutes) D.push(`${sens} : ${r.chutes.toFixed(2)} chute par tour de bot (max ${B.chutes})`);
     if (r.coupes > B.coupes) D.push(`${sens} : ${r.coupes.toFixed(2)} pénalité de raccourci par tour de bot (max ${B.coupes}) — tracé ambigu ?`);
