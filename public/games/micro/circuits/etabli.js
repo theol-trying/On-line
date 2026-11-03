@@ -649,7 +649,7 @@ const ZONES = {
 };
 
 export default {
-  id: 'etabli', nom: 'Établi du garage', emoji: '🔧', v: 2, sous: 'Établi du garage · mètre ruban turbo, étau, huile, ponceuse et écrou fou',
+  id: 'etabli', nom: 'Établi du garage', emoji: '🔧', v: 2, sous: 'Contreplaqué d\'atelier · mètre ruban turbo, étau, huile, ponceuse et écrou fou',
   w: 4000, h: 2250, surf: 'etabli', edge: 'chute', table: { x0: 30, y0: 30, x1: 3970, y1: 2220, r: 18 }, W: 90,
   pts: PTS,
   mobs: [
