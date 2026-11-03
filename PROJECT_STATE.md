@@ -454,6 +454,8 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     **Tous les chiffres sont dans l'objet `ASPI` en tête de `games/micro/server.js`** (boost, duree, reprise, charge,
     repos, braquage, braquageT, embardee, glisse, distance, cone, vmin) : ni le client ni l'aide n'en répètent aucun.
     Mesuré (7 bots, 3 tours) : 40 à 94 boosts par course, 0 à 5 décrochages de bots, aucune chute de plus.
+    Client : traits de vent le long de la voiture selon la jauge, lueur claire et icône 🌬 pendant le boost, son `aspi`,
+    message perso au boost et au décrochage (son `glisse`, petite secousse).
   - **Escargot** 🐌 : ralentit tous ceux de devant, interpolé selon la place — le meneur ×0,5 pendant 3 s, la voiture juste
     devant ×0,85 pendant 1,5 s (avant : ×0,62 pendant 2,5 s pour tous). Par joueur : `slowV` (le plus fort l'emporte si deux
     escargots se chevauchent).
