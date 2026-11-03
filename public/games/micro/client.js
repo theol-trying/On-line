@@ -526,7 +526,7 @@ export default (function () {
       const me = mySeat >= 0 && ps[mySeat]; if (me && Math.hypot(me.x - f.x, me.y - f.y) < 320) shakeMag = Math.max(shakeMag, 7);
       return;
     }
-    if (f.type === 'rate') { if (f.seat === mySeat) msgPerso(f.it === 10 ? '🪝' : '🎯', f.it === 10 ? 'Grappin : personne devant à portée, garde-le !' : 'Toupie : personne à viser', { bad: true }); return; }
+    if (f.type === 'rate') { if (f.seat === mySeat) msgPerso(f.it === 10 ? '🪝' : '🎯', f.it === 10 ? 'Grappin lancé dans le vide : personne devant à portée' : 'Toupie lancée dans le vide : personne à viser', { bad: true }); return; }
     if (f.type === 'pare') { const p = ps[f.seat]; if (p) { psound('pare', p.x, p.y); if (FX()) rings.push({ x: p.x, y: p.y, born: now, life: 360, r1: 36, sh: 1 }); } return; }
   }
 

@@ -454,7 +454,8 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
   - 🧊 **Glaçon** : plaque de glace (flaque type 2, rayon 52, 10 s, glisse 24, sans embardée), derrière ou 130 u devant.
   - 🪝 **Grappin** : accroche la voiture la plus proche devant dans l'axe ET devant au classement (moins de 4 portes : jamais un
     autre tronçon), à 450 u au plus ; tire de 0,7 u/tick² (maxi ×1,35 VMAX) jusqu'à 1,5 s, puis aspiration complète à
-    l'arrivée ; pendant la traction, `hitT` évite la sanction de raccourci. Personne à portée : l'objet est GARDÉ (fx `rate`).
+    l'arrivée ; pendant la traction, `hitT` évite la sanction de raccourci. Personne à portée : lancé dans le vide, l'objet est consommé (fx `rate`) — d'abord gardé, ce qui bloquait la case objet
+    (retour utilisateur du 03/11) ; un bot sans cible le jette au bout de 10 s. Idem pour la toupie sans cible.
     Snapshot joueur `gr` (siège accroché ou -1), câble dessiné.
   - 👻 **Fantôme** 3 s (`phT`, joueur `ph`) et 🪀 **Ressort** 1 s (`juT`, joueur `ju` = phase 0..1) : `intouchable()` — ni
     voitures, ni mobiles, ni flaques, ni zones, ni objets ; le ressort passe en plus par-dessus les obstacles ronds et ne tombe

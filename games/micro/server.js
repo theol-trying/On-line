@@ -614,7 +614,7 @@ export function createMicro(room) {
   //   7 Bombe à eau 💧 (lancée en cloche devant : grande flaque glissante là où elle retombe)
   //   8 Pétard 🧨 (posé derrière : explose au bout d'1 s et repousse les voitures proches)
   //   9 Glaçon 🧊 (plaque de glace derrière soi : presque plus d'adhérence un instant)
-  //  10 Grappin 🪝 (s'accroche à la voiture de devant à portée et vous tire vers elle, puis aspiration ; raté : on le garde)
+  //  10 Grappin 🪝 (s'accroche à la voiture de devant à portée et vous tire vers elle, puis aspiration ; personne : lancé dans le vide)
   //  11 Fantôme 👻 3 s (on traverse voitures, obstacles mobiles, flaques, zones et objets ; pas les murs ni le vide)
   //  12 Encre de seiche 🦑 (vue brouillée 3 s pour tous ceux de devant ; un bot encré conduit moins bien)
   //  13 Ressort 🪀 (saut d'1 s par-dessus voitures, obstacles ronds et mobiles, flaques, zones et objets ; on retombe où l'on
@@ -714,10 +714,10 @@ export function createMicro(room) {
         if (t > q.slowT) q.slowT = t;
       }
     }
-    else if (it === 6) { const q = cibleToupie(p, inv); if (!q) { if (!p.bot) fx.push({ type: 'rate', seat: p.seat, it }); return; } toupies.push({ x: p.x + c * CAR_L * 0.7, y: p.y + s * CAR_L * 0.7, a: inv ? p.a + Math.PI : p.a, cb: q.seat, t: tick + TOUPIE.t, o: p.seat }); }
+    else if (it === 6) { const q = cibleToupie(p, inv); if (!q) fx.push({ type: 'rate', seat: p.seat, it }); else toupies.push({ x: p.x + c * CAR_L * 0.7, y: p.y + s * CAR_L * 0.7, a: inv ? p.a + Math.PI : p.a, cb: q.seat, t: tick + TOUPIE.t, o: p.seat }); }
     else if (it === 7) { const v = inv ? -BOMBE.vInv : BOMBE.v; bombes.push({ x: p.x, y: p.y, vx: c * v + p.vx * 0.5, vy: s * v + p.vy * 0.5, t0: tick, o: p.seat }); }
     else if (it === 8) { const d = inv ? 0.9 : -0.9; petards.push({ x: p.x + c * CAR_L * d, y: p.y + s * CAR_L * d, vx: inv ? c * PETARD.vInv + p.vx * 0.5 : 0, vy: inv ? s * PETARD.vInv + p.vy * 0.5 : 0, t: tick + PETARD.meche, o: p.seat }); }
-    else if (it === 10) { const q = cibleGrappin(p); if (!q) { if (!p.bot) fx.push({ type: 'rate', seat: p.seat, it }); return; } p.grap = q.seat; p.grapT = tick + GRAPPIN.t; }
+    else if (it === 10) { const q = cibleGrappin(p); if (!q) fx.push({ type: 'rate', seat: p.seat, it }); else { p.grap = q.seat; p.grapT = tick + GRAPPIN.t; } }   // personne à portée : lancé dans le vide (03/11 : le garder bloquait la case objet)
     else if (it === 11) p.phT = tick + FANTOME_T;
     else if (it === 12) { for (const q of players) if (q.playing && q.alive && !q.fin && q.pos < p.pos && !protege(q)) q.encT = tick + ENCRE_T; }
     else if (it === 13) p.juT = tick + RESSORT_T;
@@ -823,7 +823,7 @@ export function createMicro(room) {
     else if (it === 6 || it === 12) go = p.pos > 1;                                         // toupie, encre : dès qu'il y a quelqu'un devant
     else if (it === 7) go = devant(520, 0.8) || held > 300;
     else if (it === 8 || it === 9) go = derriere(150) || held > 240;
-    else if (it === 10) go = !!cibleGrappin(p) && C.rayon[(p.si + 10) % C.n] > 300;
+    else if (it === 10) go = (!!cibleGrappin(p) && C.rayon[(p.si + 10) % C.n] > 300) || held > 300;   // trop longtemps sans cible : dans le vide, pour ramasser autre chose
     else if (it === 11) go = boules.some(b => b.o !== p.seat && Math.hypot(b.x - p.x, b.y - p.y) < 160) || toupies.some(u => u.cb === p.seat && Math.hypot(u.x - p.x, u.y - p.y) < 260) || held > 200;
     else if (it === 13) go = flaques.some(f => { const dx = f.x - p.x, dy = f.y - p.y, d = Math.hypot(dx, dy); return f.o !== p.seat && d < 170 && (dx * c + dy * s) / d > 0.8; }) || held > 240;
     if (go && (D.err === 0 || Math.random() > D.err * 40)) utiliser(p, inv);
