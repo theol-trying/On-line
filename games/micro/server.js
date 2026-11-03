@@ -151,7 +151,7 @@ export function createMicro(room) {
       bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
       lane: 0, forme: 1, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0,
       gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
-      item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0, aspBr: 0, flT: 0,
+      item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0, aspBr: 0, flT: 0, phT: 0, encT: 0, juT: 0, grap: -1, grapT: 0,
       rs: 0, place: 0, elimTick: -1, score: 0, gpPts: 0, gpDer: 0, gpWins: 0,
     }));
   }
@@ -242,17 +242,17 @@ export function createMicro(room) {
         pg: 0, lap: 0, lapStart: 0, best: 0, last: 0, fin: 0, ftick: 0, pos: k + 1, fall: 0, fallHole: 0, ghost: 0, outT: 0,
         wrong: false, surf: 0, drift: 0, boostCd: 0, inZone: null, bumpFx: 0, bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
         lane: ((k * 37) % 9 - 4) / 4 * 0.22, forme: 1 + (Math.random() * 2 - 1) * 0.022, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0, rs: 0, place: 0, elimTick: -1, alive: true, gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
-        item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0, aspBr: 0, flT: 0 });
+        item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0, aspBr: 0, flT: 0, phT: 0, encT: 0, juT: 0, grap: -1, grapT: 0 });
       p.inp = { up: false, down: false, left: false, right: false };
     });
     nParts = N; endTick = 0; winner = null; finCount = 0; finDeadline = 0; leader = -1; leadT = -1e9; lastBest = null;
-    boxT = C.boxes.map(() => 0); flaques = []; boules = [];
+    boxT = C.boxes.map(() => 0); flaques = []; boules = []; toupies = []; bombes = []; petards = [];
     cam = formule === 'elim' ? { x: g.reduce((s, q) => s + q.x, 0) / N, y: g.reduce((s, q) => s + q.y, 0) / N, hw: ELIM_HW0 } : null;
     round++; tick = 0; countdownUntil = COUNTDOWN_TICKS; gameState = 'countdown';
   }
   function backToLobby() {            // abandon : retour au lobby en pleine partie
     if (gameState !== 'play' && gameState !== 'countdown' && gameState !== 'paused') return;
-    gameState = 'lobby'; winner = null; fx = []; pend = []; cam = null; flaques = []; boules = [];
+    gameState = 'lobby'; winner = null; fx = []; pend = []; cam = null; flaques = []; boules = []; toupies = []; bombes = []; petards = [];
     gpAnnuler();                                         // abandon en pleine course : le Grand Prix repart de zéro
     for (const p of players) { p.playing = false; p.alive = false; p.vx = 0; p.vy = 0; }
   }
@@ -279,7 +279,7 @@ export function createMicro(room) {
 
   /* ---------- fin de manche ---------- */
   function endRound() {
-    gameState = 'over'; endTick = tick; flaques = []; boules = [];
+    gameState = 'over'; endTick = tick; flaques = []; boules = []; toupies = []; bombes = []; petards = [];
     majPositions();
     const ps = players.filter(p => p.playing);
     if (formule === 'elim') {
@@ -366,7 +366,7 @@ export function createMicro(room) {
     }
     if (D.noise) { if (tick >= p.noiseT) { p.noiseT = tick + 8 + Math.floor(Math.random() * 10); p.noise = (Math.random() * 2 - 1) * D.noise; } }
     if (D.err && Math.random() < D.err) p.errT = tick + 6 + Math.floor(Math.random() * 10);   // Facile / Normale : un coup de volant de trop
-    p.steer = clamp(d * 3.2 + (D.noise ? p.noise : 0) + (p.errT > tick ? 0.9 : 0), -1, 1);
+    p.steer = clamp(d * 3.2 + (D.noise ? p.noise : 0) + (p.errT > tick ? 0.9 : 0) + (p.encT > tick ? Math.sin(tick * 0.35 + p.seat) * 0.5 : 0), -1, 1);
     // vitesse : la plus basse des vitesses de virage à venir, compte tenu de la distance de freinage
     let vt = VMAX * (cruise ? 0.7 : D.v * p.forme * Math.max(p.aspB > tick ? ASP_V : 1, p.flT > tick ? FL_V : 1));   // aspiration / flèche turbo : en ligne droite seulement (virages ci-dessous)
     for (let k = 0; k < 32; k += 2) {
@@ -471,6 +471,7 @@ export function createMicro(room) {
       for (let k = 0; k < ids.length; k++) {
         const id = ids[k];
         if (id >= 10000) {
+          if (p.juT > tick) continue;                    // ressort : par-dessus les obstacles ronds
           const r = C.rocks[id - 10000], dx = px - r[0], dy = py - r[1], dd = Math.hypot(dx, dy), rr = r[2] + CC_R;
           if (dd < rr && dd > 1e-6) {
             const bump = Object.hasOwn(BUMPERS, r[3]);     // bumper (punaise, pion, tampon…) : il RENVOIE (coup de pied en plus du rebond)
@@ -484,7 +485,7 @@ export function createMicro(room) {
           if (dd < rr && dd > 1e-6) { pousser(p, qx + dx / dd * w[4], qy + dy / dd * w[4], dx / dd, dy / dd, rr - dd, Object.hasOwn(REST, w[5]) ? REST[w[5]] : E_MUR, 0); disques(p, CA); }
         }
       }
-      for (let k = 0; k < MOBP.length; k++) {           // obstacles mobiles : masse « infinie », ils emportent la voiture
+      if (!intouchable(p)) for (let k = 0; k < MOBP.length; k++) {   // obstacles mobiles : masse « infinie », ils emportent la voiture (sauf fantôme / saut)
         const o = MOBP[k], rr = C.mobs[k].r + CC_R, dx = CA[d][0] - o.x, dy = CA[d][1] - o.y, dd = Math.hypot(dx, dy);
         if (dd >= rr || dd < 1e-6) continue;
         const nx = dx / dd, ny = dy / dd;
@@ -608,12 +609,33 @@ export function createMicro(room) {
   //   4 Bouclier 🛡 5 s (ni huile, ni boule, ni escargot ; les chocs le secouent à peine)
   //   5 Escargot 🐌 (tous ceux de devant, d'autant plus qu'ils sont loin en tête — 03/11 : le meneur ×0,5 pendant 3 s, la voiture
   //     juste devant ×0,85 pendant 1,5 s ; avant : ×0,62 pendant 2,5 s pour tous)
+  //   — ajoutés le 03/11 —
+  //   6 Toupie chercheuse 🎯 (file au-dessus de tout vers le premier — le 2e si c'est soi — et le fait tourner)
+  //   7 Bombe à eau 💧 (lancée en cloche devant : grande flaque glissante là où elle retombe)
+  //   8 Pétard 🧨 (posé derrière : explose au bout d'1 s et repousse les voitures proches)
+  //   9 Glaçon 🧊 (plaque de glace derrière soi : presque plus d'adhérence un instant)
+  //  10 Grappin 🪝 (s'accroche à la voiture de devant à portée et vous tire vers elle, puis aspiration ; raté : on le garde)
+  //  11 Fantôme 👻 3 s (on traverse voitures, obstacles mobiles, flaques, zones et objets ; pas les murs ni le vide)
+  //  12 Encre de seiche 🦑 (vue brouillée 3 s pour tous ceux de devant ; un bot encré conduit moins bien)
+  //  13 Ressort 🪀 (saut d'1 s par-dessus voitures, obstacles ronds et mobiles, flaques, zones et objets ; on retombe où l'on
+  //     atterrit — dans le vide si c'est le vide)
+  // LANCER INVERSÉ (msg `objet` { inv: 1 } — Ctrl ou Maj au clavier, bouton ↩ sur téléphone) : ce qui part devant part
+  // derrière et inversement (boule, bombe, toupie → la voiture juste derrière ; huile, glaçon et pétard partent devant).
+  // Sans effet pour les autres objets.
   const BOX_R = 24, BOX_T = 4 * TICK_HZ, TURBO_T = 45, TURBO_V = 1.4, TURBO_A = 1.6, SHIELD_T = 5 * TICK_HZ;
   // flaque d'huile (29/10, jugée trop punitive) : glisse 24 → 14 ticks, embardée 0,14 → 0,08 rad/tick (rotation 16° → 8°)
   const SLOW_V1 = 0.5, SLOW_T1 = 90, SLOW_V2 = 0.85, SLOW_T2 = 45;   // escargot : meneur … voiture juste devant (interpolé selon la place)
   const OIL_R = 44, OIL_T = 12 * TICK_HZ, OIL_SLIP = 14, OIL_SPIN = 0.08, BALL_V = 15, BALL_R = 9, BALL_T = 3 * TICK_HZ;
-  const ITEMS = ['turbo', 'triple', 'huile', 'boule', 'bouclier', 'escargot'];
-  let bonusOn = true, boxT = [], flaques = [], boules = [], nextId = 1;
+  // flaques posées (k) : 0 huile, 1 eau (bombe), 2 glace (glaçon) — rayon, durée, adhérence perdue (ticks), embardée (rad/tick)
+  const FLAQ = [{ r: OIL_R, t: OIL_T, slip: OIL_SLIP, spin: OIL_SPIN }, { r: 62, t: 10 * TICK_HZ, slip: 12, spin: 0.03 }, { r: 52, t: 10 * TICK_HZ, slip: 24, spin: 0 }];
+  const TOUPIE = { v: 24, vire: 0.16, vireP: 0.45, r: 14, t: 10 * TICK_HZ };   // vitesse (u/tick), virage (rad/tick ; vireP de près), rayon, durée de vie
+  const BOMBE = { v: 20, vInv: 13, air: 14 };                                  // lancer devant / derrière (u/tick, + la moitié de la vitesse de la voiture), ticks en l'air
+  const PETARD = { meche: TICK_HZ, r: 140, force: 9, vInv: 14, frein: 0.9 };    // mèche (ticks), rayon et force du souffle (u/tick), lancer devant (inversé)
+  const GRAPPIN = { portee: 450, cone: 0.5, t: 45, tire: 0.7, vmax: 1.35 };     // portée (u), cône, durée max (ticks), traction (u/tick²), vitesse maxi tirée (× VMAX)
+  const FANTOME_T = 3 * TICK_HZ, ENCRE_T = 3 * TICK_HZ, RESSORT_T = TICK_HZ;
+  const ITEMS = ['turbo', 'triple', 'huile', 'boule', 'bouclier', 'escargot', 'toupie', 'bombe', 'petard', 'glacon', 'grappin', 'fantome', 'encre', 'ressort'];
+  let bonusOn = true, boxT = [], flaques = [], boules = [], toupies = [], bombes = [], petards = [], nextId = 1;
+  const intouchable = q => q.phT > tick || q.juT > tick;   // fantôme ou en l'air : objets, flaques, voitures et mobiles passent sans toucher
   // COUP DE POUCE (option `pouce`) : plus on est loin derrière le meneur, plus la voiture va vite (plafond et reprise),
   // jusqu'à +POUCE_MAX à un demi-tour d'écart. Calculé sur la progression du tick précédent ; le meneur n'a rien.
   const POUCE_MAX = 0.16;
@@ -626,7 +648,9 @@ export function createMicro(room) {
   }
   function poidsObjets(p) {                              // r : 0 = en tête … 1 = dernier (rattrapage)
     const n = Math.max(1, players.filter(q => q.playing && q.alive).length), r = n > 1 ? (p.pos - 1) / (n - 1) : 0.5;
-    return [30 - 10 * r, 4 + 30 * r, 6 + 26 * (1 - r), 22, 6 + 20 * (1 - r), p.pos > 1 ? 4 + 26 * r * r : 0];
+    const der = p.pos > 1;                               // les objets qui visent ceux de devant ne sortent pas pour le premier
+    return [30 - 10 * r, 4 + 30 * r, 6 + 26 * (1 - r), 22, 6 + 20 * (1 - r), der ? 4 + 26 * r * r : 0,
+      der ? 2 + 18 * r * r : 0, 10, 4 + 12 * (1 - r), 4 + 12 * (1 - r), der ? 2 + 16 * r : 0, 7, der ? 2 + 12 * r : 0, 7];
   }
   function tirerObjet(p) {
     const w = poidsObjets(p); let s = 0; for (const v of w) s += v;
@@ -646,12 +670,42 @@ export function createMicro(room) {
     }
   }
   const protege = q => q.shT > tick;
-  function utiliser(p) {
+  function poserFlaque(p, k, devant) {                   // huile / glace : derrière la voiture, ou lancée 130 u devant (inversé)
+    const c = Math.cos(p.a), s = Math.sin(p.a), d = devant ? 130 : -CAR_L * 0.9;
+    flaques.push({ id: nextId++, k, x: p.x + c * d, y: p.y + s * d, t: tick + FLAQ[k].t, o: p.seat, ot: tick + TICK_HZ });
+    if (flaques.length > 14) flaques.shift();
+  }
+  const adversaire = (p, q) => q !== p && q.playing && q.alive && !q.fin && (nteams >= nParts || q.team !== p.team);
+  function cibleToupie(p, inv) {                         // le premier adversaire au classement ; inversé : celui juste derrière
+    const ps = players.filter(q => adversaire(p, q)).sort((a, b) => a.pos - b.pos);
+    if (inv) return ps.find(q => q.pos > p.pos) || null;
+    return ps[0] || null;
+  }
+  function cibleGrappin(p) {                             // la voiture la plus proche devant, dans l'axe, et devant AU CLASSEMENT (pas un autre tronçon)
+    const c = Math.cos(p.a), s = Math.sin(p.a); let best = null, bd = GRAPPIN.portee;
+    for (const q of players) {
+      if (q === p || !q.playing || !q.alive || q.fall || q.fin || !(q.rs > p.rs && q.rs - p.rs < 4)) continue;
+      const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy);
+      if (d < bd && d > CAR_L && (dx * c + dy * s) / d > GRAPPIN.cone) { bd = d; best = q; }
+    }
+    return best;
+  }
+  function remorque(p) {                                 // grappin : tiré vers la cible tant que le câble tient ; arrivé : aspiration
+    if (p.grapT <= tick || p.grap < 0) return;
+    const q = players[p.grap];
+    if (!q || !q.playing || !q.alive || q.fall || q.fin || p.fall) { p.grapT = 0; p.grap = -1; return; }
+    const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy);
+    if (d < CAR_L * 1.6) { p.grapT = 0; p.grap = -1; p.aspB = tick + ASP_T; p.aspCd = tick + ASP_T + ASP_CD; p.aspC = 0; fx.push({ type: 'aspi', seat: p.seat, x: r1(p.x), y: r1(p.y) }); return; }
+    if (d > GRAPPIN.portee * 1.4) { p.grapT = 0; p.grap = -1; return; }
+    p.vx += dx / d * GRAPPIN.tire; p.vy += dy / d * GRAPPIN.tire; p.hitT = tick;   // tiré par un câble : couper un bout de virage n'est pas un raccourci
+    const v = Math.hypot(p.vx, p.vy), vm = VMAX * GRAPPIN.vmax; if (v > vm) { p.vx *= vm / v; p.vy *= vm / v; }
+  }
+  function utiliser(p, inv) {                            // inv : lancer inversé (Ctrl / Maj, bouton ↩)
     if (p.item < 0 || p.fall || p.fin || gameState !== 'play') return;
     const it = p.item, c = Math.cos(p.a), s = Math.sin(p.a);
     if (it === 0 || it === 1) { p.tbT = tick + TURBO_T; const vf = p.vx * c + p.vy * s; if (vf < VMAX) { p.vx += c * (VMAX - vf) * 0.5; p.vy += s * (VMAX - vf) * 0.5; } }
-    else if (it === 2) { flaques.push({ id: nextId++, x: p.x - c * (CAR_L * 0.9), y: p.y - s * (CAR_L * 0.9), t: tick + OIL_T, o: p.seat, ot: tick + TICK_HZ }); if (flaques.length > 12) flaques.shift(); }
-    else if (it === 3) { boules.push({ x: p.x + c * (CAR_L * 0.7), y: p.y + s * (CAR_L * 0.7), vx: c * BALL_V + p.vx * 0.3, vy: s * BALL_V + p.vy * 0.3, t: tick + BALL_T, o: p.seat, ot: tick + 9, reb: 3 }); }
+    else if (it === 2 || it === 9) poserFlaque(p, it === 2 ? 0 : 2, !!inv);
+    else if (it === 3) { const v = inv ? -BALL_V * 0.8 : BALL_V, sd = inv ? -1 : 1; boules.push({ x: p.x + c * (CAR_L * 0.7) * sd, y: p.y + s * (CAR_L * 0.7) * sd, vx: c * v + p.vx * 0.3, vy: s * v + p.vy * 0.3, t: tick + BALL_T, o: p.seat, ot: tick + 9, reb: 3 }); }
     else if (it === 4) p.shT = tick + SHIELD_T;
     else if (it === 5) {                                 // escargot : le meneur est le plus ralenti, la voiture juste devant à peine
       for (const q of players) if (q.playing && q.alive && !q.fin && q.pos < p.pos && !protege(q)) {
@@ -660,20 +714,28 @@ export function createMicro(room) {
         if (t > q.slowT) q.slowT = t;
       }
     }
-    fx.push({ type: 'objet', seat: p.seat, it, x: r1(p.x), y: r1(p.y) });
+    else if (it === 6) { const q = cibleToupie(p, inv); if (!q) { if (!p.bot) fx.push({ type: 'rate', seat: p.seat, it }); return; } toupies.push({ x: p.x + c * CAR_L * 0.7, y: p.y + s * CAR_L * 0.7, a: inv ? p.a + Math.PI : p.a, cb: q.seat, t: tick + TOUPIE.t, o: p.seat }); }
+    else if (it === 7) { const v = inv ? -BOMBE.vInv : BOMBE.v; bombes.push({ x: p.x, y: p.y, vx: c * v + p.vx * 0.5, vy: s * v + p.vy * 0.5, t0: tick, o: p.seat }); }
+    else if (it === 8) { const d = inv ? 0.9 : -0.9; petards.push({ x: p.x + c * CAR_L * d, y: p.y + s * CAR_L * d, vx: inv ? c * PETARD.vInv + p.vx * 0.5 : 0, vy: inv ? s * PETARD.vInv + p.vy * 0.5 : 0, t: tick + PETARD.meche, o: p.seat }); }
+    else if (it === 10) { const q = cibleGrappin(p); if (!q) { if (!p.bot) fx.push({ type: 'rate', seat: p.seat, it }); return; } p.grap = q.seat; p.grapT = tick + GRAPPIN.t; }
+    else if (it === 11) p.phT = tick + FANTOME_T;
+    else if (it === 12) { for (const q of players) if (q.playing && q.alive && !q.fin && q.pos < p.pos && !protege(q)) q.encT = tick + ENCRE_T; }
+    else if (it === 13) p.juT = tick + RESSORT_T;
+    fx.push({ type: 'objet', seat: p.seat, it, inv: inv ? 1 : 0, x: r1(p.x), y: r1(p.y) });
     if (--p.iu <= 0) p.item = -1;
   }
   function majObjets() {                                 // flaques (glisse), boules de papier (vol, rebonds, impact)
     for (let i = flaques.length - 1; i >= 0; i--) if (flaques[i].t <= tick) flaques.splice(i, 1);
     for (const f of flaques) for (const q of players) {
-      if (!q.playing || !q.alive || q.fall || q.fin || q.ghost) continue;
-      if ((q.x - f.x) * (q.x - f.x) + (q.y - f.y) * (q.y - f.y) > OIL_R * OIL_R) { if (q.oilIn === f.id) q.oilIn = 0; continue; }
+      const F = FLAQ[f.k || 0];
+      if (!q.playing || !q.alive || q.fall || q.fin || q.ghost || intouchable(q)) continue;
+      if ((q.x - f.x) * (q.x - f.x) + (q.y - f.y) * (q.y - f.y) > F.r * F.r) { if (q.oilIn === f.id) q.oilIn = 0; continue; }
       if (q.oilIn === f.id || (q.seat === f.o && tick < f.ot)) continue;
       q.oilIn = f.id;
       if (protege(q)) { fx.push({ type: 'pare', seat: q.seat }); continue; }
-      q.slip = Math.max(q.slip, OIL_SLIP); q.w += (Math.random() < 0.5 ? -1 : 1) * OIL_SPIN;
+      q.slip = Math.max(q.slip, F.slip); if (F.spin) q.w += (Math.random() < 0.5 ? -1 : 1) * F.spin;
       if (f.o !== q.seat && players[f.o] && players[f.o].team !== q.team) { q.bumpBy = f.o; q.bumpT = tick; }
-      fx.push({ type: 'glisse', seat: q.seat, by: f.o, x: r1(q.x), y: r1(q.y) });
+      fx.push({ type: 'glisse', seat: q.seat, by: f.o, k: f.k || 0, x: r1(q.x), y: r1(q.y) });
     }
     for (let i = boules.length - 1; i >= 0; i--) {
       const b = boules[i];
@@ -689,7 +751,7 @@ export function createMicro(room) {
         }
       }
       if (!fini) for (const q of players) {
-        if (!q.playing || !q.alive || q.fall || q.fin || q.ghost || (q.seat === b.o && tick < b.ot)) continue;
+        if (!q.playing || !q.alive || q.fall || q.fin || q.ghost || intouchable(q) || (q.seat === b.o && tick < b.ot)) continue;
         if ((q.x - b.x) * (q.x - b.x) + (q.y - b.y) * (q.y - b.y) > (CAR_R + BALL_R + 4) * (CAR_R + BALL_R + 4)) continue;
         fini = true;
         if (protege(q)) { fx.push({ type: 'pare', seat: q.seat }); break; }
@@ -700,6 +762,49 @@ export function createMicro(room) {
       }
       if (fini) boules.splice(i, 1);
     }
+    for (let i = toupies.length - 1; i >= 0; i--) {     // toupie chercheuse : vole vers sa cible (au-dessus des murs), la fait tourner
+      const u = toupies[i], q = players[u.cb];
+      let fini = u.t <= tick || !q || !q.playing || !q.alive || q.fin;
+      if (!fini) {
+        const d = Math.hypot(q.x - u.x, q.y - u.y), vire = d < 220 ? TOUPIE.vireP : TOUPIE.vire;
+        u.a += clamp(wrapA(Math.atan2(q.y - u.y, q.x - u.x) - u.a), -vire, vire);
+        u.x += Math.cos(u.a) * TOUPIE.v; u.y += Math.sin(u.a) * TOUPIE.v;
+        if (!q.fall && !q.ghost && !intouchable(q) && Math.hypot(q.x - u.x, q.y - u.y) < CAR_R + TOUPIE.r) {
+          fini = true;
+          if (protege(q)) fx.push({ type: 'pare', seat: q.seat });
+          else {
+            q.vx *= 0.3; q.vy *= 0.3; q.slip = Math.max(q.slip, 30); q.w = (Math.random() < 0.5 ? -1 : 1) * 0.35; q.hitT = tick;
+            if (players[u.o] && players[u.o].team !== q.team) { q.bumpBy = u.o; q.bumpT = tick; }
+            fx.push({ type: 'paf', seat: q.seat, by: u.o, k: 'toupie', x: r1(q.x), y: r1(q.y) });
+          }
+        }
+      }
+      if (fini) toupies.splice(i, 1);
+    }
+    for (let i = bombes.length - 1; i >= 0; i--) {      // bombe à eau : vole en cloche, éclate en flaque là où elle retombe
+      const b = bombes[i];
+      b.x += b.vx; b.y += b.vy; b.vx *= 0.97; b.vy *= 0.97;
+      if (C.edge !== 'chute') { b.x = clamp(b.x, C.table.x0 + 20, C.table.x1 - 20); b.y = clamp(b.y, C.table.y0 + 20, C.table.y1 - 20); }
+      if (tick - b.t0 < BOMBE.air) continue;
+      bombes.splice(i, 1);
+      if (surTable(C, b.x, b.y)) { flaques.push({ id: nextId++, k: 1, x: b.x, y: b.y, t: tick + FLAQ[1].t, o: b.o, ot: tick }); if (flaques.length > 14) flaques.shift(); }
+      fx.push({ type: 'plouf', seat: b.o, x: r1(b.x), y: r1(b.y) });
+    }
+    for (let i = petards.length - 1; i >= 0; i--) {     // pétard : glisse (lancé devant), puis explose et repousse les voitures proches
+      const e = petards[i];
+      e.x += e.vx; e.y += e.vy; e.vx *= PETARD.frein; e.vy *= PETARD.frein;
+      if (e.t > tick) continue;
+      petards.splice(i, 1);
+      fx.push({ type: 'boum', seat: e.o, x: r1(e.x), y: r1(e.y) });
+      for (const q of players) {
+        if (!q.playing || !q.alive || q.fall || q.fin || q.ghost || intouchable(q)) continue;
+        const dx = q.x - e.x, dy = q.y - e.y, d = Math.hypot(dx, dy);
+        if (d > PETARD.r || d < 1e-6) continue;
+        const k = (1 - d / PETARD.r) * PETARD.force * (protege(q) ? 0.3 : 1);
+        q.vx += dx / d * k; q.vy += dy / d * k; q.slip = Math.max(q.slip, 10); q.w += (Math.random() < 0.5 ? -1 : 1) * 0.06; q.hitT = tick;
+        if (e.o !== q.seat && players[e.o] && players[e.o].team !== q.team) { q.bumpBy = e.o; q.bumpT = tick; }
+      }
+    }
   }
   function botObjet(p) {                                 // les bots s'en servent aussi (mieux en Difficile)
     if (p.item < 0 || p.fin) return;
@@ -708,10 +813,20 @@ export function createMicro(room) {
     let go = false;
     if (it === 5) go = true;                             // escargot : tout de suite
     else if (it === 0 || it === 1) go = C.rayon[(p.si + 12) % C.n] > 400 && p.dTrack < C.W && p.slip <= 0;   // turbo en ligne droite
-    else if (it === 4) go = boules.some(b => b.o !== p.seat && Math.hypot(b.x - p.x, b.y - p.y) < 160) || held > 150;
+    else if (it === 4) go = boules.some(b => b.o !== p.seat && Math.hypot(b.x - p.x, b.y - p.y) < 160) || toupies.some(u => u.cb === p.seat && Math.hypot(u.x - p.x, u.y - p.y) < 260) || held > 150;
     else if (it === 2) go = players.some(q => q !== p && q.playing && q.alive && !q.fin && Math.hypot(q.x - p.x, q.y - p.y) < 140 && ((q.x - p.x) * c + (q.y - p.y) * s) < -20) || held > 240;
     else if (it === 3) go = players.some(q => { if (q === p || !q.playing || !q.alive || q.fin || q.team === p.team) return false; const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy); return d < 420 && d > 30 && (dx * c + dy * s) / d > (botDiff === 2 ? 0.96 : 0.9); }) || held > 300;
-    if (go && (D.err === 0 || Math.random() > D.err * 40)) utiliser(p);
+    const derriere = d => players.some(q => adversaire(p, q) && Math.hypot(q.x - p.x, q.y - p.y) < d && ((q.x - p.x) * c + (q.y - p.y) * s) < -20);
+    const devant = (dmax, cone) => players.some(q => { if (!adversaire(p, q)) return false; const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy); return d < dmax && d > 30 && (dx * c + dy * s) / d > cone; });
+    let inv = false;
+    if (it === 3 && !go && derriere(160) && !devant(420, 0.9)) { go = true; inv = true; }   // boule en arrière sur celui qui colle
+    else if (it === 6 || it === 12) go = p.pos > 1;                                         // toupie, encre : dès qu'il y a quelqu'un devant
+    else if (it === 7) go = devant(520, 0.8) || held > 300;
+    else if (it === 8 || it === 9) go = derriere(150) || held > 240;
+    else if (it === 10) go = !!cibleGrappin(p) && C.rayon[(p.si + 10) % C.n] > 300;
+    else if (it === 11) go = boules.some(b => b.o !== p.seat && Math.hypot(b.x - p.x, b.y - p.y) < 160) || toupies.some(u => u.cb === p.seat && Math.hypot(u.x - p.x, u.y - p.y) < 260) || held > 200;
+    else if (it === 13) go = flaques.some(f => { const dx = f.x - p.x, dy = f.y - p.y, d = Math.hypot(dx, dy); return f.o !== p.seat && d < 170 && (dx * c + dy * s) / d > 0.8; }) || held > 240;
+    if (go && (D.err === 0 || Math.random() > D.err * 40)) utiliser(p, inv);
   }
   function eliminer(p) {
     p.alive = false; p.elimTick = tick; p.fall = 0;
@@ -764,7 +879,7 @@ export function createMicro(room) {
       if (p.fall) continue;
       if (p.fin) botControl(p, true);                   // arrivé : pilote automatique au ralenti, en fantôme
       else if (p.bot) { botControl(p, false); if (bonusOn) botObjet(p); }
-      else { humanControl(p); if (p.useReq) { p.useReq = false; utiliser(p); } }   // l'objet demandé par message : utilisé DANS le tick (fx d'un message = perdus, le tick repart de `pend`)
+      else { humanControl(p); if (p.useReq) { const inv = p.useReq === 2; p.useReq = false; utiliser(p, inv); } }   // l'objet demandé par message : utilisé DANS le tick (fx d'un message = perdus, le tick repart de `pend`)
     }
     for (const p of racers) {
       if (p.fall) { p.vx *= 0.9; p.vy *= 0.9; p.x += p.vx; p.y += p.vy; if (--p.fall <= 0) reapparaitre(p); continue; }
@@ -772,21 +887,23 @@ export function createMicro(room) {
       if (p.boostCd > tick + BOOST_CD) p.boostCd = 0;
       p.si = proche(C, p.x, p.y, p.si, 8);
       p.dTrack = Math.hypot(p.x - C.sx[p.si], p.y - C.sy[p.si]);
-      p.surf = surfaceDe(p);
+      p.surf = intouchable(p) ? 0 : surfaceDe(p);      // fantôme / en l'air : ni lait, ni sucre, ni zone
+      remorque(p);
       drive(p);
       const dd = Math.hypot(p.x - p.px, p.y - p.py);       // trajet depuis la dernière porte (et la part loin hors piste)
       p.gLen += dd; if (p.dTrack > C.W + CUT_MARGE) p.gOff += dd;
     }
     for (let i = 0; i < racers.length; i++) {
-      const p = racers[i]; if (p.fall || p.ghost || p.fin) continue;
-      for (let j = i + 1; j < racers.length; j++) { const q = racers[j]; if (!q.fall && !q.ghost && !q.fin) choc(p, q); }
+      const p = racers[i]; if (p.fall || p.ghost || p.fin || intouchable(p)) continue;
+      for (let j = i + 1; j < racers.length; j++) { const q = racers[j]; if (!q.fall && !q.ghost && !q.fin && !intouchable(q)) choc(p, q); }
     }
     for (const p of racers) {
       if (p.fall) continue;
       murs(p);
       if (p.fin) { if (!surTable(C, p.x, p.y) || dansTrou(C, p.x, p.y)) reapparaitre(p); }   // pilote automatique égaré : replacé sur la piste
       else {
-        if (C.edge === 'chute' && !surTable(C, p.x, p.y)) tomber(p, false);
+        if (p.juT > tick) { /* en l'air : on ne tombe qu'à l'atterrissage */ }
+        else if (C.edge === 'chute' && !surTable(C, p.x, p.y)) tomber(p, false);
         else if (C.holes.length && dansTrou(C, p.x, p.y)) tomber(p, true);
         else if (!surTable(C, p.x, p.y)) { p.x = clamp(p.x, C.table.x0 + CAR_R, C.table.x1 - CAR_R); p.y = clamp(p.y, C.table.y0 + CAR_R, C.table.y1 - CAR_R); }   // filet : jamais à travers une bande
       }
@@ -822,7 +939,8 @@ export function createMicro(room) {
       cam: cam && gameState !== 'lobby' ? [r1(cam.x), r1(cam.y), Math.round(cam.hw)] : null,
       rec: lastBest ? [lastBest.seat, r2(lastBest.t / TICK_HZ)] : null,
       bx: bonusOn ? (boxT.length === C.boxes.length ? boxT.map(t => (t > tick && gameState !== 'lobby' ? '0' : '1')).join('') : '1'.repeat(C.boxes.length)) : '',
-      fl: flaques.map(f => [r1(f.x), r1(f.y)]), pj: boules.map(b => [r1(b.x), r1(b.y)]), opt: { bonus: bonusOn ? 1 : 0, pouce: pouceOn ? 1 : 0 },
+      fl: flaques.map(f => [r1(f.x), r1(f.y), f.k || 0]), pj: boules.map(b => [r1(b.x), r1(b.y)]),   // flaques [x, y, type 0 huile | 1 eau | 2 glace]
+      tp: toupies.map(u => [r1(u.x), r1(u.y)]), bm: bombes.map(b => [r1(b.x), r1(b.y), r1((tick - b.t0) / BOMBE.air)]), pt: petards.map(e => [r1(e.x), r1(e.y), r1(Math.max(0, (e.t - tick) / PETARD.meche))]), opt: { bonus: bonusOn ? 1 : 0, pouce: pouceOn ? 1 : 0 },
       match: match.etat(players),
       // Grand Prix : n courses, k déjà courues, circuits de la série, f = terminé, ws = sièges vainqueurs (null = course simple)
       gp: gpChoix ? { n: gpSeq.length || gpTotal(), k: gpFait, seq: gpSeq, f: gpSeq.length && gpFait >= gpSeq.length ? 1 : 0, ws: gpGagnants } : null,
@@ -835,6 +953,7 @@ export function createMicro(room) {
         lap: Math.max(1, Math.min(laps, p.lap || 1)), pos: p.pos, fin: p.fin, ft: p.fin ? r2(p.ftick / TICK_HZ) : 0,
         bl: p.best ? r2(p.best / TICK_HZ) : 0, ll: p.last ? r2(p.last / TICK_HZ) : 0, pg: p.pg,
         bumps: p.bumps, kos: p.kos, falls: p.falls, cuts: p.cuts, pen: p.penT > tick, it: p.item, iu: p.iu, tb: p.tbT > tick || p.flT > tick, sh: p.shT > tick, sl: p.slowT > tick, score: p.score, place: p.place, elimTick: p.elimTick,
+        ph: p.phT > tick, en: p.encT > tick, ju: p.juT > tick ? r1(1 - (p.juT - tick) / RESSORT_T) : 0, gr: p.grapT > tick ? p.grap : -1,   // fantôme, encre, saut (0..1), grappin (cible)
         gpp: p.gpPts, gpd: p.gpDer, ap: p.aspB > tick ? 4 : Math.min(3, Math.floor(p.aspC / ASP_CHARGE * 4)),
       })),
     };
@@ -882,7 +1001,7 @@ export function createMicro(room) {
       }
       else { p.ana = null; p.inp = { up: !!m.up, down: !!m.down, left: !!m.left, right: !!m.right }; }
     }
-    else if (m.t === 'objet' && p) { if (p.playing && p.alive && !p.bot && p.item >= 0) p.useReq = true; }
+    else if (m.t === 'objet' && p) { if (p.playing && p.alive && !p.bot && p.item >= 0) p.useReq = m.inv ? 2 : 1; }   // inv : lancer inversé
     else if (m.t === 'bonus') { if (editable()) bonusOn = !bonusOn; }
     else if (m.t === 'pouce') { if (editable()) pouceOn = !pouceOn; }
     else if (m.t === 'klaxon' && p) { if (p.playing && clk - p.honkT >= 20 && (gameState === 'play' || gameState === 'countdown')) { p.honkT = clk; pend.push({ type: 'honk', seat: p.seat }); } }

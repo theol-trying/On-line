@@ -126,6 +126,7 @@ async function jouer(id, participants, attentes = {}) {
       if (Math.random() < 0.5) c.jeu({ t: 'input', up: Math.random() < 0.8, down: Math.random() < 0.1, left: Math.random() < 0.3, right: Math.random() < 0.3 });
       else c.jeu({ t: 'input', mx: Math.random() * 2 - 1, my: Math.random() * 2 - 1 });
       if (Math.random() < 0.05) c.jeu({ t: 'klaxon' });
+      if (Math.random() < 0.05) c.jeu(Math.random() < 0.5 ? { t: 'objet' } : { t: 'objet', inv: 1 });   // objets, dans les deux sens
     }
     else if (id === 'patate') {                        // course tenue + sprint (comme le Foot) ; la patate passe au contact
       c.jeu({ t: 'input', up: Math.random() < 0.3, down: Math.random() < 0.3, left: Math.random() < 0.3, right: Math.random() < 0.3 });

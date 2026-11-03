@@ -188,7 +188,7 @@ const INPUT = {
   sumo: () => [{ t: 'input', up: chance(0.3), down: chance(0.3), left: chance(0.3), right: chance(0.3) }, ...(chance(0.05) ? [{ t: 'dash' }] : [])],
   foot: () => [{ t: 'input', up: chance(0.3), down: chance(0.3), left: chance(0.3), right: chance(0.3) }, ...(chance(0.05) ? [{ t: 'charge', on: chance(0.5) }] : []), ...(chance(0.03) ? [{ t: 'shoot' }] : [])],
   patate: () => [{ t: 'input', up: chance(0.3), down: chance(0.3), left: chance(0.3), right: chance(0.3) }, ...(chance(0.05) ? [{ t: 'sprint', on: chance(0.5) }] : [])],
-  micro: () => [chance(0.5) ? { t: 'input', up: chance(0.7), down: chance(0.15), left: chance(0.3), right: chance(0.3) } : { t: 'input', mx: R() * 2 - 1, my: R() * 2 - 1 }, ...(chance(0.03) ? [{ t: 'klaxon' }] : []), ...(chance(0.05) ? [{ t: 'objet' }] : [])],
+  micro: () => [chance(0.5) ? { t: 'input', up: chance(0.7), down: chance(0.15), left: chance(0.3), right: chance(0.3) } : { t: 'input', mx: R() * 2 - 1, my: R() * 2 - 1 }, ...(chance(0.03) ? [{ t: 'klaxon' }] : []), ...(chance(0.05) ? [{ t: 'objet' }] : []), ...(chance(0.03) ? [{ t: 'objet', inv: 1 }] : [])],
 };
 // réglages qui changent l'issue d'une manche (variantes de fin) — un tirage par manche
 const REGLAGES = {

@@ -19,6 +19,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const id = process.argv[2];
 if (!id) { console.error('usage : node outils/verifier-sons.mjs <id>'); process.exit(2); }
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// hasard à graine : les recettes tirent leurs grains et gouttes au hasard ; sans graine, un même son passait ou non le seuil
+// des crêtes selon le tirage (splash(« craie ») à 1,55, 03/11) — le contrôle doit donner le même verdict à chaque fois
+{ let a = 20261103; Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const defauts = [];
 const ko = m => defauts.push(m);
 

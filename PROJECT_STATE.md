@@ -442,6 +442,34 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     faits (le vérificateur ne connaît que les circuits inscrits). Méthode : un agent par circuit, l'un après l'autre (les
     ateliers à plusieurs agents coûtaient trop cher), vérification + galerie + une course en jeu (serveur local RELANCÉ :
     il garde la géométrie en mémoire), commit.
+- **8 nouveaux objets + lancer inversé (03/11)** — proposés puis choisis par l'utilisateur (tous retenus) ; objets 6 à 13 de
+  `ITEMS` (serveur), `ITEM` (client), sons `objet6`…`objet13`, `plouf`, `boum`, `gel` :
+  - 🎯 **Toupie chercheuse** (`toupies`, snapshot `tp`) : vole au-dessus de tout (24 u/tick, virage 0,16 rad/tick, 0,45 de près)
+    vers le premier adversaire au classement (inversé : celui juste derrière) ; touche = ×0,3 de vitesse, glisse 30 ticks,
+    tête-à-queue (fx `paf` k `toupie`). Mesuré : 20 lancées, 20 touches.
+  - 💧 **Bombe à eau** (`bombes`, `bm` [x, y, phase du vol]) : lancée en cloche (20 u/tick devant, 13 derrière, 14 ticks en
+    l'air), éclate en flaque d'eau (type 1, rayon 62, 10 s, glisse 12) ; fx `plouf`.
+  - 🧨 **Pétard** (`petards`, `pt` [x, y, mèche restante]) : posé derrière (inversé : lancé devant, freiné ×0,9/tick), explose
+    au bout d'1 s : souffle radial jusqu'à 9 u/tick sur 140 u (×0,3 sous bouclier) ; fx `boum`.
+  - 🧊 **Glaçon** : plaque de glace (flaque type 2, rayon 52, 10 s, glisse 24, sans embardée), derrière ou 130 u devant.
+  - 🪝 **Grappin** : accroche la voiture la plus proche devant dans l'axe ET devant au classement (moins de 4 portes : jamais un
+    autre tronçon), à 450 u au plus ; tire de 0,7 u/tick² (maxi ×1,35 VMAX) jusqu'à 1,5 s, puis aspiration complète à
+    l'arrivée ; pendant la traction, `hitT` évite la sanction de raccourci. Personne à portée : l'objet est GARDÉ (fx `rate`).
+    Snapshot joueur `gr` (siège accroché ou -1), câble dessiné.
+  - 👻 **Fantôme** 3 s (`phT`, joueur `ph`) et 🪀 **Ressort** 1 s (`juT`, joueur `ju` = phase 0..1) : `intouchable()` — ni
+    voitures, ni mobiles, ni flaques, ni zones, ni objets ; le ressort passe en plus par-dessus les obstacles ronds et ne tombe
+    qu'à l'atterrissage. Les murs et (pour le fantôme) le vide comptent toujours.
+  - 🦑 **Encre de seiche** (`encT`, joueur `en`) : 3 s de taches sur l'écran de tous ceux de devant (dessin client, repère du
+    HUD) ; un bot encré braque en zigzag.
+  - Flaques posées typées : `fl` = [x, y, k] (0 huile, 1 eau, 2 glace), réglages `FLAQ` ; fx `glisse` porte `k`.
+  - **Lancer inversé** : msg `objet { inv: 1 }` (`useReq` 2) — Ctrl ou Maj au clavier (pas seulement Ctrl : Ctrl + W ferme
+    l'onglet aux joueurs en WASD), bouton tactile `#mmItemInv` ↩️. Boule, bombe et toupie partent derrière ; huile, glaçon et
+    pétard partent devant ; sans effet pour les autres.
+  - Tirage pondéré par la place (`poidsObjets`, 14 poids) : toupie, grappin et encre surtout pour les derniers (jamais pour le
+    premier), pétard et glaçon plutôt pour la tête. Bots : règles d'emploi par objet dans `botObjet` (boule en arrière sur celui
+    qui colle). Mesuré (4 courses de 8) : tous les objets sortent, aucune chute de plus, 7 circuits toujours conformes.
+  - `outils/verifier-sons.mjs` tire désormais son hasard à graine : `splash("craie")` passait ou non le seuil des crêtes selon
+    le tirage (échec aléatoire de `npm test`).
 - **Flèches turbo (03/11)** — demande : « que les lignes de boost donnent une meilleure accélération, pour que les prendre ait un
   réel intérêt ». Avant : à-coup à +42 % qui retombait en 0,3 s (~+3 % de distance sur 3 s). Désormais une fenêtre de turbo
   (champ `flT`) : +40 % de vitesse de pointe et reprise ×2 pendant 1,5 s, élan immédiat (la moitié de l'écart), relançable

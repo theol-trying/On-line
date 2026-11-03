@@ -605,7 +605,7 @@
       <button id="mmLbBtn">🏆 Classement</button>
     </div>
     <div class="help">
-      <b>↑</b> / <b>Z</b> (W) accélère · <b>↓</b> / <b>S</b> freine et recule · <b>← →</b> / <b>Q D</b> (A D) tournent · <b>Espace</b> = utiliser l'objet 🎁 · <b>H</b> = klaxon 📯 · <b>P / Échap</b> = pause.
+      <b>↑</b> / <b>Z</b> (W) accélère · <b>↓</b> / <b>S</b> freine et recule · <b>← →</b> / <b>Q D</b> (A D) tournent · <b>Espace</b> = utiliser l'objet 🎁 · <b>Ctrl</b> / <b>Maj</b> = le lancer dans l'autre sens · <b>H</b> = klaxon 📯 · <b>P / Échap</b> = pause.
       Attention au bord de la table : on tombe ! Couper la piste est sanctionné.
     </div>
     <div class="gpad">
@@ -615,6 +615,7 @@
       </div>
       <div class="acts">
         <button id="mmItem" class="touch fire" aria-label="utiliser l'objet">🎁</button>
+        <button id="mmItemInv" class="touch" aria-label="lancer l'objet dans l'autre sens">↩️</button>
         <button id="mmHorn" class="touch" aria-label="klaxon">📯</button>
       </div>
     </div>
@@ -640,6 +641,15 @@
         <div class="legrow"><span>🛢</span><b>Flaque d'huile</b> — posée derrière soi : qui roule dessus glisse et tourne</div>
         <div class="legrow"><span>📄</span><b>Boule de papier</b> — lancée devant : la voiture touchée part en tête-à-queue</div>
         <div class="legrow"><span>🛡</span><b>Bouclier</b> — protège des boules, des flaques et amortit les chocs</div>
+        <div class="legrow"><span>🎯</span><b>Toupie chercheuse</b> — file au-dessus de tout vers le premier (le 2e si c'est toi) et le fait tourner</div>
+        <div class="legrow"><span>💧</span><b>Bombe à eau</b> — lancée en cloche devant : elle éclate en grande flaque glissante là où elle retombe</div>
+        <div class="legrow"><span>🧨</span><b>Pétard</b> — posé derrière soi, il explose au bout d'une seconde et repousse les voitures proches</div>
+        <div class="legrow"><span>🧊</span><b>Glaçon</b> — laisse une plaque de glace derrière soi : qui roule dessus perd presque toute son adhérence</div>
+        <div class="legrow"><span>🪝</span><b>Grappin</b> — s'accroche à la voiture de devant à portée et te tire vers elle, puis aspiration pour la doubler (personne à portée : tu le gardes)</div>
+        <div class="legrow"><span>👻</span><b>Fantôme</b> — 3 s transparent : voitures, obstacles mobiles, flaques, zones et objets passent à travers (pas les murs, pas le vide)</div>
+        <div class="legrow"><span>🦑</span><b>Encre de seiche</b> — tache l'écran de tous ceux qui sont devant pendant 3 s (le bouclier protège)</div>
+        <div class="legrow"><span>🪀</span><b>Ressort</b> — un saut d'une seconde par-dessus voitures, obstacles, flaques et objets ; on retombe là où l'on atterrit</div>
+        <div class="legrow"><span>↩️</span><b>Dans l'autre sens</b> — <b>Ctrl</b> ou <b>Maj</b> (bouton ↩️ sur téléphone) lance l'objet à l'envers : boule, bombe et toupie partent vers l'arrière (la toupie vise celui qui te suit), huile, glaçon et pétard partent devant</div>
         <div class="legrow"><span>🐌</span><b>Escargot</b> — ralentit tous ceux qui sont devant, et d'autant plus qu'ils sont loin en tête : le premier perd la moitié de sa vitesse pendant 3 s, la voiture juste devant presque rien</div>
         <div class="legrow"><span>🤝</span><b>Coup de pouce</b> — (option) plus on est loin derrière le meneur, plus la voiture va vite, jusqu'à +16 %. Le meneur n'en a pas</div>
         <h4>Formules (game master)</h4>

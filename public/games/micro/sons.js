@@ -198,6 +198,62 @@ export const SONS = {
     S.bruit({ dur: 0.22, gain: 0.14, couleur: 'rose', filtre: { type: 'lowpass', f: 700 }, attaque: 0.01, retard: 0.05 });   // « sclorp »
     S.ton({ f: 180, f2: 420, glisse: 0.6, dur: 0.09, onde: 'sine', gain: 0.1, attaque: 0.003, retard: 0.02 });
   },
+  objet6: (S) => {                                       // Toupie chercheuse 🎯 : on la lance (« vrrrr » qui monte) et elle part en sifflant
+    S.ton({ f: 180, f2: 720, glisse: 0.7, dur: 0.55, onde: 'creux', gain: 0.12, attaque: 0.02, vibrato: { f: 22, prof: 0.35 }, filtre: { type: 'lowpass', f: 2600 }, reverb: 0.3 });
+    S.souffle({ dur: 0.5, f1: 900, f2: 3600, gain: 0.2, q: 2, retard: 0.1 });
+    S.choc({ f: 300, f2: 160, dur: 0.06, gain: 0.1, clic: 0.6, fClic: 2500 });
+  },
+  objet7: (S) => {                                       // Bombe à eau 💧 : le ballon qui ballotte, puis le lancer
+    S.ton({ f: 220, f2: 330, glisse: 0.5, dur: 0.18, onde: 'sine', gain: 0.12, attaque: 0.01, vibrato: { f: 9, prof: 0.4 } });
+    S.bruit({ dur: 0.16, gain: 0.08, couleur: 'rose', filtre: { type: 'bandpass', f: 900, q: 2 }, attaque: 0.01 });          // l'eau dedans
+    S.souffle({ dur: 0.3, f1: 600, f2: 2200, gain: 0.24, q: 1.2, retard: 0.12 });
+  },
+  objet8: (S) => {                                       // Pétard 🧨 : on frotte l'allumette, la mèche grésille
+    S.bruit({ dur: 0.12, gain: 0.18, couleur: 'blanc', filtre: { type: 'bandpass', f: 3200, q: 1.5 }, attaque: 0.004 });
+    grains(S, 14, 0.9, 3000, 8000, 0.05, 0.1);
+    S.bruit({ dur: 0.9, gain: 0.06, couleur: 'blanc', filtre: { type: 'highpass', f: 4000 }, attaque: 0.05, retard: 0.1 });
+  },
+  objet9: (S) => {                                       // Glaçon 🧊 : tintement du glaçon qui tombe, craquement de la glace qui s'étale
+    cloche(S, 2637, 0.25, 0.06); cloche(S, 3520, 0.2, 0.05, 0.07);
+    grains(S, 8, 0.3, 1800, 5000, 0.07, 0.12);
+    S.souffle({ dur: 0.35, f1: 3000, f2: 1200, gain: 0.12, q: 2, retard: 0.12 });
+  },
+  objet10: (S) => {                                      // Grappin 🪝 : le câble qui file, le crochet qui claque
+    S.souffle({ dur: 0.35, f1: 500, f2: 2600, gain: 0.24, q: 1.4 });
+    S.ton({ f: 1200, f2: 600, dur: 0.3, onde: 'sine', gain: 0.04, attaque: 0.01, vibrato: { f: 30, prof: 0.2 } });
+    S.choc({ f: 520, f2: 260, dur: 0.09, gain: 0.18, clic: 1, fClic: 3200, retard: 0.3, reverb: 0.3 });
+  },
+  objet11: (S) => {                                      // Fantôme 👻 : « ouuuh » flûté, très réverbéré
+    S.ton({ f: 523, f2: 392, glisse: 0.7, dur: 0.9, onde: 'sine', gain: 0.12, attaque: 0.08, vibrato: { f: 5, prof: 0.6 }, reverb: 0.85 });
+    S.ton({ f: 784, f2: 523, glisse: 0.7, dur: 0.8, onde: 'sine', gain: 0.05, attaque: 0.1, vibrato: { f: 5.5, prof: 0.6 }, retard: 0.05, reverb: 0.9 });
+    S.souffle({ dur: 0.8, f1: 1200, f2: 400, gain: 0.08, q: 1 });
+  },
+  objet12: (S) => {                                      // Encre de seiche 🦑 : « sproutch » de l'encre crachée
+    S.bruit({ dur: 0.25, gain: 0.26, couleur: 'rose', filtre: { type: 'bandpass', f: 700, f2: 1800, q: 1.4 }, attaque: 0.006, reverb: 0.3 });
+    S.ton({ f: 260, f2: 130, dur: 0.18, onde: 'sine', gain: 0.12, attaque: 0.005 });
+    grains(S, 6, 0.25, 900, 2400, 0.06, 0.12);                                                                                   // les gouttes
+  },
+  objet13: (S) => {                                      // Ressort 🪀 : « boïng » qui vibre
+    S.ton({ f: 150, f2: 600, glisse: 0.25, dur: 0.6, onde: 'creux', gain: 0.16, attaque: 0.005, vibrato: { f: 14, prof: 0.6 }, filtre: { type: 'lowpass', f: 2400 }, reverb: 0.3 });
+    S.choc({ f: 220, f2: 110, dur: 0.08, gain: 0.12, clic: 0.4, fClic: 1500 });
+  },
+  plouf: (S) => {                                        // la bombe à eau éclate : « splash » franc et gouttes qui retombent
+    if (!S.limite('plouf', 80)) return;
+    S.bruit({ dur: 0.35, gain: 0.32, couleur: 'blanc', filtre: { type: 'bandpass', f: 1600, f2: 600, q: 0.9 }, attaque: 0.004, reverb: 0.35 });
+    S.choc({ f: 160, f2: 70, dur: 0.12, gain: 0.16, clic: 0.5, fClic: 900 });
+    for (let k = 0; k < 4; k++) { const g = 900 + Math.random() * 1400; S.ton({ f: g, f2: g * 1.8, glisse: 0.5, dur: 0.05, onde: 'sine', gain: 0.035, attaque: 0.002, retard: 0.06 + Math.random() * 0.25, reverb: 0.4, varie: 0.15 }); }
+  },
+  boum: (S) => {                                         // le pétard explose : claquement sec et grave, débris de papier
+    if (!S.limite('boum', 90)) return;
+    S.choc({ f: 110, f2: 40, dur: 0.3, gain: 0.32, clic: 1, fClic: 2600, reverb: 0.45 });
+    S.bruit({ dur: 0.4, gain: 0.26, couleur: 'brun', filtre: { type: 'lowpass', f: 1800, f2: 200 }, attaque: 0.002, reverb: 0.5 });
+    grains(S, 10, 0.4, 1500, 6000, 0.05, 0.05);
+  },
+  gel: (S) => {                                          // roues sur la plaque de glace : crissement aigu qui glisse
+    if (!S.limite('gel', 120)) return;
+    S.souffle({ dur: 0.4, f1: 4200, f2: 1800, gain: 0.14, q: 3 });
+    S.ton({ f: 1800, f2: 1200, dur: 0.3, onde: 'sine', gain: 0.04, attaque: 0.01, vibrato: { f: 18, prof: 0.3 } });
+  },
   paf: (S) => {                                          // boule de papier reçue : « paf », le papier s'écrase, la voiture part en toupie
     S.choc({ f: 190, f2: 90, dur: 0.12, gain: 0.24, clic: 0.9, fClic: 1900, reverb: 0.35 });
     grains(S, 6, 0.08, 1800, 5500, 0.08);
@@ -246,6 +302,9 @@ export const DEMO = [
   { k: 'out', nom: 'Sorti de l\'écran (éliminé)' }, { k: 'coupe', nom: 'Raccourci / pénalité' },
   { k: 'boite', nom: 'Boîte surprise ramassée' }, { k: 'objet0', nom: 'Objet : Turbo' }, { k: 'objet1', nom: 'Objet : Triple turbo' }, { k: 'objet2', nom: 'Objet : Flaque d\'huile' },
   { k: 'objet3', nom: 'Objet : Boule de papier' }, { k: 'objet4', nom: 'Objet : Bouclier' }, { k: 'objet5', nom: 'Objet : Escargot' },
+  { k: 'objet6', nom: 'Objet : Toupie chercheuse' }, { k: 'objet7', nom: 'Objet : Bombe à eau' }, { k: 'objet8', nom: 'Objet : Pétard (mèche)' }, { k: 'objet9', nom: 'Objet : Glaçon' },
+  { k: 'objet10', nom: 'Objet : Grappin' }, { k: 'objet11', nom: 'Objet : Fantôme' }, { k: 'objet12', nom: 'Objet : Encre de seiche' }, { k: 'objet13', nom: 'Objet : Ressort' },
+  { k: 'plouf', nom: 'Bombe à eau qui éclate' }, { k: 'boum', nom: 'Pétard qui explose' }, { k: 'gel', nom: 'Roule sur la glace' },
   { k: 'paf', nom: 'Touché par une boule de papier' }, { k: 'glisse', nom: 'Roule dans l\'huile' }, { k: 'pare', nom: 'Le bouclier pare un coup' },
   { k: 'count', nom: 'Décompte (feu rouge)' }, { k: 'go', nom: 'Départ (feu vert)' }, { k: 'win', nom: 'Fin de manche' },
 ];

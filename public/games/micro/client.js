@@ -57,7 +57,9 @@ const DIR_KEYS = { ArrowUp: 'up', KeyW: 'up', KeyZ: 'up', ArrowDown: 'down', Key
 const ORD = n => n === 1 ? '1er' : n + 'ᵉ';
 // objets à ramasser (indices = ITEMS du serveur)
 const ITEM = [{ e: '⚡', n: 'Turbo', c: '#ffd23a' }, { e: '🚀', n: 'Triple turbo', c: '#ff8a1e' }, { e: '🛢️', n: 'Flaque d\'huile', c: '#7a5a3a' },
-  { e: '📄', n: 'Boule de papier', c: '#f2f2ea' }, { e: '🛡️', n: 'Bouclier', c: '#6fc6ff' }, { e: '🐌', n: 'Escargot', c: '#9be060' }];
+  { e: '📄', n: 'Boule de papier', c: '#f2f2ea' }, { e: '🛡️', n: 'Bouclier', c: '#6fc6ff' }, { e: '🐌', n: 'Escargot', c: '#9be060' },
+  { e: '🎯', n: 'Toupie chercheuse', c: '#ff5a5a' }, { e: '💧', n: 'Bombe à eau', c: '#5ab4ff' }, { e: '🧨', n: 'Pétard', c: '#ff7a3a' }, { e: '🧊', n: 'Glaçon', c: '#bfe9ff' },
+  { e: '🪝', n: 'Grappin', c: '#c8a070' }, { e: '👻', n: 'Fantôme', c: '#e0e6ff' }, { e: '🦑', n: 'Encre de seiche', c: '#8a6cff' }, { e: '🪀', n: 'Ressort', c: '#ffd23a' }];
 const itemAt = k => (k | 0) === k && k >= 0 && k < ITEM.length ? ITEM[k] : null;
 const SENS_NAME = { normal: '➡️ Sens normal', inverse: '↩️ Sens inverse', hasard: '🎲 Sens au hasard' };
 const CAR_NAMES = ['proto', 'mini', 'pickup', 'formule', 'fourgon'];
@@ -88,7 +90,7 @@ export default (function () {
   let pendingEnd = null, overT0 = 0, eatUntil = 0, homeChoice = false, goT0 = -1e9, lastFinishAt = -1e9;
   let podSrc = null, podList = [], endPod = false;
   let hud, cards, startBtn, pauseBtn, modeBtn, botsBtn, diffBtn, formBtn, circBtn, lapsBtn, pauseFloat, lbBtn, lbPanel, lbBody, endEl, hornBtn;
-  let sensBtn, bonusBtn, pouceBtn, itemBtn, gpBtn, ckey = '', VRT = 0, lastItemMsg = -1e9;
+  let sensBtn, bonusBtn, pouceBtn, itemBtn, itemInvBtn, gpBtn, ckey = '', VRT = 0, lastItemMsg = -1e9;
   const bumpFlash = {};                                   // bumpers qui viennent de renvoyer quelqu'un : éclat (index d'obstacle → instant)
   let matchBtn = null, matchChip = null;
   const lastRear = new Array(MAX_SEATS).fill(null);    // dernière position des roues arrière (traces de pneus)
@@ -331,6 +333,7 @@ export default (function () {
       const tx = d ? d.e + (me.iu > 1 ? '×' + me.iu : '') : '🎁';
       if (itemBtn._t !== tx) { itemBtn._t = tx; itemBtn.textContent = tx; }
       itemBtn.style.opacity = d ? '' : '0.45'; itemBtn.style.display = bon ? '' : 'none';
+      if (itemInvBtn) { itemInvBtn.style.opacity = d ? '' : '0.45'; itemInvBtn.style.display = bon ? '' : 'none'; }
     }
     if (gpBtn) { gpBtn.disabled = !idle; gpBtn.textContent = '🏎 Grand Prix : ' + (m.gp ? m.gp.n + ' courses' : 'non'); gpBtn.classList.toggle('on', !!m.gp); }
     if (lapsBtn) { lapsBtn.disabled = !idle || m.formule === 'elim'; lapsBtn.textContent = '🔁 ' + m.laps + ' tour' + (m.laps > 1 ? 's' : ''); }
@@ -495,17 +498,35 @@ export default (function () {
       const it = f.it | 0; psound(`objet${it}`, f.x, f.y);   // clé calculée objet0..objet5 (sound() ignore une clé absente de SONS)
       if (it === 0 || it === 1) { if (FX()) LUM.ajouter(f.x, f.y, 80, '#ffd23a', 420, 0.55); }
       else if (it === 4) { if (FX()) LUM.ajouter(f.x, f.y, 70, '#8fd8ff', 400, 0.5); }
+      else if (it === 6) { msgGlobal('🎯', nameOf(f.seat) + (f.inv ? ' lance une toupie sur celui qui le suit !' : ' lance une toupie chercheuse sur le premier !'), { color: '#ff8a8a' }); const me = snap && mySeat >= 0 ? snap.players[mySeat] : null, sh = ps[f.seat] ? snap.players[f.seat] : null; if (me && sh && f.seat !== mySeat && (f.inv ? me.pos === sh.pos + 1 : me.pos === 1)) CALL.push('TOUPIE !', '#ff5a5a', now); }
+      else if (it === 11) { if (f.seat === mySeat) msgPerso('👻', 'Fantôme : rien ne te touche pendant 3 s (sauf le vide)', { color: '#e0e6ff' }); }
+      else if (it === 12) msgGlobal('🦑', nameOf(f.seat) + ' crache de l\'encre sur ceux de devant !', { color: '#b8a6ff' });
+      else if (it === 13) { const p = ps[f.seat]; if (p && FX()) dust(p.x, p.y, 10, '255,255,255', 1.2); }
       else if (it === 5) { msgGlobal('🐌', nameOf(f.seat) + ' ralentit ceux de devant, le premier surtout !', { color: '#9be060' }); if (snap && mySeat >= 0 && snap.players[mySeat] && snap.players[mySeat].pos < (ps[f.seat] ? ps[f.seat].pos : 99)) CALL.push('ESCARGOT !', '#9be060', now); }
       return;
     }
     if (f.type === 'paf') {
       if (!seatOk(f.seat) || !fin(f.x)) return;
       psound('paf', f.x, f.y); sparksAt(f.x, f.y, 14, 4); if (FX()) rings.push({ x: f.x, y: f.y, born: now, life: 320, r1: 34 });
-      if (f.seat === mySeat) { shakeMag = Math.max(shakeMag, 8); msgPerso('📄', 'Boule de papier de ' + nameOf(f.by) + ' !', { bad: true }); }
+      if (f.seat === mySeat) { shakeMag = Math.max(shakeMag, 8); msgPerso(f.k === 'toupie' ? '🎯' : '📄', (f.k === 'toupie' ? 'Toupie de ' : 'Boule de papier de ') + nameOf(f.by) + ' !', { bad: true }); }
       else if (f.by === mySeat) { msgPerso('🎯', 'Touché : ' + nameOf(f.seat) + ' tourne !', { color: K.yel }); CALL.push('TOUCHÉ !', colSeat(f.by), now); }
       return;
     }
-    if (f.type === 'glisse') { if (!fin(f.x)) return; psound('glisse', f.x, f.y); splashAt(f.x, f.y, 10, '40,30,20'); if (f.seat === mySeat) msgPerso('🛢', 'De l\'huile ! Ça glisse', { bad: true }); return; }
+    if (f.type === 'glisse') {                            // flaque posée : 0 huile, 1 eau (bombe), 2 glace (glaçon)
+      if (!fin(f.x)) return;
+      if (f.k === 1) { psound('splash', f.x, f.y, 'lait'); splashAt(f.x, f.y, 12, '120,190,255'); if (f.seat === mySeat) msgPerso('💧', 'Bombe à eau : ça glisse !', { bad: true }); }
+      else if (f.k === 2) { psound('gel', f.x, f.y); splashAt(f.x, f.y, 8, '225,245,255'); if (f.seat === mySeat) msgPerso('🧊', 'Plaque de glace !', { bad: true }); }
+      else { psound('glisse', f.x, f.y); splashAt(f.x, f.y, 10, '40,30,20'); if (f.seat === mySeat) msgPerso('🛢', 'De l\'huile ! Ça glisse', { bad: true }); }
+      return;
+    }
+    if (f.type === 'plouf') { if (!fin(f.x)) return; psound('plouf', f.x, f.y); splashAt(f.x, f.y, 20, '120,190,255'); if (FX()) rings.push({ x: f.x, y: f.y, born: now, life: 420, r1: 60 }); return; }
+    if (f.type === 'boum') {                              // pétard : éclair, étincelles, onde ; secousse si c'est près de moi
+      if (!fin(f.x)) return;
+      psound('boum', f.x, f.y); sparksAt(f.x, f.y, 26, 6); if (FX()) { LUM.ajouter(f.x, f.y, 150, '#ffb03a', 320, 0.75); rings.push({ x: f.x, y: f.y, born: now, life: 380, r1: 140 }); }
+      const me = mySeat >= 0 && ps[mySeat]; if (me && Math.hypot(me.x - f.x, me.y - f.y) < 320) shakeMag = Math.max(shakeMag, 7);
+      return;
+    }
+    if (f.type === 'rate') { if (f.seat === mySeat) msgPerso(f.it === 10 ? '🪝' : '🎯', f.it === 10 ? 'Grappin : personne devant à portée, garde-le !' : 'Toupie : personne à viser', { bad: true }); return; }
     if (f.type === 'pare') { const p = ps[f.seat]; if (p) { psound('pare', p.x, p.y); if (FX()) rings.push({ x: p.x, y: p.y, born: now, life: 360, r1: 36, sh: 1 }); } return; }
   }
 
@@ -533,8 +554,7 @@ export default (function () {
       VIEWP[pb.seat] = { x, y, a: ang, fa };
     });
     VRT = (sa.rt || 0) + ((sb.rt || 0) - (sa.rt || 0)) * al;   // temps de course interpolé : position des obstacles mobiles
-    VPJ.length = 0; const ja = sa.pj || [], jb = sb.pj || [];
-    for (let i = 0; i < jb.length; i++) { const q = jb[i], o = ja[i]; VPJ.push(o && Math.hypot(q[0] - o[0], q[1] - o[1]) < 60 ? [o[0] + (q[0] - o[0]) * al, o[1] + (q[1] - o[1]) * al] : q); }
+    interpListe(VPJ, sa.pj, sb.pj, al, 60); interpListe(VTP, sa.tp, sb.tp, al, 140); interpListe(VBM, sa.bm, sb.bm, al, 110); interpListe(VPT, sa.pt, sb.pt, al, 60);
     return VIEWP;
   }
 
@@ -579,6 +599,66 @@ export default (function () {
     const gr = g.createLinearGradient(x - 30, y - 20, x + 30, y + 20); gr.addColorStop(0, 'rgba(255,90,200,0.35)'); gr.addColorStop(0.5, 'rgba(90,216,255,0.35)'); gr.addColorStop(1, 'rgba(247,255,90,0.3)');
     g.fillStyle = gr; g.beginPath(); oval(g, x - 6, y - 6, 18, 9); g.fill(); g.restore();
   }
+  function interpListe(out, ja, jb, al, seuil) {         // objets en vol [x, y, …] : interpolés entre deux états (même rang, pas trop loin)
+    out.length = 0; ja = ja || []; jb = jb || [];
+    for (let i = 0; i < jb.length; i++) { const q = jb[i], o = ja[i]; out.push(o && Math.hypot(q[0] - o[0], q[1] - o[1]) < seuil ? [o[0] + (q[0] - o[0]) * al, o[1] + (q[1] - o[1]) * al, q[2]] : q); }
+  }
+  function flaqueEau(g, x, y, now) {                      // flaque de la bombe à eau (rayon de prise ≈ 62 u) : bleue, translucide, ridée
+    g.save(); g.fillStyle = 'rgba(70,150,235,0.42)'; g.beginPath(); oval(g, x, y, 56, 44); oval(g, x + 34, y + 12, 24, 18); oval(g, x - 30, y + 16, 22, 16); oval(g, x + 6, y - 36, 18, 13); g.fill();
+    g.strokeStyle = 'rgba(220,240,255,0.55)'; g.lineWidth = 2;
+    const ph = A.reduceFx ? 0.5 : (now / 1400) % 1;
+    for (let k = 0; k < 2; k++) { const u = (ph + k * 0.5) % 1; g.globalAlpha = 1 - u; g.beginPath(); oval(g, x, y, 12 + u * 40, 9 + u * 30); g.stroke(); }
+    g.globalAlpha = 1; g.fillStyle = 'rgba(255,255,255,0.5)'; g.beginPath(); oval(g, x - 16, y - 12, 12, 5); g.fill(); g.restore();
+  }
+  function flaqueGlace(g, x, y) {                         // plaque de glace du glaçon (≈ 52 u) : bleu très pâle, bords nets, reflets
+    g.save(); g.fillStyle = 'rgba(215,240,255,0.78)'; g.strokeStyle = 'rgba(140,200,240,0.9)'; g.lineWidth = 2; g.beginPath();
+    for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2, d = 46 + ((i * 37) % 11) - 5; if (i) g.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d * 0.82); else g.moveTo(x + d, y); }
+    g.closePath(); g.fill(); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.95)'; g.lineWidth = 3; g.lineCap = 'round'; g.beginPath(); g.moveTo(x - 26, y - 8); g.lineTo(x - 6, y - 22); g.moveTo(x - 14, y + 4); g.lineTo(x + 2, y - 8); g.moveTo(x + 14, y + 14); g.lineTo(x + 26, y + 4); g.stroke();
+    g.restore();
+  }
+  function toupieVol(g, x, y, now, k) {                   // toupie chercheuse : toupie qui tourne très vite, traînée rouge
+    g.save();
+    if (!A.reduceFx) lumiere(g, x, y, 34, '#ff5a5a', 0.45);
+    g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.arc(x + 5, y + 8, 14, 0, Math.PI * 2); g.fill();
+    g.translate(x, y); g.rotate(A.reduceFx ? 0 : now / 35 + k);
+    const cols = ['#e8322a', '#ffd23a', '#2f7ff0', '#ffffff'];
+    for (let i = 0; i < 8; i++) { g.fillStyle = cols[i % 4]; g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, 14, i / 8 * Math.PI * 2, (i + 1) / 8 * Math.PI * 2); g.closePath(); g.fill(); }
+    g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 1.5; g.beginPath(); g.arc(0, 0, 14, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = '#8a5a2a'; g.beginPath(); g.arc(0, 0, 4.5, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+  function bombeVol(g, x, y, h) {                         // bombe à eau en cloche : h = 0..1 du vol (grossit en montant, ombre qui s'écarte)
+    const z = Math.sin(Math.PI * Math.min(1, Math.max(0, h || 0))), r = 11 * (1 + 0.55 * z);
+    g.save(); g.fillStyle = 'rgba(0,0,0,' + (0.28 - 0.14 * z).toFixed(2) + ')'; g.beginPath(); oval(g, x + 6 + 26 * z, y + 9 + 34 * z, 11, 8); g.fill();
+    const gr = g.createRadialGradient(x - r * 0.35, y - r * 0.4, 1, x, y, r); gr.addColorStop(0, '#d8efff'); gr.addColorStop(0.45, '#5ab4ff'); gr.addColorStop(1, '#2366c8');
+    g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#2366c8'; g.beginPath(); g.moveTo(x + r * 0.7, y + r * 0.7); g.lineTo(x + r * 1.05, y + r * 0.95); g.lineTo(x + r * 0.9, y + r * 0.55); g.closePath(); g.fill();   // le nœud
+    g.restore();
+  }
+  function petardSol(g, x, y, f, now) {                   // pétard : bâton rouge, mèche qui grésille (clignote plus vite à la fin)
+    g.save(); g.translate(x, y); g.rotate(0.5);
+    g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(-12, -3, 26, 10);
+    g.fillStyle = '#d8281e'; g.fillRect(-14, -6, 26, 11); g.fillStyle = '#ffd23a'; g.fillRect(-14, -6, 4, 11); g.fillRect(8, -6, 4, 11);
+    g.strokeStyle = '#3a2a1a'; g.lineWidth = 2; g.beginPath(); g.moveTo(12, -1); g.quadraticCurveTo(18, -8, 22, -4); g.stroke();
+    const on = A.reduceFx || Math.sin(now / (40 + 140 * (f || 0))) > -0.2;
+    if (on) { g.fillStyle = '#fff3a0'; g.beginPath(); g.arc(22, -4, 4, 0, Math.PI * 2); g.fill(); if (!A.reduceFx) lumiere(g, 22, -4, 22, '#ffb03a', 0.6); }
+    g.restore();
+  }
+  function encreEcran(now) {                              // encre de seiche reçue : taches sur MON écran (repère du HUD), fondu en entrée et en sortie
+    const t = now - encreT0, fin = encreFin ? Math.max(0, 1 - (now - encreFin) / 450) : 1, a = Math.min(1, t / 140) * fin;
+    if (a <= 0) return;
+    const R = rng(encreSeed), W = HUDW;
+    ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = 'rgba(18,12,38,0.94)';
+    for (let i = 0; i < 6; i++) {
+      const x = W * (0.12 + R() * 0.76), y = W * (0.12 + R() * 0.7), r = W * (0.08 + R() * 0.08);
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      for (let k = 0; k < 7; k++) { const u = R() * Math.PI * 2, d = r * (0.9 + R() * 0.5); ctx.moveTo(x + Math.cos(u) * d + r * 0.3, y + Math.sin(u) * d); ctx.arc(x + Math.cos(u) * d, y + Math.sin(u) * d, r * (0.2 + R() * 0.25), 0, Math.PI * 2); }
+      const dl = r * (0.6 + R()) * Math.min(1, t / 1200); ctx.moveTo(x + r * 0.2, y); ctx.rect(x - r * 0.12, y, r * 0.24, r * 0.8 + dl);   // coulure
+      ctx.fill();
+    }
+    ctx.restore();
+  }
   function boule(g, x, y, now, k) {                      // boule de papier froissé qui file
     g.save(); g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.arc(x + 6, y + 10, 9, 0, Math.PI * 2); g.fill();
     g.translate(x, y); g.rotate(A.reduceFx ? 0 : now / 70 + k);
@@ -589,10 +669,13 @@ export default (function () {
     g.restore();
   }
   const MOBV = { x: 0, y: 0, vx: 0, vy: 0, a: 0 };
+  const VTP = [], VBM = [], VPT = [];                    // toupies, bombes à eau, pétards (interpolés)
+  let encreT0 = 0, encreFin = 0, encreSeed = 1, encreVu = false;
   function vivants(now, lobby) {                         // boîtes, flaques posées, éclats des bumpers, obstacles mobiles (sous les voitures)
     const bx = snap && snap.bx ? snap.bx : '';
     if (bx) for (let i = 0; i < C.boxes.length; i++) if (bx.charAt(i) === '1') boite(ctx, C.boxes[i][0], C.boxes[i][1], i, now);
-    if (snap && snap.fl && !lobby) for (let i = 0; i < snap.fl.length; i++) flaque(ctx, snap.fl[i][0], snap.fl[i][1]);
+    if (snap && snap.fl && !lobby) for (let i = 0; i < snap.fl.length; i++) { const f = snap.fl[i]; if (f[2] === 1) flaqueEau(ctx, f[0], f[1], now); else if (f[2] === 2) flaqueGlace(ctx, f[0], f[1]); else flaque(ctx, f[0], f[1]); }
+    if (!lobby) for (let i = 0; i < VPT.length; i++) petardSol(ctx, VPT[i][0], VPT[i][1], VPT[i][2], now);
     for (const k in bumpFlash) {
       const r = C.rocks[k], tt = (now - bumpFlash[k]) / 320;
       if (!r || tt >= 1) { delete bumpFlash[k]; continue; }
@@ -785,7 +868,14 @@ export default (function () {
         if (!A.reduceFx && !rf && snap.gs === 'play' && !(v.fa > 0)) particulesSol(p, v, kdt, now);
         if (v.fa > 0) { voitureQuiTombe(p, v, now); continue; }
         const ghost = !!p.gh, blink = ghost && !A.reduceFx ? 0.35 + 0.3 * Math.sin(now / 60) : 1;
-        drawCar(ctx, i, v.x, v.y, v.a, { st: p.st, alpha: ghost ? blink : (p.fin && !over ? 0.75 : 1), ghost, me: i === mySeat && !over && snap.gs !== 'countdown', brake: p.th < 0 && p.sp > 1, lights, boost: p.sp > 12.5 || !!p.tb, flag: !!p.fin }, now);
+        const saut = p.ju > 0 ? Math.sin(Math.PI * Math.min(1, p.ju)) : 0;   // ressort : la voiture monte puis redescend
+        if (saut > 0) { ctx.save(); ctx.fillStyle = 'rgba(0,0,0,' + (0.3 - 0.15 * saut).toFixed(2) + ')'; ctx.beginPath(); oval(ctx, v.x + 18 * saut, v.y + 26 * saut, CAR_L * 0.55, CAR_W * 0.6); ctx.fill(); ctx.restore(); }
+        if (p.gr >= 0 && pv[p.gr] && !(pv[p.gr].fa > 0)) {   // grappin : le câble tendu jusqu'à la voiture accrochée, le crochet au bout
+          const w = pv[p.gr]; ctx.save(); ctx.strokeStyle = '#6b4a2a'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(v.x, v.y);
+          ctx.quadraticCurveTo((v.x + w.x) / 2 + (w.y - v.y) * 0.06, (v.y + w.y) / 2 - (w.x - v.x) * 0.06, w.x, w.y); ctx.stroke();
+          ctx.fillStyle = '#9aa3ad'; ctx.beginPath(); ctx.arc(w.x, w.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        }
+        drawCar(ctx, i, v.x, v.y, v.a, { st: p.st, scale: 1 + 0.45 * saut, alpha: p.ph ? (A.reduceFx ? 0.45 : 0.32 + 0.12 * Math.sin(now / 140)) : ghost ? blink : (p.fin && !over ? 0.75 : 1), ghost: ghost || !!p.ph, me: i === mySeat && !over && snap.gs !== 'countdown', brake: p.th < 0 && p.sp > 1, lights, boost: p.sp > 12.5 || !!p.tb, flag: !!p.fin }, now);
         effets(p, v, now);
         if (over && wt >= 0 && p.team === wt) { ctx.save(); ctx.strokeStyle = K.yel; ctx.lineWidth = 3; ctx.globalAlpha = A.reduceFx ? 0.9 : 0.5 + 0.4 * Math.sin(now / 180); ctx.beginPath(); ctx.arc(v.x, v.y, CAR_L, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
       }
@@ -799,6 +889,8 @@ export default (function () {
     // éliminés (Élimination) : la voiture s'envole et s'efface
     for (let i = flyers.length - 1; i >= 0; i--) { const f = flyers[i], t = (now - f.born) / 800; if (t >= 1) { flyers.splice(i, 1); continue; } drawCar(ctx, f.seat, f.x, f.y, f.a + t * 5, { scale: 1 + t, alpha: 1 - t, noShadow: true }, now); }
     for (let i = 0; i < VPJ.length; i++) boule(ctx, VPJ[i][0], VPJ[i][1], now, i);   // boules de papier : au-dessus des voitures
+    for (let i = 0; i < VTP.length; i++) toupieVol(ctx, VTP[i][0], VTP[i][1], now, i);
+    for (let i = 0; i < VBM.length; i++) bombeVol(ctx, VBM[i][0], VBM[i][1], VBM[i][2]);
     particules(now, kdt, rf);
     // fenêtre commune (Élimination) : son bord en pointillés
     if (snap && snap.formule === 'elim' && snap.cam && (snap.gs === 'play' || snap.gs === 'paused')) {
@@ -931,6 +1023,9 @@ export default (function () {
   }
   // HUD de course : position, tour, chrono, meilleur tour, compte à rebours de fin, consignes
   function hudCourse(now, rf, pv) {
+    { const mi = mySeat >= 0 ? snap.players[mySeat] : null, en = !!(mi && mi.en && mi.playing && mi.alive && snap.gs === 'play');   // encre reçue
+      if (en && !encreVu) { encreVu = true; encreT0 = now; encreFin = 0; encreSeed = (now | 0) + mySeat; } else if (!en && encreVu) { encreVu = false; encreFin = now; }
+      if (encreVu || (encreFin && now - encreFin < 450)) encreEcran(now); }
     const me = mySeat >= 0 ? snap.players[mySeat] : null, k = Math.min(hudK(cv, HUDW), 1.7);
     const nPlay = snap.players.filter(p => p.playing).length;
     const f1 = readable(13, cv, HUDW / k, 10) * 1;
@@ -960,7 +1055,7 @@ export default (function () {
         ctx.restore();
       }
       const fxs = [];                                     // effets en cours, à droite de la position
-      if (me.tb) fxs.push('⚡'); if (me.ap >= 4) fxs.push('🌬'); if (me.sh) fxs.push('🛡️'); if (me.sl) fxs.push('🐌'); if (me.pen) fxs.push('⚠️');
+      if (me.tb) fxs.push('⚡'); if (me.ap >= 4) fxs.push('🌬'); if (me.ph) fxs.push('👻'); if (me.ju) fxs.push('🪀'); if (me.gr >= 0) fxs.push('🪝'); if (me.en) fxs.push('🦑'); if (me.sh) fxs.push('🛡️'); if (me.sl) fxs.push('🐌'); if (me.pen) fxs.push('⚠️');
       if (fxs.length && me.alive) { ctx.save(); ctx.translate(12 + 110 * k, 12); ctx.scale(k, k); ctx.font = '20px system-ui, sans-serif'; ctx.fillStyle = '#ffffff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; for (let i = 0; i < fxs.length; i++) ctx.fillText(fxs[i], i * 26, 18); ctx.restore(); }
       // tour + chrono (en haut à droite)
       if (snap.formule !== 'elim') {
@@ -1010,7 +1105,7 @@ export default (function () {
   function setIn(k, v) { if (input[k] === v) return; input[k] = v; anaSent = ''; pushInput(); }
   const isPlay = () => snap && (snap.gs === 'play' || snap.gs === 'paused');
   function klaxon() { if (snap && (snap.gs === 'play' || snap.gs === 'countdown')) send({ t: 'klaxon' }); }
-  function utiliserObjet() { if (snap && snap.gs === 'play') send({ t: 'objet' }); }
+  function utiliserObjet(inv) { if (snap && snap.gs === 'play') send(inv ? { t: 'objet', inv: 1 } : { t: 'objet' }); }   // inv : lancer inversé (devant ↔ derrière)
   // joystick analogique (app.js → joystick.js) : CAP ABSOLU ; envoi quantifié (64 caps × 3 forces), au plus toutes les 60 ms
   function joyAna(dx, dy, finJ) {
     unlockAudio();
@@ -1030,6 +1125,7 @@ export default (function () {
     if (e.key === ' ' && (pendingEnd || RL.active(performance.now()))) { RL.skip(); return; }
     if (e.key === ' ') { if (snap && (snap.gs === 'lobby' || snap.gs === 'over')) send({ t: 'start' }); else utiliserObjet(); return; }   // en course : Espace = l'objet (le klaxon est sur H)
     if (e.code === 'KeyH' || e.code === 'KeyK') { klaxon(); return; }
+    if (e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') { if (isPlay()) utiliserObjet(true); return; }   // Ctrl / Maj : objet lancé dans l'autre sens
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && isPlay()) { send({ t: 'pause' }); return; }
     const d = Object.prototype.hasOwnProperty.call(DIR_KEYS, e.code) ? DIR_KEYS[e.code] : null; if (d) setIn(d, true);
   };
@@ -1053,7 +1149,7 @@ export default (function () {
     hud.insertBefore(matchChip, hud.firstChild);
     startBtn = $('mmStart'); pauseBtn = $('mmPause'); modeBtn = $('mmMode'); botsBtn = $('mmBots'); diffBtn = $('mmDiff'); formBtn = $('mmFormule'); circBtn = $('mmCircuit'); lapsBtn = $('mmLaps'); pauseFloat = $('mmPauseFloat');
     lbBtn = $('mmLbBtn'); lbPanel = $('mmLbPanel'); lbBody = $('mmLbBody'); hornBtn = $('mmHorn');
-    sensBtn = $('mmSens'); bonusBtn = $('mmBonus'); pouceBtn = $('mmPouce'); itemBtn = $('mmItem'); gpBtn = $('mmGp');
+    sensBtn = $('mmSens'); bonusBtn = $('mmBonus'); pouceBtn = $('mmPouce'); itemBtn = $('mmItem'); itemInvBtn = $('mmItemInv'); gpBtn = $('mmGp');
     if (gpBtn) gpBtn.onclick = () => send({ t: 'gp' });
     const aideC = $('mmHelpCircuits');                  // circuits de l'aide : tirés des définitions (jamais en retard d'un circuit)
     if (aideC) aideC.innerHTML = CIRCUITS.map(d => `<div class="legrow"><span>${d.emoji}</span><b>${esc(d.nom)}</b> — ${esc(d.sous)}</div>`).join('');
@@ -1080,6 +1176,7 @@ export default (function () {
       hold('mmUp', 'up'); hold('mmDown', 'down'); hold('mmLeft', 'left'); hold('mmRight', 'right');
       if (hornBtn) hornBtn.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); klaxon(); });
       if (itemBtn) itemBtn.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); utiliserObjet(); });
+      if (itemInvBtn) itemInvBtn.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); utiliserObjet(true); });
     }
     applyColors();
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
