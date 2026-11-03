@@ -110,6 +110,12 @@ export const SONS = {
     S.ton({ f: 330, f2: 1320, glisse: 0.8, dur: 0.38, onde: 'doux', gain: 0.08, attaque: 0.03, filtre: { type: 'lowpass', f: 2500 }, reverb: 0.3 });
     S.bruit({ dur: 0.3, gain: 0.12, couleur: 'brun', filtre: { type: 'lowpass', f: 700, f2: 300 }, attaque: 0.01, reverb: 0.2 });   // la poussée
   },
+  aspi: (S) => {                                         // aspiration (sillage d'une voiture) : l'air s'ouvre, puis la voiture est happée
+    if (!S.limite('aspi', 120)) return;
+    S.souffle({ dur: 0.55, f1: 2200, f2: 500, gain: 0.2, q: 0.7 });                                                                    // le sillage qui se referme
+    S.souffle({ dur: 0.4, f1: 500, f2: 2800, gain: 0.2, q: 1, retard: 0.2, reverb: 0.3 });                                            // happée vers l'avant
+    S.ton({ f: 480, f2: 960, glisse: 0.7, dur: 0.32, onde: 'doux', gain: 0.05, attaque: 0.03, retard: 0.2, filtre: { type: 'lowpass', f: 2200 }, reverb: 0.3 });
+  },
   splash: (S, z) => {                                    // entrée dans une zone (arg = type) : éclaboussure ou crissement de miettes
     if (!S.limite('splash', 70)) return;
     if (typeof z === 'string' && own(LIQUIDE, z)) {
@@ -233,7 +239,7 @@ export const DEMO = [
   { k: 'bumper', arg: 0.6, nom: 'Bumper, punaise, pion, tampon' },
   { k: 'fall', nom: 'Chute de la table' }, { k: 'hole', nom: 'Dans une poche de billard' }, { k: 'respawn', nom: 'Retour sur la piste' },
   { k: 'lap', nom: 'Tour bouclé' }, { k: 'best', nom: 'Meilleur tour / record' }, { k: 'lastlap', nom: 'Dernier tour (cloche)' }, { k: 'finish', nom: 'Ligne d\'arrivée' },
-  { k: 'boost', nom: 'Flèche turbo' },
+  { k: 'boost', nom: 'Flèche turbo' }, { k: 'aspi', nom: 'Aspiration (sillage)' },
   { k: 'splash', arg: 'lait', nom: 'Zone : lait renversé' }, { k: 'splash', arg: 'encre', nom: 'Zone : tache d\'encre' }, { k: 'splash', arg: 'huile', nom: 'Zone : flaque d\'huile' },
   { k: 'splash', arg: 'sucre', nom: 'Zone : sucre / miettes' }, { k: 'splash', arg: 'gomme', nom: 'Zone : miettes de gomme' }, { k: 'splash', arg: 'craie', nom: 'Zone : craie' }, { k: 'splash', arg: 'sciure', nom: 'Zone : sciure' },
   { k: 'honk', arg: 0, nom: 'Klaxon (grave)' }, { k: 'honk', arg: 48, nom: 'Klaxon (moyen)' }, { k: 'honk', arg: 96, nom: 'Klaxon (aigu)' },

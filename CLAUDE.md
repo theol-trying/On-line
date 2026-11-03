@@ -82,7 +82,7 @@ tenir à jour quand l'architecture ou les règles d'un jeu changent.
 ## Lancer et tester
 
 ```
-npm test                      # smoke.mjs (9 jeux, vrais clients WebSocket) puis fins-de-manche.mjs — AVANT CHAQUE PUSH
+npm test                      # smoke.mjs (9 jeux, vrais clients WebSocket), fins-de-manche.mjs, sons.mjs, verifier-circuits.mjs — AVANT CHAQUE PUSH
 node server.js                # :3000, ou preview_start via .claude/launch.json
 HUB_TRACE=1 node server.js    # journalise chaque diffusion
 ```

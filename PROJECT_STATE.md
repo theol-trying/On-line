@@ -429,11 +429,30 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     3000×3000), 🔧 Établi (escalier à angles droits, ligne droite du mètre ruban, ponceuse et écrou fou, 10 712 u, 4000×2250),
     🥣 Petit-déjeuner (grande table familiale, bol géant, chicane de sucres, café et miel, orange qui roule, 13 429 u,
     3900×2440), ✏️ Bureau d'écolier (monde en portrait, escargot de crayons en double spirale, règles turbo, gomme qui
-    frotte, 12 331 u, 2280×3340), 🎱 Billard (le plus rapide : haricot à deux longues lignes droites le long des bandes, parabolique à trois rayons, épingle autour du triangle de billes, 6 poches, 5 billes qui roulent, 9 851 u, 4000×2400). Tours de bots ~32-45 s.
-  - **Restent** : Circuit-jouet et Circuit en 8 (encore les anciennes versions v1, ~6 400 u), et 5 nouveaux à dessiner
-    (Jardin, Salle de bain, Chambre d'enfant avec train électrique, Bac à sable, Table de Noël) : leurs fichiers sont des
-    emplacements provisoires, **retirés de `circuits/index.js`** tant qu'ils ne sont pas faits. Méthode : un agent par
-    circuit, l'un après l'autre (les ateliers à plusieurs agents coûtaient trop cher), vérification + galerie, commit.
+    frotte, 12 331 u, 2280×3340), 🎱 Billard (le plus rapide : haricot à deux longues lignes droites le long des bandes, parabolique à trois rayons, épingle autour du triangle de billes, 6 poches, 5 billes qui roulent, 9 851 u, 4000×2400),
+    🏁 Circuit-jouet (03/11 : piste orange à rails sur moquette bleu-vert, ligne des stands à 3 turbos, virages relevés,
+    épingle intérieure, tunnel violet, buggy téléguidé et pelote du chat, 11 429 u, 3900×2460), ♾️ Circuit en 8 (03/11 :
+    tapis de jeu, deux droites qui se croisent à 72° — carrefour dessiné dans `final` —, boucle gauche rapide avec rivière
+    et ponts, boucle droite « ferme » avec épingle autour de l'enclos, canard mécanique et tracteur, 11 618 u, 4200×2280).
+    Tours de bots ~32-45 s. Les 7 circuits inscrits passent le vérificateur : il fait désormais partie de `npm test`.
+  - Le vérificateur ne demande plus que TOUS les bots passent la ligne : comme en jeu, ceux encore en course 12 s après le
+    premier sont classés ; seul un bot pas encore dans le dernier tour (ou le plafond de temps) fait échouer.
+  - **Restent** : 5 nouveaux à dessiner (Jardin, Salle de bain, Chambre d'enfant avec train électrique, Bac à sable, Table
+    de Noël) : leurs fichiers sont des emplacements provisoires, **retirés de `circuits/index.js`** tant qu'ils ne sont pas
+    faits (le vérificateur ne connaît que les circuits inscrits). Méthode : un agent par circuit, l'un après l'autre (les
+    ateliers à plusieurs agents coûtaient trop cher), vérification + galerie + une course en jeu (serveur local RELANCÉ :
+    il garde la géométrie en mémoire), commit.
+- **Aspiration et escargot dégressif (03/11)** — demandes : « l'escargot doit ralentir plus le premier et moins les
+  derniers » ; « de l'aspiration quand on suit quelqu'un pour pouvoir le doubler (3 s derrière = petit boost) ».
+  - **Aspiration** (`aspiration()` du serveur, avant la conduite) : une voiture à moins de 260 u devant, dans l'axe (±44°) et
+    dans le même sens, à plus de 45 % de la vitesse de pointe → la jauge `aspC` monte ; pleine à 3 s → boost 1,33 s (plafond
+    ×1,14, reprise ×1,35), puis 2 s de repos ; hors du sillage elle redescend de 2 ticks par tick (un virage ne l'efface pas).
+    Bots compris. Snapshot joueur `ap` (0, 1-3 jauge, 4 boost), fx `aspi` (son `aspi`, lueur, message perso « 🌬 »).
+    Client : traits de vent le long de la voiture selon la jauge, lueur claire et icône 🌬 au boost. Mesuré (7 bots, 3 tours) :
+    ~3 aspirations par bot et par tour en peloton, temps au tour inchangé.
+  - **Escargot** 🐌 : ralentit tous ceux de devant, interpolé selon la place — le meneur ×0,5 pendant 3 s, la voiture juste
+    devant ×0,85 pendant 1,5 s (avant : ×0,62 pendant 2,5 s pour tous). Par joueur : `slowV` (le plus fort l'emporte si deux
+    escargots se chevauchent).
   - **Hasard par défaut** (`circChoix = 'hasard'`) : tirage « en sac » (tous les circuits passent avant qu'un revienne,
     jamais deux fois de suite).
   - **Grand Prix** (msg `gp`, game master ; cycle non / 3 / 5 / tous) : une course par circuit, tous différents (le circuit

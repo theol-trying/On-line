@@ -458,6 +458,11 @@ export default (function () {
       return;
     }
     if (f.type === 'boost') { const p = ps[f.seat]; if (p) { psound('boost', p.x, p.y); if (FX()) LUM.ajouter(p.x, p.y, 70, '#ffd23a', 380, 0.5); } return; }
+    if (f.type === 'aspi') {                              // 3 s dans le sillage d'une voiture : petit coup de boost pour la doubler
+      const p = ps[f.seat]; if (p) { psound('aspi', p.x, p.y); if (FX()) LUM.ajouter(p.x, p.y, 60, '#bfe6ff', 360, 0.45); }
+      if (f.seat === mySeat) msgPerso('🌬', 'Aspiration : petit coup de boost pour doubler !', { color: '#bfe6ff' });
+      return;
+    }
     if (f.type === 'splash') { if (!fin(f.x)) return; psound('splash', f.x, f.y, f.k); splashAt(f.x, f.y, f.k === 'lait' || f.k === 'encre' ? 14 : 8, Object.prototype.hasOwnProperty.call(ZONE_COL, f.k) ? ZONE_COL[f.k] : '255,255,255'); if (f.seat === mySeat && (f.k === 'lait' || f.k === 'encre')) msgPerso(f.k === 'lait' ? '🥛' : '🖋', f.k === 'lait' ? 'Lait renversé : ça glisse !' : 'Tache d\'encre : ça glisse !', { color: '#bfe6ff' }); return; }
     if (f.type === 'honk') { const p = ps[f.seat]; if (p) { psound('honk', p.x, p.y, (f.seat % 5) * 24); if (FX()) rings.push({ x: p.x, y: p.y, born: now, life: 300, r1: 30, honk: 1 }); } return; }
     if (f.type === 'lead') { if (f.seat !== mySeat && snap && snap.formule === 'course' && now - goT0 > 4000) msgGlobal('🥇', nameOf(f.seat) + ' prend la tête', { color: colSeat(f.seat) }); if (J.actif() && now - goT0 > 4000) J.moment(now, f.seat, 'prend la tête', 2); return; }
@@ -484,7 +489,7 @@ export default (function () {
       const it = f.it | 0; psound(`objet${it}`, f.x, f.y);   // clé calculée objet0..objet5 (sound() ignore une clé absente de SONS)
       if (it === 0 || it === 1) { if (FX()) LUM.ajouter(f.x, f.y, 80, '#ffd23a', 420, 0.55); }
       else if (it === 4) { if (FX()) LUM.ajouter(f.x, f.y, 70, '#8fd8ff', 400, 0.5); }
-      else if (it === 5) { msgGlobal('🐌', nameOf(f.seat) + ' ralentit tous ceux de devant !', { color: '#9be060' }); if (snap && mySeat >= 0 && snap.players[mySeat] && snap.players[mySeat].pos < (ps[f.seat] ? ps[f.seat].pos : 99)) CALL.push('ESCARGOT !', '#9be060', now); }
+      else if (it === 5) { msgGlobal('🐌', nameOf(f.seat) + ' ralentit ceux de devant, le premier surtout !', { color: '#9be060' }); if (snap && mySeat >= 0 && snap.players[mySeat] && snap.players[mySeat].pos < (ps[f.seat] ? ps[f.seat].pos : 99)) CALL.push('ESCARGOT !', '#9be060', now); }
       return;
     }
     if (f.type === 'paf') {
@@ -594,6 +599,16 @@ export default (function () {
   }
   function effets(p, v, now) {                           // sur la voiture : bouclier, lueur du turbo, escargot / pénalité au-dessus
     if (p.tb && !A.reduceFx) lumiere(ctx, v.x - Math.cos(v.a) * 22, v.y - Math.sin(v.a) * 22, 40, '#ffb03a', 0.4);
+    if (p.ap && !A.reduceFx) {                            // aspiration : traits de vent le long de la voiture (jauge 1-3), lueur claire au boost (4)
+      const c = Math.cos(v.a), s = Math.sin(v.a), n = p.ap >= 4 ? 3 : p.ap, ph = (now / 90) % 1;
+      ctx.save(); ctx.strokeStyle = p.ap >= 4 ? 'rgba(220,240,255,0.85)' : 'rgba(220,240,255,0.5)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath();
+      for (let k = 0; k < n; k++) for (let sd = -1; sd <= 1; sd += 2) {
+        const o = (CAR_W * 0.7 + k * 5) * sd, b = -CAR_L * (0.2 + ((ph + k * 0.33) % 1) * 0.9), l = 14 + k * 4;
+        ctx.moveTo(v.x + c * b - s * o, v.y + s * b + c * o); ctx.lineTo(v.x + c * (b - l) - s * o, v.y + s * (b - l) + c * o);
+      }
+      ctx.stroke(); ctx.restore();
+      if (p.ap >= 4) lumiere(ctx, v.x - c * 20, v.y - s * 20, 36, '#bfe6ff', 0.35);
+    }
     if (p.sh) {
       ctx.save(); ctx.globalAlpha = A.reduceFx ? 0.55 : 0.45 + 0.12 * Math.sin(now / 120);
       ctx.fillStyle = 'rgba(120,200,255,0.25)'; ctx.strokeStyle = '#8fd8ff'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(v.x, v.y, CAR_L * 0.78, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -939,7 +954,7 @@ export default (function () {
         ctx.restore();
       }
       const fxs = [];                                     // effets en cours, à droite de la position
-      if (me.tb) fxs.push('⚡'); if (me.sh) fxs.push('🛡️'); if (me.sl) fxs.push('🐌'); if (me.pen) fxs.push('⚠️');
+      if (me.tb) fxs.push('⚡'); if (me.ap >= 4) fxs.push('🌬'); if (me.sh) fxs.push('🛡️'); if (me.sl) fxs.push('🐌'); if (me.pen) fxs.push('⚠️');
       if (fxs.length && me.alive) { ctx.save(); ctx.translate(12 + 110 * k, 12); ctx.scale(k, k); ctx.font = '20px system-ui, sans-serif'; ctx.fillStyle = '#ffffff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; for (let i = 0; i < fxs.length; i++) ctx.fillText(fxs[i], i * 26, 18); ctx.restore(); }
       // tour + chrono (en haut à droite)
       if (snap.formule !== 'elim') {
