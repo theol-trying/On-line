@@ -35,10 +35,25 @@ const GP_POINTS = [15, 12, 10, 8, 6, 5, 4, 3, 2, 1];    // points de la 1re à l
 const MOB_E = 0.3, MOB_KICK = 0.8, MOB_SLIP = 0.6;       // obstacles mobiles : rebond mou + petite poussée (ils ne s'arrêtent pas pour vous)
 const HIT_GRACE = 75;                                    // 2,5 s après un choc violent, revenir « plus loin » sur la piste n'est pas un raccourci
 const BOOST_V = 1.42, BOOST_CD = 30;                     // flèche turbo (circuit-jouet) : +42 % d'un coup, une fois par passage
-// ASPIRATION (03/11) : rouler dans le sillage d'une voiture (à moins de ASP_D u derrière elle, dans son axe et dans le même sens)
-// remplit une jauge ; pleine au bout de ASP_CHARGE (3 s), elle donne un petit coup de boost (plafond ×ASP_V, reprise ×ASP_A
-// pendant ASP_T) pour la doubler, puis ASP_CD de repos. Hors du sillage la jauge redescend doucement (un virage ne l'efface pas).
-const ASP_D = 260, ASP_COS = 0.72, ASP_VMIN = 0.45, ASP_CHARGE = 3 * TICK_HZ, ASP_T = 40, ASP_V = 1.14, ASP_A = 1.35, ASP_CD = 2 * TICK_HZ;
+// ASPIRATION (03/11) : rouler dans le sillage d'une voiture remplit une jauge ; pleine, elle donne un gros coup de boost pour la
+// doubler et prendre un peu d'avance. Lancée au-dessus de la vitesse normale, la voiture DÉCROCHE si l'on braque trop fort trop
+// longtemps (glisse + embardée) : le boost se prend en ligne droite. Hors du sillage la jauge redescend doucement.
+// ── RÉGLAGES (tout se règle ici ; le client et l'aide n'affichent aucun de ces chiffres) ──
+const ASPI = {
+  boost: 0.5,       // +50 % de vitesse de pointe pendant le boost (bots compris)
+  duree: 2.5,       // durée du boost (s)
+  reprise: 2,       // accélération ×2 pendant le boost, pour atteindre vite la nouvelle vitesse
+  charge: 3,        // temps passé dans le sillage pour déclencher le boost (s)
+  repos: 2,         // après un boost, temps sans pouvoir recharger (s)
+  braquage: 0.75,   // part du braquage maximal au-delà de laquelle, pendant le boost et au-dessus de la vitesse normale…
+  braquageT: 4,     // …la voiture décroche si on la tient au moins ce nombre de ticks (un petit coup de volant passe)
+  embardee: 0.07,   // rotation donnée au décrochage (rad/tick, s'amortit)
+  glisse: 14,       // ticks d'adhérence perdue au décrochage
+  distance: 260,    // le sillage : moins de 260 u derrière la voiture de devant…
+  cone: 0.72,       // …dans son axe (cos 44°) et dans le même sens…
+  vmin: 0.45,       // …à plus de 45 % de la vitesse de pointe
+};
+const ASP_T = Math.round(ASPI.duree * TICK_HZ), ASP_CHARGE = Math.round(ASPI.charge * TICK_HZ), ASP_CD = Math.round(ASPI.repos * TICK_HZ), ASP_V = 1 + ASPI.boost;
 // Murs (29/10, jugés trop punitifs) : rebond moitié moins fort, la voiture glisse le long du mur au lieu d'y freiner, et le
 // contact ne la fait presque plus tourner ni décrocher. Mesuré (banc d'essai, mur abordé à 45° à pleine vitesse) : renvoi vers
 // l'extérieur 39° → 2°, retard sur 2 s 100 u → 49 u.
@@ -127,7 +142,7 @@ export function createMicro(room) {
       bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
       lane: 0, forme: 1, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0,
       gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
-      item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0,
+      item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0, aspBr: 0,
       rs: 0, place: 0, elimTick: -1, score: 0, gpPts: 0, gpDer: 0, gpWins: 0,
     }));
   }
@@ -218,7 +233,7 @@ export function createMicro(room) {
         pg: 0, lap: 0, lapStart: 0, best: 0, last: 0, fin: 0, ftick: 0, pos: k + 1, fall: 0, fallHole: 0, ghost: 0, outT: 0,
         wrong: false, surf: 0, drift: 0, boostCd: 0, inZone: null, bumpFx: 0, bumpBy: -1, bumpT: -1e9, bumps: 0, kos: 0, falls: 0,
         lane: ((k * 37) % 9 - 4) / 4 * 0.22, forme: 1 + (Math.random() * 2 - 1) * 0.022, stuck: 0, rev: 0, errT: 0, noiseT: 0, noise: 0, rs: 0, place: 0, elimTick: -1, alive: true, gLen: 0, gOff: 0, dTrack: 0, penT: 0, cuts: 0, w: 0, slip: 0, hitT: -1e9, fallGate: -1,
-        item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0 });
+        item: -1, iu: 0, itemT: 0, tbT: 0, shT: 0, slowT: 0, slowV: 1, oilIn: 0, pouce: 1, useReq: false, aspC: 0, aspB: 0, aspCd: 0, aspBr: 0 });
       p.inp = { up: false, down: false, left: false, right: false };
     });
     nParts = N; endTick = 0; winner = null; finCount = 0; finDeadline = 0; leader = -1; leadT = -1e9; lastBest = null;
@@ -344,7 +359,7 @@ export function createMicro(room) {
     if (D.err && Math.random() < D.err) p.errT = tick + 6 + Math.floor(Math.random() * 10);   // Facile / Normale : un coup de volant de trop
     p.steer = clamp(d * 3.2 + (D.noise ? p.noise : 0) + (p.errT > tick ? 0.9 : 0), -1, 1);
     // vitesse : la plus basse des vitesses de virage à venir, compte tenu de la distance de freinage
-    let vt = VMAX * (cruise ? 0.7 : D.v * p.forme);
+    let vt = VMAX * (cruise ? 0.7 : D.v * p.forme * (p.aspB > tick ? ASP_V : 1));   // boost d'aspiration : en ligne droite seulement (virages ci-dessous)
     for (let k = 0; k < 32; k += 2) {
       const j = (p.si + k) % n, vc = Math.min(VMAX, 0.9 * TURN * C.rayon[j] * D.lat);
       const allow = Math.sqrt(vc * vc + 2 * BRAKE * 0.7 * k * C.step);
@@ -377,13 +392,16 @@ export function createMicro(room) {
     // la part latérale qui reste est le dérapage, amorti selon l'adhérence de la surface
     let c = Math.cos(p.a), s = Math.sin(p.a);
     const vf0 = p.vx * c + p.vy * s, k = Math.min(1, Math.abs(vf0) / TURN_V);
+    if (p.aspB > tick && vf0 > VMAX * 1.05 && Math.abs(p.steer) > ASPI.braquage) {   // boost d'aspiration : un coup de volant trop brusque à cette vitesse…
+      if (++p.aspBr === ASPI.braquageT) { p.slip = Math.max(p.slip, ASPI.glisse); p.w += (p.steer > 0 ? 1 : -1) * ASPI.embardee; fx.push({ type: 'decroche', seat: p.seat, x: r1(p.x), y: r1(p.y) }); }   // …et elle décroche
+    } else p.aspBr = 0;
     p.a = wrapA(p.a + p.steer * TURN * k * (vf0 >= 0 ? 1 : -1) * (Math.abs(vf0) > VMAX * 0.92 ? 0.9 : 1) + p.w);   // + rotation reçue d'un choc
     p.w *= p.slip > 0 ? 0.9 : 0.8;                       // rotation reçue d'un choc : s'éteint plus vite qu'avant (29/10 : 0,93 / 0,84)
     c = Math.cos(p.a); s = Math.sin(p.a);
     let vf = p.vx * c + p.vy * s, vr = -p.vx * s + p.vy * c;
     const tb = p.tbT > tick, asp = p.aspB > tick;       // turbo (bonus) / aspiration : plafond et reprise relevés ; escargot : plafond abaissé
     const cap = VMAX * S.vmax * (p.bot && !p.fin ? D.v * p.forme : 1) * (p.penT > tick ? PEN_V : 1) * (tb ? TURBO_V : 1) * (asp ? ASP_V : 1) * (p.slowT > tick ? p.slowV : 1) * (p.pouce || 1);   // forme du jour (±2 %) : deux bots du même niveau finissent par se séparer ; pénalité de coupe
-    if (p.thr > 0 || tb) { if (vf < cap) vf += ACC * S.acc * (tb ? TURBO_A : p.thr) * (asp ? ASP_A : 1) * (p.pouce || 1) * (1 - Math.max(0, vf) / cap * 0.6); }
+    if (p.thr > 0 || tb) { if (vf < cap) vf += ACC * S.acc * (tb ? TURBO_A : p.thr) * (asp ? ASPI.reprise : 1) * (p.pouce || 1) * (1 - Math.max(0, vf) / cap * 0.6); }
     else if (p.thr < 0) { if (vf > 0.3) vf -= BRAKE * -p.thr; else if (vf > -VREV) vf -= REV * -p.thr; }
     else vf *= COAST;
     vf *= 1 - S.drag;
@@ -702,10 +720,10 @@ export function createMicro(room) {
       if (p.aspB > tick || p.aspCd > tick) continue;
       const c = Math.cos(p.a), s = Math.sin(p.a), vf = p.vx * c + p.vy * s;
       let dans = false;
-      if (vf > VMAX * ASP_VMIN) for (const q of racers) {
+      if (vf > VMAX * ASPI.vmin) for (const q of racers) {
         if (q === p || q.fall || q.fin || q.ghost > 0) continue;
         const dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy);
-        if (d < CAR_L || d > ASP_D || (dx * c + dy * s) / d < ASP_COS || Math.cos(q.a - p.a) < ASP_COS) continue;
+        if (d < CAR_L || d > ASPI.distance || (dx * c + dy * s) / d < ASPI.cone || Math.cos(q.a - p.a) < ASPI.cone) continue;
         dans = true; break;
       }
       if (dans) {

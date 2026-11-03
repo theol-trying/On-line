@@ -445,11 +445,15 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
 - **Aspiration et escargot dégressif (03/11)** — demandes : « l'escargot doit ralentir plus le premier et moins les
   derniers » ; « de l'aspiration quand on suit quelqu'un pour pouvoir le doubler (3 s derrière = petit boost) ».
   - **Aspiration** (`aspiration()` du serveur, avant la conduite) : une voiture à moins de 260 u devant, dans l'axe (±44°) et
-    dans le même sens, à plus de 45 % de la vitesse de pointe → la jauge `aspC` monte ; pleine à 3 s → boost 1,33 s (plafond
-    ×1,14, reprise ×1,35), puis 2 s de repos ; hors du sillage elle redescend de 2 ticks par tick (un virage ne l'efface pas).
-    Bots compris. Snapshot joueur `ap` (0, 1-3 jauge, 4 boost), fx `aspi` (son `aspi`, lueur, message perso « 🌬 »).
-    Client : traits de vent le long de la voiture selon la jauge, lueur claire et icône 🌬 au boost. Mesuré (7 bots, 3 tours) :
-    ~3 aspirations par bot et par tour en peloton, temps au tour inchangé.
+    dans le même sens, à plus de 45 % de la vitesse de pointe → la jauge `aspC` monte ; pleine à 3 s → boost. Hors du sillage
+    elle redescend de 2 ticks par tick (un virage ne l'efface pas). Bots compris (ils relèvent leur vitesse visée en ligne
+    droite ; leurs vitesses de virage ne changent pas). Snapshot joueur `ap` (0, 1-3 jauge, 4 boost), fx `aspi`.
+    **Réglage du 03/11 (retour utilisateur : « pas assez long ni assez puissant »)** : +50 % de vitesse de pointe et reprise ×2
+    pendant 2,5 s, puis 2 s de repos ; lancée au-dessus de 105 % de la vitesse normale, la voiture DÉCROCHE si l'on braque à
+    plus de 75 % pendant 4 ticks (adhérence perdue 14 ticks + embardée 0,07 rad/tick ; fx `decroche`, message « 😵 »).
+    **Tous les chiffres sont dans l'objet `ASPI` en tête de `games/micro/server.js`** (boost, duree, reprise, charge,
+    repos, braquage, braquageT, embardee, glisse, distance, cone, vmin) : ni le client ni l'aide n'en répètent aucun.
+    Mesuré (7 bots, 3 tours) : 40 à 94 boosts par course, 0 à 5 décrochages de bots, aucune chute de plus.
   - **Escargot** 🐌 : ralentit tous ceux de devant, interpolé selon la place — le meneur ×0,5 pendant 3 s, la voiture juste
     devant ×0,85 pendant 1,5 s (avant : ×0,62 pendant 2,5 s pour tous). Par joueur : `slowV` (le plus fort l'emporte si deux
     escargots se chevauchent).

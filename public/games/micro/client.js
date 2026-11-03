@@ -458,9 +458,15 @@ export default (function () {
       return;
     }
     if (f.type === 'boost') { const p = ps[f.seat]; if (p) { psound('boost', p.x, p.y); if (FX()) LUM.ajouter(p.x, p.y, 70, '#ffd23a', 380, 0.5); } return; }
-    if (f.type === 'aspi') {                              // 3 s dans le sillage d'une voiture : petit coup de boost pour la doubler
+    if (f.type === 'aspi') {                              // jauge du sillage pleine : gros coup de boost pour doubler (réglages : ASPI du serveur)
       const p = ps[f.seat]; if (p) { psound('aspi', p.x, p.y); if (FX()) LUM.ajouter(p.x, p.y, 60, '#bfe6ff', 360, 0.45); }
-      if (f.seat === mySeat) msgPerso('🌬', 'Aspiration : petit coup de boost pour doubler !', { color: '#bfe6ff' });
+      if (f.seat === mySeat) msgPerso('🌬', 'Aspiration : boost ! Pas de coup de volant brusque', { color: '#bfe6ff' });
+      return;
+    }
+    if (f.type === 'decroche') {                          // braquage trop brusque pendant le boost d'aspiration : la voiture glisse
+      if (!fin(f.x)) return;
+      psound('glisse', f.x, f.y); dust(f.x, f.y, 8, '255,255,255', 1.2);
+      if (f.seat === mySeat) { msgPerso('😵', 'Trop brusque à pleine vitesse : la voiture décroche !', { bad: true }); shakeMag = Math.max(shakeMag, 4); }
       return;
     }
     if (f.type === 'splash') { if (!fin(f.x)) return; psound('splash', f.x, f.y, f.k); splashAt(f.x, f.y, f.k === 'lait' || f.k === 'encre' ? 14 : 8, Object.prototype.hasOwnProperty.call(ZONE_COL, f.k) ? ZONE_COL[f.k] : '255,255,255'); if (f.seat === mySeat && (f.k === 'lait' || f.k === 'encre')) msgPerso(f.k === 'lait' ? '🥛' : '🖋', f.k === 'lait' ? 'Lait renversé : ça glisse !' : 'Tache d\'encre : ça glisse !', { color: '#bfe6ff' }); return; }
