@@ -441,9 +441,14 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     🛁 Salle de bain (04/11 : monde en portrait, carrelage octogonal blanc et bleu, piste turquoise, grande droite le long de
     la baignoire, courbe autour du tapis de bain, boucle Ω autour des toilettes, zones `eau`, `savon` (glisse) et `mousse`
     (frein), houppettes qui renvoient, savonnette, grenouille mécanique et canard, 11 298 u, 2640×3630).
+    🧸 Chambre d'enfant (04/11 : piste de dalles de mousse en puzzle sur parquet et tapis « ciel étoilé », tracé en tête
+    d'ourson (droite de 2100 u à 2 turbos, deux « oreilles », oméga au pied du lit), TRAIN ÉLECTRIQUE (locomotive + 2 wagons
+    sur un même `chemin`, `dec` 0,03) qui coupe deux fois la piste à des passages à niveau dont les feux s'allument à son
+    approche, briques et petites voitures en murs, cubes ABC, balles qui renvoient, zones `moumoute` (frein) et `billes`
+    (glisse), robot mécanique, 11 019 u, 3800×2520).
   - Le vérificateur ne demande plus que TOUS les bots passent la ligne : comme en jeu, ceux encore en course 12 s après le
     premier sont classés ; seul un bot pas encore dans le dernier tour (ou le plafond de temps) fait échouer.
-  - **Restent** : 3 nouveaux à dessiner (Chambre d'enfant avec train électrique, Bac à sable, Table
+  - **Restent** : 2 nouveaux à dessiner (Bac à sable, Table
     de Noël) : leurs fichiers sont des emplacements provisoires, **retirés de `circuits/index.js`** tant qu'ils ne sont pas
     faits (le vérificateur ne connaît que les circuits inscrits). Méthode : un agent par circuit, l'un après l'autre (les
     ateliers à plusieurs agents coûtaient trop cher), vérification + galerie + une course en jeu (serveur local RELANCÉ :
