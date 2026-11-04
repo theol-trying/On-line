@@ -434,10 +434,13 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     épingle intérieure, tunnel violet, buggy téléguidé et pelote du chat, 11 429 u, 3900×2460), ♾️ Circuit en 8 (03/11 :
     tapis de jeu, deux droites qui se croisent à 72° — carrefour dessiné dans `final` —, boucle gauche rapide avec rivière
     et ponts, boucle droite « ferme » avec épingle autour de l'enclos, canard mécanique et tracteur, 11 618 u, 4200×2280).
-    Tours de bots ~32-45 s. Les 7 circuits inscrits passent le vérificateur : il fait désormais partie de `npm test`.
+    Tours de bots ~32-45 s. Les circuits inscrits passent tous le vérificateur : il fait désormais partie de `npm test`.
+  - **Nouveaux** : 🌻 Jardin (04/11 : allée de gravier sinueuse sur pelouse rayée, terrasse pavée de départ, allée du potager
+    à turbo, mare aux carpes, tuyau d'arrosage en mur `tuyau`, zones `flaque` (glisse) et `terre` (frein), ballon de plage
+    qui renvoie, tondeuse robot, escargot et arroseur tournant, 11 114 u, 3400×2800).
   - Le vérificateur ne demande plus que TOUS les bots passent la ligne : comme en jeu, ceux encore en course 12 s après le
     premier sont classés ; seul un bot pas encore dans le dernier tour (ou le plafond de temps) fait échouer.
-  - **Restent** : 5 nouveaux à dessiner (Jardin, Salle de bain, Chambre d'enfant avec train électrique, Bac à sable, Table
+  - **Restent** : 4 nouveaux à dessiner (Salle de bain, Chambre d'enfant avec train électrique, Bac à sable, Table
     de Noël) : leurs fichiers sont des emplacements provisoires, **retirés de `circuits/index.js`** tant qu'ils ne sont pas
     faits (le vérificateur ne connaît que les circuits inscrits). Méthode : un agent par circuit, l'un après l'autre (les
     ateliers à plusieurs agents coûtaient trop cher), vérification + galerie + une course en jeu (serveur local RELANCÉ :
