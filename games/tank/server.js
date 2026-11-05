@@ -13,6 +13,8 @@ import { creerMatch } from '../match.js';
 import { dailyRng } from '../../dayseed.js';
 
 const GID = 'tank';
+// mode triche du game master (clé admin, réglage du menu ; posé par le hub, jamais par le jeu) — 05/11
+const triche = p => !!(p && p.member && p.member.triche);
 const MAX_SEATS = 8;          // Tanks plafonne à 8 : au-delà l'arène devient illisible même agrandie
 const TICK_HZ = 30;
 const COUNTDOWN_TICKS = 3 * TICK_HZ;
@@ -229,8 +231,9 @@ export function createTank(room) {
   function fire(p) {
     if (p.empUntil > tick) return;     // EMP : ne peut pas tirer
     if (!p.inputs.fire || tick < p.cool) return;
-    if (shells.filter(s => s.o === p.seat).length >= MAX_SHELLS) return;
-    p.cool = tick + (p.rapidUntil > tick ? FIRE_COOL / 2 : FIRE_COOL);
+    const tr = triche(p);                                // triche : un obus tous les 3 ticks, sans la limite d'obus en vol (plafond 40 : la boucle reste légère)
+    if (shells.filter(s => s.o === p.seat).length >= (tr ? 40 : MAX_SHELLS)) return;
+    p.cool = tick + (tr ? 3 : p.rapidUntil > tick ? FIRE_COOL / 2 : FIRE_COOL);
     const angs = p.tripleUntil > tick ? [-0.18, 0, 0.18] : [0];
     for (const da of angs) {
       const a = p.angle + da, mx = p.x + Math.cos(a) * (TANK_R + SHELL_R + 1), my = p.y + Math.sin(a) * (TANK_R + SHELL_R + 1);

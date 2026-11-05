@@ -1660,15 +1660,19 @@ export default (function () {
     return pred.pos;
   }
   function setKey(code, val) { const a = keyToAction(code); if (a) setAction(a, val); }
+  // mode triche (game master) : Espace tenu / relâché → { t: 'tr' } ; relâché aussi si la fenêtre perd le focus
+  let trTenu = false;
+  const trJ = on => { if (on && !window.__TRICHE) return; if (on === trTenu) return; trTenu = on; send({ t: 'tr', on: on ? 1 : 0 }); };
   const onKeyDown = e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
     if (e.key === ' ' && !e.repeat && snap && snap.gs !== 'play' && snap.gs !== 'paused' && !rlBlock()) send({ t: 'start' });   // pendant le ralenti, Espace ne fait que le passer
     if (!e.repeat && (e.key === 'p' || e.key === 'P' || e.key === 'Escape') && snap && (snap.gs === 'play' || snap.gs === 'paused')) send({ t: 'pause' });   // touche tenue : jamais de re-envoi (sinon pause/reprise en boucle)
+    if (e.key === ' ' && !e.repeat && snap && snap.gs === 'play') trJ(true);   // triche : bouclier tant qu'Espace est tenu
     if (!e.repeat) setKey(e.code, true);
   };
-  const onKeyUp = e => setKey(e.code, false);
-  const onBlur = () => { if (input.up || input.dn) { input.up = input.dn = false; send({ t: 'input', up: false, dn: false }); } };
+  const onKeyUp = e => { if (e.key === ' ') trJ(false); setKey(e.code, false); };
+  const onBlur = () => { trJ(false); if (input.up || input.dn) { input.up = input.dn = false; send({ t: 'input', up: false, dn: false }); } };
   function hold(el, action) {
     if (!el) return;
     const on = e => { e.preventDefault(); unlockAudio(); setAction(action, true); };

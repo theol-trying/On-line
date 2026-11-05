@@ -6,6 +6,8 @@ import { classerManche } from '../fin-manche.js';
 import { creerMatch } from '../match.js';
 
 const GID = 'pong';
+// mode triche du game master (clé admin, réglage du menu ; posé par le hub, jamais par le jeu) — 05/11
+const triche = p => !!(p && p.member && p.member.triche);
 const r1 = x => Math.round(x * 10) / 10;
 
 /* ---- constantes de jeu ---- */
@@ -650,6 +652,7 @@ export function createPong(room) {
     }
     if (gameState !== 'play') return;
     tick++;
+    for (const p of players) if (p.trHold && triche(p) && inPlay(p)) p.shieldUntil = Math.max(p.shieldUntil, tick + 2);   // triche : bouclier tant qu'Espace est tenu
     if (tick >= MAX_ROUND_TICKS) { endByTimeup(); return; }
     computeLeader();
     if (rules.sudden !== 'off' && !sdActive && aliveTeams().size === 2) sdActive = true;
@@ -794,6 +797,7 @@ export function createPong(room) {
         powerups.push({ x: CX + Math.cos(ang) * rad, y: CY + Math.sin(ang) * rad, type, bad: false });
       }
     } else if (m.t === 'input' && p) { p.up = !!m.up; p.dn = !!m.dn; }
+    else if (m.t === 'tr' && p) p.trHold = !!m.on;          // triche : Espace tenu / relâché (sans effet hors mode triche)
     else if (m.t === 'start') startGame();
     else if (m.t === 'pause') { if (gameState === 'play') gameState = 'paused'; else if (gameState === 'paused') gameState = 'play'; }
     else if (m.t === 'abort') backToLobby();

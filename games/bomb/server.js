@@ -17,6 +17,8 @@ import { creerMatch } from '../match.js';
 import { dailyRng } from '../../dayseed.js';
 
 const GID = 'bomb';
+// mode triche du game master (clé admin, réglage du menu ; posé par le hub, jamais par le jeu) — 05/11
+const triche = p => !!(p && p.member && p.member.triche);
 const MAX_SEATS = 8;          // Bomberman plafonne à 8 : au-delà on meurt trop souvent sans avoir vu la bombe
 const TICK_HZ = 30;
 const COUNTDOWN_TICKS = 3 * TICK_HZ;
@@ -256,7 +258,7 @@ export function createBomb(room) {
     return true;
   }
   function placeBombAt(p, gx, gy, forceFuse) {
-    if (p.bombsActive >= p.maxBombs) return false;
+    if (p.bombsActive >= p.maxBombs && !triche(p)) return false;   // triche : autant de bombes que d'appuis (une par case)
     if (gx < 1 || gy < 1 || gx >= GW - 1 || gy >= GH - 1) return false;
     if (bombAt(gx, gy) || cells[idx(gx, gy)] !== 0) return false;
     const pass = new Set();
@@ -309,7 +311,7 @@ export function createBomb(room) {
     p.ring = (p.ring + d + RING_LEN) % RING_LEN; p.x = ccx(RING[p.ring][0]); p.y = ccx(RING[p.ring][1]);
   }
   function revBomb(p) {
-    if (gameState !== 'play' || p.bombsActive >= p.maxBombs) return;
+    if (gameState !== 'play' || (p.bombsActive >= p.maxBombs && !triche(p))) return;   // triche : bombes sans limite (revanche aussi)
     const [rx, ry] = RING[p.ring], [ix, iy] = innerCell(rx, ry);
     if (cells[idx(ix, iy)] !== 0 || bombAt(ix, iy)) return;
     const pass = new Set(); for (const q of players) if (active(q) && Math.floor(q.x / CELL) === ix && Math.floor(q.y / CELL) === iy) pass.add(q.seat);

@@ -8,6 +8,8 @@ import { classerManche } from '../fin-manche.js';
 import { creerMatch } from '../match.js';
 
 const GID = 'patate';
+// mode triche du game master (clé admin, réglage du menu ; posé par le hub, jamais par le jeu) — 05/11
+const triche = p => !!(p && p.member && p.member.triche);
 const MAX_SEATS = 10;
 const COUNTDOWN_TICKS = 3 * TICK_HZ;
 // course : mêmes réglages que le Foot (un pion qui glisse un peu) ; le PORTEUR court 10 % plus vite (vitesse ET accélération,
@@ -240,10 +242,10 @@ export function createPatate(room) {
   }
   function turnToward(p, ta, rate) { let d = ta - p.a; d = Math.atan2(Math.sin(d), Math.cos(d)); p.a += Math.max(-rate, Math.min(rate, d)); }
   function move(p) {
-    const D = PTDIFF[botDiff] || PTDIFF[1], moving = !!(p.mx || p.my), turbo = p.tbUntil > tick;
+    const D = PTDIFF[botDiff] || PTDIFF[1], moving = !!(p.mx || p.my), turbo = p.tbUntil > tick, libre = turbo || triche(p);   // triche : sprint sans fatigue
     // sprint : Maj tenue, en mouvement, endurance disponible (ou turbo)
-    p.sprinting = p.sprintHeld && moving && (turbo || (!p.winded && p.sta > 0));
-    if (p.sprinting && !turbo) { p.sta = Math.max(0, p.sta - STA_DRAIN); p.staRest = 0; if (p.sta <= 0) p.winded = true; }
+    p.sprinting = p.sprintHeld && moving && (libre || (!p.winded && p.sta > 0));
+    if (p.sprinting && !libre) { p.sta = Math.max(0, p.sta - STA_DRAIN); p.staRest = 0; if (p.sta <= 0) p.winded = true; }
     else if (!p.sprinting) { if (++p.staRest > STA_DELAY) p.sta = Math.min(1, p.sta + STA_REGEN); if (p.winded && p.sta >= STA_MIN) p.winded = false; }
     const sk = (turbo ? TURBO_SPD : 1) * (p.hp ? CARRY_SPD : 1) * (p.bot ? D.acc : 1);   // turbo, porteur, bot Facile : jouent sur l'accélération ET le plafond
     const acc = ACC * sk * (p.sprinting ? SPRINT_ACC : 1), vmax = VMAX * sk * (p.sprinting ? SPRINT_SPD : 1);

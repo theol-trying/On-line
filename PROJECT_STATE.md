@@ -522,6 +522,16 @@ AZERTY, donc ZQSD marchait déjà en AZERTY. `KeyZ`/`KeyQ` ajoutés partout : Z 
 en QWERTY, et W A S D reste valable. Textes d'aide mis à jour (« Z Q S D (W A S D) »).
 
 ## Communs aux jeux
+- **Mode triche du game master (05/11)** — demande de l'utilisateur, pour lui seul. Interrupteur « 🎭 Mode triche » dans la
+  boîte Admin des Réglages (visible seulement avec la clé admin, choix mémorisé `pong-lan-triche`, renvoyé au hub après la
+  clé à chaque connexion). Hub : msg `triche { on }` accepté seulement si `member.gm` (clé vérifiée, jamais l'hôte de
+  repli), pose `member.triche`, répond `{ t: 'triche', on }` → `window.__TRICHE` côté client. Chaque serveur de jeu lit
+  `triche(p)` = `p.member.triche` (les bots n'en ont jamais) :
+  Micro Machines = turbo tant qu'Espace est tenu (msg de jeu `tr { on }`, aussi le bouton 🎁) · Sumo = une charge toutes les
+  0,4 s sans recharge tant qu'Espace est tenu (`tr`, aussi le bouton de charge) · Tanks = un obus tous les 3 ticks sans
+  limite d'obus en vol (plafond 40) · Pong = bouclier tant qu'Espace est tenu (`tr` ; pas de bouton tactile) · Bomberman =
+  bombes sans limite (une par case ; revanche comprise) · Patate = sprint sans fatigue · rien pour Tron et Snake.
+  Le message `tr` est ouvert à tous mais sans effet sans `member.triche` ; relâché aussi quand la fenêtre perd le focus.
 - **Équipes** FFA/2v2/2v2v2/3v3 (2v2 à 4 joueurs ; 2v2v2 & 3v3 à 6). Couleur d'équipe (palette Okabe-Ito en daltonien).
 - **Tir allié** (Tank & Bomberman, bouton 🤝, actif seulement en équipes, **OFF par défaut**) : ON = les obus/mines/explosions
   touchent les coéquipiers. La **bombe/obus propre** blesse toujours son auteur ; en ON un kill d'allié est crédité.

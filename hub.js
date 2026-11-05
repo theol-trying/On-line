@@ -431,6 +431,13 @@ function wire(member) {                          // (re)branche les handlers d'u
     } else if (m.t === 'forcestart') {
       if (tour && tour.wait > 0) return;             // transition de tournoi : l'ancien jeu ne repart pas
       if (member.id === hostId()) { garde('création du jeu', ensureGame); if (game && game.isIdle()) { asseoirSpectateurs(); garde('départ forcé', () => game.onMessage(member, { t: 'start' })); } } // l'hôte force le départ malgré des joueurs pas prêts
+    } else if (m.t === 'triche') {
+      // MODE TRICHE (05/11) : réservé au détenteur de la clé admin (member.gm, jamais l'hôte de repli). Les jeux lisent
+      // member.triche (Micro : turbo tant qu'Espace est tenu, Sumo : charges sans recharge, Tanks : tir sans délai ni limite,
+      // Pong : bouclier tant qu'Espace est tenu, Bomberman : bombes sans limite, Patate : sprint sans fatigue).
+      if (!member.gm) { room.send(member, { t: 'denied' }); return; }
+      member.triche = !!m.on;
+      room.send(member, { t: 'triche', on: member.triche });
     } else if (m.t === 'adminreset') {
       const KEY = process.env.ADMIN_KEY;            // réinitialisation de TOUS les classements (réservée au détenteur de la clé admin)
       if (KEY && typeof m.key === 'string' && m.key === KEY) { for (const meta of META) reset(meta.id); resetDaily(); }  // reset marque dirty → step() rediffuse les classements vides à tous (le global et le défi du jour se recalculent)

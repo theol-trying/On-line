@@ -1072,19 +1072,22 @@ export default (function () {
   function pushInput() { send({ t: 'input', up: input.up, down: input.down, left: input.left, right: input.right }); }
   function setIn(k, v) { if (input[k] === v) return; input[k] = v; pushInput(); }   // n'envoie qu'aux CHANGEMENTS
   const isPlay = () => snap && (snap.gs === 'play' || snap.gs === 'paused');
+  // mode triche (game master) : Espace tenu / relâché → { t: 'tr' } ; relâché aussi si la fenêtre perd le focus
+  let trTenu = false;
+  const trJ = on => { if (on && !window.__TRICHE) return; if (on === trTenu) return; trTenu = on; send({ t: 'tr', on: on ? 1 : 0 }); };
   const onKeyDown = e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
     if (e.repeat) return;                                 // la répétition auto relançait charge/ancrage et renvoyait les mêmes touches
     // start seulement hors partie : pendant le compte à rebours, Espace (réflexe « prêt à charger ») renvoyait un start inutile
     if (e.key === ' ' && (pendingEnd || RL.active(performance.now()))) { RL.skip(); return; }   // le PREMIER Espace pendant le ralenti le passe, sans lancer « Rejouer »
-    if (e.key === ' ') { if (snap && (snap.gs === 'lobby' || snap.gs === 'over')) send({ t: 'start' }); else if (snap && snap.gs === 'play') send({ t: 'dash' }); return; }
+    if (e.key === ' ') { if (snap && (snap.gs === 'lobby' || snap.gs === 'over')) send({ t: 'start' }); else if (snap && snap.gs === 'play') { send({ t: 'dash' }); trJ(true); } return; }
     if ((e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyE') && isPlay()) { send({ t: 'brace' }); return; }
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && isPlay()) { send({ t: 'pause' }); return; }
     const d = DIR_KEYS[e.code]; if (d) setIn(d, true);
   };
-  const onKeyUp = e => { const d = DIR_KEYS[e.code]; if (d) setIn(d, false); };
-  const onBlur = () => { let ch = false; for (const k in input) if (input[k]) { input[k] = false; ch = true; } if (ch) pushInput(); };   // fenêtre quittée : plus de touche « collée »
+  const onKeyUp = e => { if (e.key === ' ') { trJ(false); return; } const d = DIR_KEYS[e.code]; if (d) setIn(d, false); };
+  const onBlur = () => { trJ(false); let ch = false; for (const k in input) if (input[k]) { input[k] = false; ch = true; } if (ch) pushInput(); };   // fenêtre quittée : plus de touche « collée »
   // boutons maintenus : le joystick d'app.js les actionne par événements synthétiques (pas de setPointerCapture)
   function hold(id, k) { const el = $(id); if (!el) return; const on = e => { e.preventDefault(); unlockAudio(); setIn(k, true); }; const off = e => { e.preventDefault(); setIn(k, false); }; el.addEventListener('pointerdown', on); el.addEventListener('pointerup', off); el.addEventListener('pointerleave', off); el.addEventListener('pointercancel', off); }
   function tap(id, t) { const el = $(id); if (!el) return; el.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); send({ t }); }); }
@@ -1124,7 +1127,8 @@ export default (function () {
     }
     if (premiere) cv.addEventListener('click', () => { unlockAudio(); if (snap && !isPlay() && snap.gs !== 'countdown') send({ t: 'start' }); });
     if (premiere) endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
-    if (premiere) { hold('smUp', 'up'); hold('smDown', 'down'); hold('smLeft', 'left'); hold('smRight', 'right'); tap('smDash', 'dash'); tap('smBrace', 'brace'); }
+    if (premiere) { hold('smUp', 'up'); hold('smDown', 'down'); hold('smLeft', 'left'); hold('smRight', 'right'); tap('smDash', 'dash'); tap('smBrace', 'brace');
+      const db = $('smDash'); if (db) { db.addEventListener('pointerdown', () => { if (snap && snap.gs === 'play') trJ(true); }); ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => db.addEventListener(t, () => trJ(false))); } }
     applyColors();
     resizeH = resizeCanvas; addEventListener('resize', resizeH); resizeCanvas();
     addEventListener('keydown', onKeyDown); addEventListener('keyup', onKeyUp); addEventListener('blur', onBlur);

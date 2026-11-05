@@ -13,6 +13,9 @@ const COUNTDOWN_TICKS = 3 * TICK_HZ;
 const ACC = 0.95, VMAX = 6.5, FRICTION = 0.86, GRIP_FRICTION = 0.78;
 // charge : grosse impulsion brève, recharge longue → c'est un engagement, pas un spam
 const DASH_IMP = 11, DASH_TICKS = 9, DASH_CD = 66, DASH_HIT_MUL = 1.7;
+// mode triche du game master (clé admin, réglage du menu ; posé par le hub, jamais par le jeu) — 05/11
+const triche = p => !!(p && p.member && p.member.triche);
+const TR_DASH = 12;                                      // triche : une charge toutes les 12 ticks (0,4 s) tant qu'Espace est tenu
 // ancrage : très lourd mais presque immobile → contre direct d'une charge, inutile en mouvement
 const BRACE_TICKS = 30, BRACE_CD = 90, BRACE_MASS = 3, BRACE_ACC = 0.3;
 // collisions : restitution élevée + poussée minimale, sinon deux lutteurs collés « fondent » l'un dans l'autre sans jamais se repousser
@@ -393,6 +396,7 @@ export function createSumo(room) {
     const alive = players.filter(p => p.alive);
     for (const p of alive) { if (p.bot) botThink(p); else humanDir(p); }
     for (const p of alive) { if (p.wantBrace) tryBrace(p); if (p.wantDash) tryDash(p); }
+    for (const p of alive) if (p.trHold && triche(p) && tick >= (p.trT || 0)) { p.dashReadyAt = 0; tryDash(p); p.trT = tick + TR_DASH; }   // triche : pousser sans arrêt
     for (const p of alive) move(p);
     for (let i = 0; i < alive.length; i++) for (let j = i + 1; j < alive.length; j++) collide(alive[i], alive[j]);
     for (const p of alive) collectPickups(p);
@@ -458,6 +462,7 @@ export function createSumo(room) {
     const seat = seatOf(member);
     const p = seat >= 0 ? players[seat] : null;
     if (m.t === 'input' && p) p.inp = { up: !!m.up, down: !!m.down, left: !!m.left, right: !!m.right };   // état TENU, envoyé à chaque changement
+    else if (m.t === 'tr' && p) p.trHold = !!m.on;          // triche : Espace tenu / relâché (sans effet hors mode triche)
     else if (m.t === 'dash' && p && p.alive && gameState === 'play') p.wantDash = true;     // traité au tick suivant (ordre déterministe)
     else if (m.t === 'brace' && p && p.alive && gameState === 'play') p.wantBrace = true;
     else if (m.t === 'start') startGame();

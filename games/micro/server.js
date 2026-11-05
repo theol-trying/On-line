@@ -13,6 +13,8 @@ import { classerManche } from '../fin-manche.js';
 import { creerMatch } from '../match.js';
 
 const GID = 'micro';
+// mode triche du game master (clé admin, réglage du menu ; posé par le hub, jamais par le jeu) — 05/11
+const triche = p => !!(p && p.member && p.member.triche);
 const MAX_SEATS = 10;
 const COUNTDOWN_TICKS = 3 * TICK_HZ;                     // feux de départ : rouge, rouge, rouge… vert
 // moteur (u/tick, u/tick²) : vitesse de pointe, accélération, frein, marche arrière ; virage : rad/tick à pleine vitesse
@@ -889,6 +891,7 @@ export function createMicro(room) {
       p.dTrack = Math.hypot(p.x - C.sx[p.si], p.y - C.sy[p.si]);
       p.surf = intouchable(p) ? 0 : surfaceDe(p);      // fantôme / en l'air : ni lait, ni sucre, ni zone
       remorque(p);
+      if (p.trHold && triche(p) && !p.fin) p.tbT = Math.max(p.tbT, tick + 2);   // triche : turbo tant qu'Espace est tenu
       drive(p);
       const dd = Math.hypot(p.x - p.px, p.y - p.py);       // trajet depuis la dernière porte (et la part loin hors piste)
       p.gLen += dd; if (p.dTrack > C.W + CUT_MARGE) p.gOff += dd;
@@ -1001,6 +1004,7 @@ export function createMicro(room) {
       }
       else { p.ana = null; p.inp = { up: !!m.up, down: !!m.down, left: !!m.left, right: !!m.right }; }
     }
+    else if (m.t === 'tr' && p) p.trHold = !!m.on;          // triche : Espace tenu / relâché (sans effet hors mode triche)
     else if (m.t === 'objet' && p) { if (p.playing && p.alive && !p.bot && p.item >= 0) p.useReq = m.inv ? 2 : 1; }   // inv : lancer inversé
     else if (m.t === 'bonus') { if (editable()) bonusOn = !bonusOn; }
     else if (m.t === 'pouce') { if (editable()) pouceOn = !pouceOn; }

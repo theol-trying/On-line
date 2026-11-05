@@ -1118,19 +1118,22 @@ export default (function () {
     if (now - anaT >= 60) { anaT = now; anaSent = key; send({ t: 'input', mx: Math.round(v.mx * 1000) / 1000, my: Math.round(v.my * 1000) / 1000 }); }
     else { anaPend = v; if (!anaTimer) anaTimer = setTimeout(() => { anaTimer = 0; const q = anaPend; anaPend = null; if (q && q.key !== anaSent) { anaT = performance.now(); anaSent = q.key; send({ t: 'input', mx: Math.round(q.mx * 1000) / 1000, my: Math.round(q.my * 1000) / 1000 }); } }, 60 - (now - anaT)); }
   }
+  // mode triche (game master) : Espace tenu / relâché → { t: 'tr' } ; relâché aussi si la fenêtre perd le focus
+  let trTenu = false;
+  const trJ = on => { if (on && !window.__TRICHE) return; if (on === trTenu) return; trTenu = on; send({ t: 'tr', on: on ? 1 : 0 }); };
   const onKeyDown = e => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
     unlockAudio();
     if (e.repeat) return;
     if (e.key === ' ' && (pendingEnd || RL.active(performance.now()))) { RL.skip(); return; }
-    if (e.key === ' ') { if (snap && (snap.gs === 'lobby' || snap.gs === 'over')) send({ t: 'start' }); else utiliserObjet(); return; }   // en course : Espace = l'objet (le klaxon est sur H)
+    if (e.key === ' ') { if (snap && (snap.gs === 'lobby' || snap.gs === 'over')) send({ t: 'start' }); else { utiliserObjet(); if (isPlay()) trJ(true); } return; }   // en course : Espace = l'objet (le klaxon est sur H)
     if (e.code === 'KeyH' || e.code === 'KeyK') { klaxon(); return; }
     if (e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') { if (isPlay()) utiliserObjet(true); return; }   // Ctrl / Maj : objet lancé dans l'autre sens
     if ((e.key === 'p' || e.key === 'P' || e.key === 'Escape') && isPlay()) { send({ t: 'pause' }); return; }
     const d = Object.prototype.hasOwnProperty.call(DIR_KEYS, e.code) ? DIR_KEYS[e.code] : null; if (d) setIn(d, true);
   };
-  const onKeyUp = e => { const d = Object.prototype.hasOwnProperty.call(DIR_KEYS, e.code) ? DIR_KEYS[e.code] : null; if (d) setIn(d, false); };
-  const onBlur = () => { let ch = false; for (const k in input) if (input[k]) { input[k] = false; ch = true; } if (ch) pushInput(); };
+  const onKeyUp = e => { if (e.key === ' ') { trJ(false); return; } const d = Object.prototype.hasOwnProperty.call(DIR_KEYS, e.code) ? DIR_KEYS[e.code] : null; if (d) setIn(d, false); };
+  const onBlur = () => { trJ(false); let ch = false; for (const k in input) if (input[k]) { input[k] = false; ch = true; } if (ch) pushInput(); };
   function hold(id, k) { const el = $(id); if (!el) return; const on = e => { e.preventDefault(); unlockAudio(); setIn(k, true); }; const off = e => { e.preventDefault(); setIn(k, false); }; el.addEventListener('pointerdown', on); el.addEventListener('pointerup', off); el.addEventListener('pointerleave', off); el.addEventListener('pointercancel', off); }
 
   let cable = false;
@@ -1175,7 +1178,7 @@ export default (function () {
       endEl.addEventListener('click', () => { unlockAudio(); send({ t: 'start' }); });
       hold('mmUp', 'up'); hold('mmDown', 'down'); hold('mmLeft', 'left'); hold('mmRight', 'right');
       if (hornBtn) hornBtn.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); klaxon(); });
-      if (itemBtn) itemBtn.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); utiliserObjet(); });
+      if (itemBtn) { itemBtn.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); utiliserObjet(); if (isPlay()) trJ(true); }); ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => itemBtn.addEventListener(t, () => trJ(false))); }
       if (itemInvBtn) itemInvBtn.addEventListener('pointerdown', e => { e.preventDefault(); unlockAudio(); utiliserObjet(true); });
     }
     applyColors();

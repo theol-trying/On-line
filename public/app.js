@@ -204,6 +204,12 @@ let adminKey = '';                       // clé admin = marqueur « game master
   adminKey = lireLS('pong-lan-admin', '') || '';
   const adminBox = document.getElementById('adminBox'), adminResetBtn = document.getElementById('adminResetBtn');
   if (adminKey && adminBox) adminBox.style.display = '';
+  // mode triche : choix mémorisé, présenté au hub juste après la clé (onopen) ; le hub confirme par {t:'triche'}
+  const tricheBox = document.getElementById('setTriche');
+  if (tricheBox) {
+    tricheBox.checked = lireLS('pong-lan-triche', '') === '1';
+    tricheBox.onchange = () => { ecrireLS('pong-lan-triche', tricheBox.checked ? '1' : '0'); send({ t: 'triche', on: tricheBox.checked }); };
+  }
   if (adminResetBtn) adminResetBtn.onclick = () => {
     if (!adminKey || !confirm('Réinitialiser TOUS les classements (chaque jeu + classement global) ? Action irréversible.')) return;
     send({ t: 'adminreset', key: adminKey });
@@ -634,7 +640,7 @@ function connect() {
   setStatus('Connexion…', '');
   const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';   // wss en ligne (HTTPS Render), ws en LAN local
   ws = new WebSocket(`${wsProto}//${location.host}${you.token ? '/?t=' + encodeURIComponent(you.token) : ''}`);
-  ws.onopen = () => { if (adminKey) send({ t: 'auth', key: adminKey }); if (myName) send({ t: 'name', name: myName }); if (myAvatar) send({ t: 'avatar', a: myAvatar }); startPing(); };
+  ws.onopen = () => { if (adminKey) { send({ t: 'auth', key: adminKey }); if (lireLS('pong-lan-triche', '') === '1') send({ t: 'triche', on: true }); } if (myName) send({ t: 'name', name: myName }); if (myAvatar) send({ t: 'avatar', a: myAvatar }); startPing(); };
   ws.onmessage = e => {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.t === 'hello') {
@@ -677,6 +683,10 @@ function connect() {
       if (m.ok) note('👑 Game master activé');
       else if (m.why === 'nokey') note('👑 Clé refusée : ADMIN_KEY n\'est pas configurée sur le serveur');
       else note('👑 Clé admin invalide');
+    } else if (m.t === 'triche') {
+      window.__TRICHE = !!m.on;                                       // lu par les jeux (Micro, Sumo, Pong : Espace tenu)
+      const tb = document.getElementById('setTriche'); if (tb) tb.checked = !!m.on;
+      note(m.on ? '🎭 Mode triche activé' : '🎭 Mode triche désactivé');
     } else if (m.t === 'note') {
       if (typeof m.m === 'string') note(m.m.slice(0, 160));          // message d'information émis par le hub
     } else if (m.t === 'daily') {
