@@ -406,7 +406,7 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
   · seuil de « choc violent » (`hitT`, grâce anti-raccourci) 3 → 2,5 ; son/étincelles de mur dès j > 1,9 (au lieu de 2,2).
   · Boule de papier 📄 et escargot 🐌 inchangés. Courses de bots (`fins-de-manche.mjs`) : manche la plus longue 405 s → 255 s.
 
-- **Circuits v3 + Grand Prix (02-03/11, en cours)** — demande : « circuits plus longs et plus variés, zones plus larges, plus
+- **Circuits v3 + Grand Prix (02-06/11)** — demande : « circuits plus longs et plus variés, zones plus larges, plus
   de courbes, des zones d'accélération droites, obstacles fixes et mouvants, décors plus travaillés, une dizaine minimum ;
   par défaut l'option aléatoire ; plusieurs courses d'affilée sur différents circuits, 1 course par circuit ».
   - **Un fichier par circuit** : `public/games/micro/circuits/<id>.js` (`export default` de la définition), liste ordonnée
@@ -450,12 +450,15 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     sable, planche d'échafaudage de 1580 u à 2 turbos, piste de terre tassée bordée de rubalise, cônes qui renvoient (`cone`),
     seaux, briques, pelle et râteau en murs, zones `sablemou` (frein) et `boue` (glisse), pelleteuse, bétonnière et camion
     benne, grue dont la flèche passe au-dessus de la piste (`final`), 12 495 u, 3560×2680).
+    🎄 Table de Noël (06/11 : chemin de table en velours vert sur nappe rouge damassée, droite de départ et deux grands lobes
+    à droites le long des bords (4 turbos), entrée en trou de serrure vers une couronne de 270° autour du sapin, guirlande
+    lumineuse en mur `guirlande`, bougies, cadeaux, bûche, boules qui renvoient (`boule`), zones `neige` (glisse) et
+    `paillettes` (frein), ballerine de boîte à musique, renne mécanique et boule qui roule, 46 décors, 12 687 u, 3700×2580).
+  - **Chantier terminé le 06/11 : 12 circuits**, tous refaits ou nouveaux, tous dans `npm test` (vérificateur). Méthode retenue
+    pour la suite : un agent par circuit, l'un après l'autre (les ateliers à plusieurs agents coûtaient trop cher), puis
+    vérification + galerie + une course en jeu (serveur local RELANCÉ : il garde la géométrie en mémoire), commit.
   - Le vérificateur ne demande plus que TOUS les bots passent la ligne : comme en jeu, ceux encore en course 12 s après le
     premier sont classés ; seul un bot pas encore dans le dernier tour (ou le plafond de temps) fait échouer.
-  - **Reste** : 1 nouveau à dessiner (Table de Noël) : son fichier est un emplacement provisoire, **retiré de `circuits/index.js`** tant qu'il n'est pas
-    fait (le vérificateur ne connaît que les circuits inscrits). Méthode : un agent par circuit, l'un après l'autre (les
-    ateliers à plusieurs agents coûtaient trop cher), vérification + galerie + une course en jeu (serveur local RELANCÉ :
-    il garde la géométrie en mémoire), commit.
 - **8 nouveaux objets + lancer inversé (03/11)** — proposés puis choisis par l'utilisateur (tous retenus) ; objets 6 à 13 de
   `ITEMS` (serveur), `ITEM` (client), sons `objet6`…`objet13`, `plouf`, `boum`, `gel` :
   - 🎯 **Toupie chercheuse** (`toupies`, snapshot `tp`) : vole au-dessus de tout (24 u/tick, virage 0,16 rad/tick, 0,45 de près)
