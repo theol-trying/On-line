@@ -107,7 +107,7 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 export function createMicro(room) {
   let players, gameState, tick, round, countdownUntil, winner, fx, pend, mode, nteams, nParts, endTick, botCount, botDiff;
   let circuit, C, laps, formule, finCount, finDeadline, leader, leadT, cam, lastBest;
-  let circChoix = 'hasard', sensChoix = 'normal', inverse = false;   // choix du game master (« hasard » par défaut) / circuit et sens joués
+  let circChoix = 'hasard', sensChoix = 'hasard', inverse = false;   // choix du game master (« hasard » par défaut pour les deux, 05/11) / circuit et sens joués
   let sac = [];                                          // « Hasard » : circuits pas encore tirés (tous passent avant qu'un revienne)
   let gpChoix = 0, gpSeq = [], gpFait = 0, gpGagnants = [];   // Grand Prix : réglage, circuits de la série, courses courues, sièges vainqueurs
   const MOBP = [];                                       // positions des obstacles mobiles au tick courant
@@ -202,7 +202,7 @@ export function createMicro(room) {
     players = makePlayers();
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; pend = [];
     mode = 'ffa'; nteams = 0; nParts = 0; endTick = 0; botCount = 0; botDiff = 1; seatByMid = {};
-    circChoix = 'hasard'; sensChoix = 'normal'; setCircuit(CIRCUITS[0].id, false); laps = 3; formule = 'course';
+    circChoix = 'hasard'; sensChoix = 'hasard'; setCircuit(CIRCUITS[0].id, false); laps = 3; formule = 'course';
     sac = []; gpChoix = 0; gpSeq = []; gpFait = 0; gpGagnants = [];
     finCount = 0; finDeadline = 0; leader = -1; leadT = -1e9; cam = null; lastBest = null;
   }

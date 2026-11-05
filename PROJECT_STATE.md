@@ -509,7 +509,7 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     devant ×0,85 pendant 1,5 s (avant : ×0,62 pendant 2,5 s pour tous). Par joueur : `slowV` (le plus fort l'emporte si deux
     escargots se chevauchent).
   - **Hasard par défaut** (`circChoix = 'hasard'`) : tirage « en sac » (tous les circuits passent avant qu'un revienne,
-    jamais deux fois de suite).
+    jamais deux fois de suite). Depuis le 05/11, le SENS de course est lui aussi « hasard » par défaut (`sensChoix`) ; le vérificateur fait tourner le bouton Sens jusqu'au sens voulu.
   - **Grand Prix** (msg `gp`, game master ; cycle non / 3 / 5 / tous) : une course par circuit, tous différents (le circuit
     choisi, s'il y en a un, ouvre la série), points 15-12-10-8-6-5-4-3-2-1 selon la place, total → vainqueur (équipes :
     somme de leurs pilotes ; à égalité, le plus de victoires). Exclusif avec le match « premier à N » (choisir l'un remet

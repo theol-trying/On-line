@@ -132,7 +132,7 @@ async function course(d, inverse) {
     members.push(m); g.onJoin(m);
     g.onMessage({}, { t: 'daily', on: false });
     g.onMessage(m, { t: 'circuit', id: d.id });
-    if (inverse) g.onMessage(m, { t: 'sens' });
+    for (let k = 0, veut = inverse ? 'inverse' : 'normal'; k < 3 && g.tick().sens !== veut; k++) g.onMessage(m, { t: 'sens' });   // sens imposé (le défaut est « hasard »)
     for (let k = 0; k < 5; k++) g.onMessage(m, { t: 'bots' });
     g.onMessage(m, { t: 'start' });
     const c = circuitParId(d.id, inverse), seats = {}, prog = {};
