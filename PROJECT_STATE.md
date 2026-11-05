@@ -446,11 +446,14 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     sur un même `chemin`, `dec` 0,03) qui coupe deux fois la piste à des passages à niveau dont les feux s'allument à son
     approche, briques et petites voitures en murs, cubes ABC, balles qui renvoient, zones `moumoute` (frein) et `billes`
     (glisse), robot mécanique, 11 019 u, 3800×2520).
+    🚧 Bac à sable (05/11 : chantier miniature dans un bac en bois (`mur`), six épingles serrées en lacets autour de tas de
+    sable, planche d'échafaudage de 1580 u à 2 turbos, piste de terre tassée bordée de rubalise, cônes qui renvoient (`cone`),
+    seaux, briques, pelle et râteau en murs, zones `sablemou` (frein) et `boue` (glisse), pelleteuse, bétonnière et camion
+    benne, grue dont la flèche passe au-dessus de la piste (`final`), 12 495 u, 3560×2680).
   - Le vérificateur ne demande plus que TOUS les bots passent la ligne : comme en jeu, ceux encore en course 12 s après le
     premier sont classés ; seul un bot pas encore dans le dernier tour (ou le plafond de temps) fait échouer.
-  - **Restent** : 2 nouveaux à dessiner (Bac à sable, Table
-    de Noël) : leurs fichiers sont des emplacements provisoires, **retirés de `circuits/index.js`** tant qu'ils ne sont pas
-    faits (le vérificateur ne connaît que les circuits inscrits). Méthode : un agent par circuit, l'un après l'autre (les
+  - **Reste** : 1 nouveau à dessiner (Table de Noël) : son fichier est un emplacement provisoire, **retiré de `circuits/index.js`** tant qu'il n'est pas
+    fait (le vérificateur ne connaît que les circuits inscrits). Méthode : un agent par circuit, l'un après l'autre (les
     ateliers à plusieurs agents coûtaient trop cher), vérification + galerie + une course en jeu (serveur local RELANCÉ :
     il garde la géométrie en mémoire), commit.
 - **8 nouveaux objets + lancer inversé (03/11)** — proposés puis choisis par l'utilisateur (tous retenus) ; objets 6 à 13 de
