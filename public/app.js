@@ -210,12 +210,16 @@ let adminKey = '';                       // clé admin = marqueur « game master
     tricheBox.checked = lireLS('pong-lan-triche', '') === '1';
     tricheBox.onchange = () => { ecrireLS('pong-lan-triche', tricheBox.checked ? '1' : '0'); send({ t: 'triche', on: tricheBox.checked }); };
   }
+  const gmPanel = document.getElementById('gmPanel'), gmBtn = document.getElementById('gmBtn'), gmFloat = document.getElementById('gmFloat');
+  if (adminKey) { document.body.classList.add('gmcle'); if (gmBtn) gmBtn.style.display = ''; }
+  if (gmBtn && gmPanel) gmBtn.onclick = () => { togglePanel(gmPanel); renderKick(); };
+  if (gmFloat && gmPanel) gmFloat.onclick = () => { togglePanel(gmPanel); renderKick(); };
   const kickList = document.getElementById('kickList');
   if (kickList) {
     kickList.onclick = e => {
       const b = e.target.closest ? e.target.closest('button[data-k]') : null; if (!b) return;
-      const nom = b.getAttribute('data-n') || '';
-      if (b.getAttribute('data-k') === 'j') { if (confirm('Exclure ' + nom + ' pour 10 minutes ?')) send({ t: 'kick', id: b.getAttribute('data-id') }); }
+      const nom = b.getAttribute('data-n') || '', ban = +b.getAttribute('data-ban') || 0;
+      if (b.getAttribute('data-k') === 'j') { if (confirm(ban ? 'Bannir ' + nom + (ban >= 3600 ? ' 1 heure' : ' ' + ban / 60 + ' min') + ' ?' : 'Expulser ' + nom + ' ? (il pourra revenir)')) send({ t: 'kick', id: b.getAttribute('data-id'), ban }); }
       else send({ t: 'kickbot', seat: +b.getAttribute('data-seat') });
     };
     setInterval(renderKick, 1000);                      // rafraîchie seulement quand le panneau est ouvert (renderKick vérifie)
@@ -234,9 +238,11 @@ function renderKick() {
   if (!el || !adminKey || !el.offsetParent) return;
   const st = stateCache[activeId], bots = st && Array.isArray(st.players) ? st.players.filter(p => p && p.bot && p.playing && p.alive !== false) : [];
   const humains = roomPlayers.filter(p => p.id !== you.id);
-  const bouton = attrs => '<button class="ghostbtn" style="margin:0 0 0 8px;width:auto;padding:4px 10px" ' + attrs + '>Exclure</button>';
-  const rows = humains.map(p => '<div class="srow"><span>' + esc(p.name || 'Sans pseudo') + (p.role === 'spectator' ? ' 👁' : '') + '</span>' + bouton('data-k="j" data-id="' + esc(p.id) + '" data-n="' + esc(p.name || 'ce joueur') + '"') + '</div>')
-    .concat(bots.map(p => '<div class="srow"><span>' + esc(p.name || ('Bot ' + (p.seat + 1))) + '</span>' + bouton('data-k="b" data-seat="' + (p.seat | 0) + '"') + '</div>'));
+  const bouton = (attrs, txt, rouge) => '<button class="ghostbtn" style="margin:0 0 0 6px;width:auto;padding:4px 8px;font-size:12px' + (rouge ? ';background:rgba(224,80,74,.18);border-color:rgba(224,80,74,.5);color:#ffd9d6' : '') + '" ' + attrs + '>' + txt + '</button>';
+  const rows = humains.map(p => { const a = 'data-k="j" data-id="' + esc(p.id) + '" data-n="' + esc(p.name || 'ce joueur') + '"';
+      return '<div class="srow" style="flex-wrap:wrap"><span>' + esc(p.name || 'Sans pseudo') + (p.role === 'spectator' ? ' 👁' : '') + '</span><span>' + bouton(a + ' data-ban="0"', '👢 Expulser') +
+        bouton(a + ' data-ban="60"', '⛔ 1 min', 1) + bouton(a + ' data-ban="600"', '⛔ 10 min', 1) + bouton(a + ' data-ban="3600"', '⛔ 1 h', 1) + '</span></div>'; })
+    .concat(bots.map(p => '<div class="srow"><span>' + esc(p.name || ('Bot ' + (p.seat + 1))) + '</span>' + bouton('data-k="b" data-seat="' + (p.seat | 0) + '"', '🤖 Retirer') + '</div>'));
   const html = rows.length ? rows.join('') : '<div class="note">Personne à exclure.</div>';
   if (el._h !== html) { el._h = html; el.innerHTML = html; }
 }
@@ -700,7 +706,7 @@ function connect() {
       else if (m.on) { const was = tourState && tourState.on; tourState = m; renderTour(); if (!was) note('🏆 Tournoi lancé — que le meilleur gagne !'); }
       else { if (tourState) note('🏆 Tournoi annulé'); tourState = null; renderTour(); }
     } else if (m.t === 'denied') {
-      if (!window.__lastDN || performance.now() - window.__lastDN > 1500) { window.__lastDN = performance.now(); note(m.why === 'spec' ? '👁 Réservé aux joueurs — tu es spectateur' : m.why === 'gm' ? '👑 Seul le game master peut arrêter la partie' : '👑 Réservé au game master'); }
+      if (!window.__lastDN || performance.now() - window.__lastDN > 1500) { window.__lastDN = performance.now(); note(m.why === 'spec' ? '👁 Réservé aux joueurs — tu es spectateur' : m.why === 'gm' ? '👑 Seul le game master peut arrêter la partie' : m.why === 'pause1' ? '⏸ Une seule pause par manche' : m.why === 'reprise' ? '⏸ Seul celui qui a mis la pause (ou le game master) peut reprendre' : '👑 Réservé au game master'); }
     } else if (m.t === 'gm') {
       // Réponse du hub à la clé admin. Avant, un échec ne disait rien : on croyait à un bug du site.
       if (m.ok) note('👑 Game master activé');
@@ -734,7 +740,10 @@ function connect() {
     } else if (m.t === 'plein') {
       coupure = 'plein';
     } else if (m.t === 'exclu') {
-      coupure = 'exclu'; exclusMin = m.min | 0;              // exclu par le game master : pas de reconnexion automatique
+      coupure = 'exclu'; exclusMin = +m.min || 0;            // expulsé (0) ou banni (min) par le game master : pas de reconnexion automatique
+    } else if (m.t === 'reprise') {
+      const ov = document.getElementById('repriseOverlay');  // reprise après une pause : 3, 2, 1
+      if (ov) { const n = m.n | 0; ov.textContent = n > 0 ? String(n) : ''; ov.classList.toggle('on', n > 0); }
     } else if (m.t === 'state') {
       // Le hub omet les clés inchangées depuis la diffusion précédente : on les reprend de l'état
       // précédent de CE jeu. Nouvel objet à chaque fois — les instantanés déjà empilés dans le
@@ -774,7 +783,7 @@ function connect() {
     }
     if (coupure === 'plein') { coupure = ''; setStatus('Salle pleine — nouvel essai dans 30 s', 'off'); setTimeout(connect, 30000); return; }
     if (coupure === 'exclu') {                               // exclu : on ne revient que sur demande, une fois l'exclusion finie
-      setStatus('Exclu par le game master' + (exclusMin ? ' pour ' + exclusMin + ' min' : '') + ' — touche ici pour réessayer', 'off');
+      setStatus(exclusMin ? 'Banni par le game master pour ' + (exclusMin >= 60 ? '1 h' : exclusMin + ' min') + ' — touche ici pour réessayer' : 'Expulsé par le game master — touche ici pour revenir', 'off');
       msgTxt.onclick = () => { msgTxt.onclick = null; coupure = ''; connect(); };
       return;
     }

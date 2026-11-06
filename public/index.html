@@ -41,6 +41,7 @@
     <button id="dailyBtn" class="ghosttab" aria-label="défi du jour">🎲 Défi</button>
     <button id="tourBtn" class="ghosttab" aria-label="tournoi">🏆 Tournoi</button>
     <button id="setBtn" class="ghosttab" aria-label="réglages d'affichage">⚙️ Affichage</button>
+    <button id="gmBtn" class="ghosttab" aria-label="game master" style="display:none">👑 Game master</button>
   </div>
 
   <!-- ===== bandeau tournoi (jeu en cours + scores cumulés) ===== -->
@@ -706,6 +707,21 @@
   <!-- ===== réglages d'affichage (shell, partagés) ===== -->
   <button id="setFloat" aria-label="réglages d'affichage">⚙️</button>
   <button id="quitFloat" aria-label="quitter la partie en cours">✕ Quitter</button>
+  <button id="gmFloat" aria-label="game master">👑</button>
+  <div id="repriseOverlay" aria-live="polite"></div>
+  <!-- ===== game master (clé admin seulement) : joueurs, pause, triche ===== -->
+  <div id="gmPanel" class="settings hidden" style="width:min(94vw,460px);">
+    <div class="shead"><h3>👑 Game master</h3><button class="sclose" aria-label="fermer">✕</button></div>
+    <div class="sbody">
+      <h4>👥 Joueurs</h4>
+      <div id="kickList"></div>
+      <div class="note" style="margin-top:4px;"><b>Expulser</b> : la personne est déconnectée mais peut revenir tout de suite. <b>Bannir</b> : elle ne peut pas revenir avant la fin de la durée choisie. <b>Retirer</b> un bot : il sort de la manche en cours (un bot de moins ensuite).</div>
+      <h4 style="margin-top:10px;">⏸ Pause</h4>
+      <div class="note">Toi seul peux reprendre n'importe quelle pause et arrêter une partie en cours (croix ✕). Les autres joueurs ont une pause par manche et ne reprennent que la leur. Reprise après un décompte 3, 2, 1.</div>
+        <label class="srow"><span>🎭 Mode triche</span><input type="checkbox" class="switch" id="setTriche"></label>
+        <div class="note" style="margin-top:4px;">Pour toi seul : Micro Machines = turbo tant qu'Espace est tenu · Sumo = charges sans recharge (Espace tenu) · Tanks = tir continu sans recharge · Pong = bouclier tant qu'Espace est tenu · Bomberman = bombes sans limite · Patate = sprint sans fatigue. Rien pour Tron et Snake.</div>
+    </div>
+  </div>
   <div id="scrim" class="hidden"></div>
   <div id="settings" class="settings hidden">
     <div class="shead"><h3>Affichage &amp; accessibilité</h3><button class="sclose" aria-label="fermer">✕</button></div>
@@ -729,11 +745,6 @@
         <h4>🔑 Admin</h4>
         <div class="srow"><span>Classements (tous les jeux + global)</span><button id="adminResetBtn" class="ghostbtn" style="margin:0;width:auto;padding:8px 14px;background:rgba(224,80,74,.18);border-color:rgba(224,80,74,.5);color:#ffd9d6;">🗑 Réinitialiser</button></div>
         <div class="note" style="margin-top:4px;">Visible uniquement avec ta clé admin. Efface définitivement tous les scores.</div>
-        <h4 style="margin-top:10px;">👢 Exclure</h4>
-        <div id="kickList"></div>
-        <div class="note" style="margin-top:4px;">Un joueur exclu est déconnecté et ne peut pas revenir pendant 10 min ; un bot sort de la manche en cours (un bot de moins ensuite). Quand tu es connecté avec ta clé, tu es aussi le seul à pouvoir arrêter une partie en cours (croix ✕).</div>
-        <label class="srow"><span>🎭 Mode triche</span><input type="checkbox" class="switch" id="setTriche"></label>
-        <div class="note" style="margin-top:4px;">Pour toi seul : Micro Machines = turbo tant qu'Espace est tenu · Sumo = charges sans recharge (Espace tenu) · Tanks = tir continu sans recharge · Pong = bouclier tant qu'Espace est tenu · Bomberman = bombes sans limite · Patate = sprint sans fatigue. Rien pour Tron et Snake.</div>
       </div>
     </div>
   </div>

@@ -528,8 +528,8 @@ AZERTY, donc ZQSD marchait déjà en AZERTY. `KeyZ`/`KeyQ` ajoutés partout : Z 
 en QWERTY, et W A S D reste valable. Textes d'aide mis à jour (« Z Q S D (W A S D) »).
 
 ## Communs aux jeux
-- **Mode triche du game master (05/11)** — demande de l'utilisateur, pour lui seul. Interrupteur « 🎭 Mode triche » dans la
-  boîte Admin des Réglages (visible seulement avec la clé admin, choix mémorisé `pong-lan-triche`, renvoyé au hub après la
+- **Mode triche du game master (05/11)** — demande de l'utilisateur, pour lui seul. Interrupteur « 🎭 Mode triche » dans le
+  panneau 👑 Game master (visible seulement avec la clé admin, choix mémorisé `pong-lan-triche`, renvoyé au hub après la
   clé à chaque connexion). Hub : msg `triche { on }` accepté seulement si `member.gm` (clé vérifiée, jamais l'hôte de
   repli), pose `member.triche`, répond `{ t: 'triche', on }` → `window.__TRICHE` côté client. Chaque serveur de jeu lit
   `triche(p)` = `p.member.triche` (les bots n'en ont jamais) :
@@ -538,21 +538,31 @@ en QWERTY, et W A S D reste valable. Textes d'aide mis à jour (« Z Q S D (W A 
   limite d'obus en vol (plafond 40) · Pong = bouclier tant qu'Espace est tenu (`tr` ; pas de bouton tactile) · Bomberman =
   bombes sans limite (une par case ; revanche comprise) · Patate = sprint sans fatigue · rien pour Tron et Snake.
   Le message `tr` est ouvert à tous mais sans effet sans `member.triche` ; relâché aussi quand la fenêtre perd le focus.
-- **Pouvoirs du game master à clé (06/11)** — quand le détenteur de la clé admin (`member.gm`) est connecté, lui SEUL peut
-  arrêter une partie en cours (croix ✕ = `abort` ; les autres reçoivent `denied` `why: 'gm'`, « Seul le game master peut
-  arrêter la partie ») ; sans lui, rien ne change. Boîte Admin des Réglages → liste « 👢 Exclure » (`renderKick`, rafraîchie
-  chaque seconde quand le panneau est ouvert) : joueurs de la salle (sauf soi) et bots de la manche.
-  · `kick { id }` (hub) : l'exclu reçoit `{ t: 'exclu', min }`, est coupé SANS délai de grâce (`member.exclu` : son siège part
-    tout de suite, comme un abandon), les autres une note ; ses reconnexions (même jeton → même identité) sont refusées
-    10 min (`exclus`, `EXCLU_MS`). Côté client : `coupure = 'exclu'`, pas de reconnexion automatique.
-  · `kickbot { seat }` (hub → `game.onKick(seat)`, présent dans les 9 jeux) : le bot sort de la manche comme un joueur qui
-    part (mêmes règles de fin de manche que `onLeave`) et `botCount` baisse d'un (un bot de moins ensuite).
+- **Pouvoirs du game master à clé (06/11)** — tout passe par le panneau **« 👑 Game master »** (`#gmPanel`), ouvert par le bouton
+  `#gmBtn` de la rangée du bas de l'accueil ou par le bouton flottant `#gmFloat` quand le jeu est en PAUSE ; les deux ne
+  s'affichent qu'avec la clé admin (`body.gmcle`). Il regroupe la liste des joueurs, les règles de pause et le mode triche.
+  · **Croix ✕** (`abort`) : quand le détenteur de la clé (`member.gm`) est connecté, lui seul arrête une partie en cours (les
+    autres : `denied` `why: 'gm'`) ; sans lui, rien ne change.
+  · **Joueurs** (`renderKick`, rafraîchie chaque seconde quand le panneau est ouvert) : chaque humain (sauf soi) a
+    « 👢 Expulser » et « ⛔ 1 min / 10 min / 1 h » ; chaque bot de la manche « 🤖 Retirer ». `kick { id, ban }` (hub, `ban` ∈
+    `BANS` = 0, 60, 600, 3600 s) : la personne reçoit `{ t: 'exclu', min }`, est coupée SANS délai de grâce (`member.exclu` :
+    son siège part tout de suite) et les autres reçoivent une note. Expulsée (0) : elle peut revenir tout de suite ;
+    bannie : ses reconnexions (même jeton → même identité) sont refusées jusqu'à la fin (`exclus`). Client : `coupure =
+    'exclu'`, pas de reconnexion automatique (« touche ici pour revenir / réessayer »). `kickbot { seat }` → `game.onKick`
+    (9 jeux) : le bot sort de la manche comme un joueur qui part, et `botCount` baisse d'un.
+  · **Pause** (`gererPause` du hub : le message `pause` des jeux n'arrive plus directement au jeu) : un joueur met en pause
+    UNE fois par manche (`pausesFaites`, vidé au lancement de chaque manche ; sinon `denied` `why: 'pause1'`) et ne reprend que
+    SA pause (`pauseDe` ; sinon `why: 'reprise'`) ; le game master met en pause sans limite et reprend n'importe quelle pause.
+    Filets anti-blocage : auteur parti et pas de game master, ou pause de plus de 2 min (`PAUSE_MAX_MS`) → tout joueur peut
+    reprendre. **Reprise en 3, 2, 1** : le hub diffuse `{ t: 'reprise', n }` chaque seconde (grand chiffre `#repriseOverlay`),
+    le jeu reste en pause pendant le décompte puis repart (`game.onMessage(SYS, { t: 'pause' })`) ; décompte annulé si la
+    partie n'est plus en pause (abandon, fin, changement de jeu).
 - **Équipes** FFA/2v2/2v2v2/3v3 (2v2 à 4 joueurs ; 2v2v2 & 3v3 à 6). Couleur d'équipe (palette Okabe-Ito en daltonien).
 - **Tir allié** (Tank & Bomberman, bouton 🤝, actif seulement en équipes, **OFF par défaut**) : ON = les obus/mines/explosions
   touchent les coéquipiers. La **bombe/obus propre** blesse toujours son auteur ; en ON un kill d'allié est crédité.
 - **Leaderboard par jeu** (`leaderboard.json` = `{gameId:{board,history}}`) : par pseudo ; victoires, kills, K/D, survie max, etc.
   Diffusé sur `dirty`. Pages `/stats?game=<id>` & `/leaderboard.json?game=<id>`.
-- **Reset admin des classements** (réservé au détenteur d'une clé secrète) : env serveur **`ADMIN_KEY`** ; le hub n'honore `{t:'adminreset',key}` que si `key === process.env.ADMIN_KEY` → `reset()` sur **tous** les jeux (le `step()` rediffuse les classements vides à tous, le **global** se recalcule). Côté client : ouvrir une fois l'URL **`?admin=<clé>`** mémorise la clé en `localStorage` (`pong-lan-admin`) et révèle un bouton **🗑 Réinitialiser** dans ⚙️ Réglages → 🔑 Admin (invisible pour les autres). Si `ADMIN_KEY` n'est pas défini côté serveur, la commande est ignorée.
+- **Reset admin des classements** (réservé au détenteur d'une clé secrète) : env serveur **`ADMIN_KEY`** ; le hub n'honore `{t:'adminreset',key}` que si `key === process.env.ADMIN_KEY` → `reset()` sur **tous** les jeux (le `step()` rediffuse les classements vides à tous, le **global** se recalcule). Côté client : ouvrir une fois l'URL **`?admin=<clé>`** mémorise la clé en `localStorage` (`pong-lan-admin`) et révèle un bouton **🗑 Réinitialiser** dans ⚙️ Réglages → 🔑 Admin (invisible pour les autres), et le bouton **👑 Game master** (voir « Pouvoirs du game master »). Si `ADMIN_KEY` n'est pas défini côté serveur, la commande est ignorée.
 - **Reconnexion** par token : **période de grâce de 12 s** côté hub (le siège et l'état du jeu sont conservés à la coupure ;
   un F5 réutilise le même membre). Au-delà, élimination via `onLeave`. Chaque jeu garde aussi `seatByMid` (reprise après grâce).
 - **Quitter en cours** : bouton flottant ✕ → `abort` → `backToLobby()` (retour lobby sans perdre les sièges).

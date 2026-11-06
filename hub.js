@@ -95,7 +95,14 @@ const GM_ONLY = new Set(['mode', 'preset', 'opt', 'bots', 'botdiff', 'arena', 'w
 // …et parmi eux, ceux qui touchent à la mémoire DURABLE du site : réservés au détenteur de la clé admin, jamais à
 // l'hôte de repli (le premier arrivant, quand l'admin est absent, pouvait effacer le classement de Pong).
 const ADMIN_ONLY = new Set(['lbreset']);
-const EXCLU_MS = 10 * 60 * 1000, exclus = new Map();   // joueurs exclus par le game master : identité → fin de l'exclusion (ms)
+const exclus = new Map();                               // joueurs BANNIS par le game master : identité → fin du bannissement (ms)
+const BANS = [0, 60, 600, 3600];                         // 0 = expulser (peut revenir tout de suite) ; sinon bannir 1 min / 10 min / 1 h
+// PAUSE (06/11) : un joueur met en pause UNE fois par manche et ne reprend que SA pause ; le game master (clé) met en pause
+// sans limite et reprend n'importe quelle pause. Filets : auteur parti (et pas de game master) ou pause de plus de 2 min →
+// tout joueur peut reprendre. Reprise = décompte 3, 2, 1 diffusé ({ t: 'reprise', n }), puis le jeu repart.
+const PAUSE_MAX_MS = 2 * 60 * 1000;
+let gsCour = null, pauseDe = null, pauseT = 0, reprise = null;
+const pausesFaites = new Set();                          // identités qui ont déjà mis en pause pendant la manche en cours
 // Messages que seul le hub pousse aux jeux (pseudo-membre SYS) : refusés s'ils viennent d'un client
 // (un spectateur pouvait activer en douce le défi du jour de Tanks/Bomberman).
 const SYS_ONLY = new Set(['daily']);
@@ -220,6 +227,30 @@ function incident(ou, e) {
 // le processus. (Un joueur « constructor » qui quittait en pleine manche tuait le serveur 12 s plus tard.)
 function garde(ou, fn) { try { return fn(); } catch (e) { incident(ou, e); return undefined; } }
 
+function gererPause(member) {
+  if (gsCour === 'play') {                                   // mettre en pause
+    if (reprise) return;
+    if (!member.gm && pausesFaites.has(member.ident.id)) { room.send(member, { t: 'denied', why: 'pause1' }); return; }
+    if (!member.gm) pausesFaites.add(member.ident.id);
+    pauseDe = member.id; pauseT = Date.now();
+    garde('pause', () => game.onMessage(member, { t: 'pause' }));
+    room.broadcast({ t: 'note', m: '⏸ Pause de ' + (member.name || 'un joueur') });
+  } else if (gsCour === 'paused') {                          // reprendre : décompte 3, 2, 1, puis le jeu repart
+    if (reprise) return;
+    const auteurLa = members.some(x => x.id === pauseDe), gmLa = members.some(x => x.gm);
+    if (!(member.gm || member.id === pauseDe || (!auteurLa && !gmLa) || Date.now() - pauseT > PAUSE_MAX_MS)) { room.send(member, { t: 'denied', why: 'reprise' }); return; }
+    let n = 3;
+    room.broadcast({ t: 'reprise', n });
+    reprise = setInterval(() => {
+      if (gsCour !== 'paused') { clearInterval(reprise); reprise = null; room.broadcast({ t: 'reprise', n: 0 }); return; }   // abandon, fin, changement de jeu
+      if (--n > 0) { room.broadcast({ t: 'reprise', n }); return; }
+      clearInterval(reprise); reprise = null; pauseDe = null;
+      room.broadcast({ t: 'reprise', n: 0 });
+      if (game) garde('reprise', () => game.onMessage(SYS, { t: 'pause' }));
+    }, 1000);
+  }
+}
+
 function step() {
   if (members.length === 0) return;                 // personne connecté : rien à simuler/diffuser
   const gid0 = activeId;
@@ -227,6 +258,8 @@ function step() {
   try { ensureGame(); snap = game.tick(); } catch (e) { incident('tick', e); return; }   // création comprise
   const idleNow = game.isIdle();
   if (wasIdle && !idleNow) { let ch = false; for (const m of members) if (m.ready) { m.ready = false; ch = true; } if (ch) broadcastRoom(); } // manche lancée : on réarme les « Prêt »
+  if (wasIdle && !idleNow) pausesFaites.clear();      // nouvelle manche : chacun retrouve sa pause
+  gsCour = snap ? snap.gs : null;
   const finDeManche = !wasIdle && idleNow;
   if (finDeManche && snap && snap.gs === 'over') finT = Date.now();   // garde de 2 s : vraie fin de manche seulement (pas un abandon)
   if (tour && finDeManche && snap && snap.gs === 'over') {                         // manche de tournoi terminée : points selon le classement (bots exclus)
@@ -399,6 +432,7 @@ function wire(member) {                          // (re)branche les handlers d'u
       if (GM_ONLY.has(t) && member.id !== hostId()) { room.send(member, { t: 'denied' }); return; } // réglages : game master seulement
       if (PLAYER_ONLY.has(t) && member.role === 'spectator') { room.send(member, { t: 'denied', why: 'spec' }); return; } // lancer/pause/abandon : joueurs seulement
       if (t === 'abort' && !member.gm && members.some(x => x.gm)) { room.send(member, { t: 'denied', why: 'gm' }); return; } // croix « arrêter la partie » : le game master (clé) seul, quand il est connecté (06/11)
+      if (t === 'pause') { gererPause(member); return; }                                  // règles de pause et reprise en 3-2-1 (ci-dessous)
       if (t === 'start' && tour && tour.wait > 0) return;                                  // transition de tournoi : pas de relance de l'ancien jeu
       if (t === 'start' && game.isIdle() && Date.now() - finT < GARDE_FIN) return;          // 2 s après une fin de manche : Espace encore tenu (tir, bombe), pas un « Rejouer »
       if (t === 'start' && game.isIdle() && !allReady()) {                                 // gate « Prêt » : démarrage seulement si tous les joueurs sont prêts
@@ -434,18 +468,18 @@ function wire(member) {                          // (re)branche les handlers d'u
       if (tour && tour.wait > 0) return;             // transition de tournoi : l'ancien jeu ne repart pas
       if (member.id === hostId()) { garde('création du jeu', ensureGame); if (game && game.isIdle()) { asseoirSpectateurs(); garde('départ forcé', () => game.onMessage(member, { t: 'start' })); } } // l'hôte force le départ malgré des joueurs pas prêts
     } else if (m.t === 'kick') {
-      // EXCLURE un joueur (06/11, « au cas où quelqu'un bloque la partie ») : clé admin seulement. Il est prévenu, coupé
-      // SANS délai de grâce (son siège part tout de suite, comme un abandon) et ses reconnexions sont refusées 10 min.
+      // EXPULSER (ban 0 : coupé, peut revenir tout de suite) ou BANNIR (ban = 60 / 600 / 3600 s : reconnexions refusées
+      // jusque-là) un joueur — clé admin seulement. Dans les deux cas il est prévenu et coupé SANS délai de grâce (son siège
+      // part tout de suite, comme un abandon).
       if (!member.gm) { room.send(member, { t: 'denied' }); return; }
-      const cible = members.find(x => x.id === m.id);
+      const cible = members.find(x => x.id === m.id), ban = BANS.includes(m.ban) ? m.ban : 0;
       if (!cible || cible === member || cible.gm) return;
-      const fin = Date.now() + EXCLU_MS;
       for (const [k, v] of exclus) if (v < Date.now()) exclus.delete(k);
-      exclus.set(cible.ident.id, fin);
+      if (ban) exclus.set(cible.ident.id, Date.now() + ban * 1000);
       cible.exclu = true;
-      room.send(cible, { t: 'exclu', min: Math.round(EXCLU_MS / 60000) });
+      room.send(cible, { t: 'exclu', min: ban / 60 });
       setTimeout(() => { try { cible.conn.socket.end(); } catch {} }, 200).unref();
-      room.broadcast({ t: 'note', m: '👢 ' + (cible.name || 'Un joueur') + ' a été exclu par le game master' });
+      room.broadcast({ t: 'note', m: ban ? '⛔ ' + (cible.name || 'Un joueur') + ' est banni ' + (ban >= 3600 ? '1 h' : ban / 60 + ' min') + ' par le game master' : '👢 ' + (cible.name || 'Un joueur') + ' a été expulsé par le game master' });
     } else if (m.t === 'kickbot') {
       if (!member.gm) { room.send(member, { t: 'denied' }); return; }
       garde('création du jeu', ensureGame);
