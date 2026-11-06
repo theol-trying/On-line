@@ -839,7 +839,15 @@ export function createPong(room) {
   }
 
   fullReset();
-  return { onJoin, onLeave, onRename, onMessage, tick: tick_, isIdle: editable };
+  function onKick(seat) {                              // le game master (clé admin) exclut un BOT : sortie comme un départ, un bot de moins ensuite
+    const p = Number.isInteger(seat) ? players[seat] : null; if (!p || !p.bot) return;
+    if (botCount > 0) botCount--;
+    if (!p.playing || !(gameState === 'play' || gameState === 'countdown' || gameState === 'paused')) return;
+    p.playing = false; if (p.edge >= 0 && geo) geo.edges[p.edge].owner = -1; p.edge = -1;
+    if (gameState !== 'countdown') checkWin();
+  }
+
+  return { onJoin, onLeave, onRename, onMessage, onKick, tick: tick_, isIdle: editable };
 }
 
 export default { meta: { id: GID, name: 'Pong', min: 2, max: 10, tickHz: TICK_HZ, desc: '2 à 10 joueurs · terrain adaptatif · équipes · power-ups' }, create: createPong };

@@ -477,7 +477,15 @@ export function createSumo(room) {
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }
 
   fullReset();
-  return { onJoin, onLeave, onRename, onMessage, tick: tick_, isIdle: editable };
+  function onKick(seat) {                              // le game master (clé admin) exclut un BOT : sortie comme un départ, un bot de moins ensuite
+    const p = Number.isInteger(seat) ? players[seat] : null; if (!p || !p.bot) return;
+    if (botCount > 0) botCount--;
+    if (!p.playing || !(gameState === 'play' || gameState === 'countdown' || gameState === 'paused')) return;
+    if (p.alive) eliminate(p);
+    if (gameState === 'play' && aliveTeams().size <= 1) endRound();
+  }
+
+  return { onJoin, onLeave, onRename, onMessage, onKick, tick: tick_, isIdle: editable };
 }
 
 export default { meta: { id: GID, name: 'Sumo', min: 2, max: 10, tickHz: TICK_HZ, desc: 'Dohyō — poussez les autres hors du cercle : charge, ancrage, bonus, cercle qui se resserre' }, create: createSumo };

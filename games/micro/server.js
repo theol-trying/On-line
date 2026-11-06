@@ -1033,7 +1033,15 @@ export function createMicro(room) {
   function tick_() { clk++; for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }
 
   fullReset();
-  return { onJoin, onLeave, onRename, onMessage, tick: tick_, isIdle: editable };
+  function onKick(seat) {                              // le game master (clé admin) exclut un BOT : sortie comme un départ, un bot de moins ensuite
+    const p = Number.isInteger(seat) ? players[seat] : null; if (!p || !p.bot) return;
+    if (botCount > 0) botCount--;
+    if (!p.playing || !(gameState === 'play' || gameState === 'countdown' || gameState === 'paused')) return;
+    if (p.alive) { p.rs = progress(p); p.alive = false; p.elimTick = tick; pend.push({ type: 'quit', seat: p.seat }); }
+    if (gameState === 'play' && aliveTeams().size <= 1 && nParts >= 2) endRound();
+  }
+
+  return { onJoin, onLeave, onRename, onMessage, onKick, tick: tick_, isIdle: editable };
 }
 
 export default { meta: { id: GID, name: 'Micro Machines', min: 1, max: 10, tickHz: TICK_HZ, desc: 'Course de voitures-jouets vue de dessus sur des tables et des circuits miniatures — bousculades, chutes, élimination' }, create: createMicro };

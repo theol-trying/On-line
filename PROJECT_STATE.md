@@ -538,6 +538,15 @@ en QWERTY, et W A S D reste valable. Textes d'aide mis à jour (« Z Q S D (W A 
   limite d'obus en vol (plafond 40) · Pong = bouclier tant qu'Espace est tenu (`tr` ; pas de bouton tactile) · Bomberman =
   bombes sans limite (une par case ; revanche comprise) · Patate = sprint sans fatigue · rien pour Tron et Snake.
   Le message `tr` est ouvert à tous mais sans effet sans `member.triche` ; relâché aussi quand la fenêtre perd le focus.
+- **Pouvoirs du game master à clé (06/11)** — quand le détenteur de la clé admin (`member.gm`) est connecté, lui SEUL peut
+  arrêter une partie en cours (croix ✕ = `abort` ; les autres reçoivent `denied` `why: 'gm'`, « Seul le game master peut
+  arrêter la partie ») ; sans lui, rien ne change. Boîte Admin des Réglages → liste « 👢 Exclure » (`renderKick`, rafraîchie
+  chaque seconde quand le panneau est ouvert) : joueurs de la salle (sauf soi) et bots de la manche.
+  · `kick { id }` (hub) : l'exclu reçoit `{ t: 'exclu', min }`, est coupé SANS délai de grâce (`member.exclu` : son siège part
+    tout de suite, comme un abandon), les autres une note ; ses reconnexions (même jeton → même identité) sont refusées
+    10 min (`exclus`, `EXCLU_MS`). Côté client : `coupure = 'exclu'`, pas de reconnexion automatique.
+  · `kickbot { seat }` (hub → `game.onKick(seat)`, présent dans les 9 jeux) : le bot sort de la manche comme un joueur qui
+    part (mêmes règles de fin de manche que `onLeave`) et `botCount` baisse d'un (un bot de moins ensuite).
 - **Équipes** FFA/2v2/2v2v2/3v3 (2v2 à 4 joueurs ; 2v2v2 & 3v3 à 6). Couleur d'équipe (palette Okabe-Ito en daltonien).
 - **Tir allié** (Tank & Bomberman, bouton 🤝, actif seulement en équipes, **OFF par défaut**) : ON = les obus/mines/explosions
   touchent les coéquipiers. La **bombe/obus propre** blesse toujours son auteur ; en ON un kill d'allié est crédité.

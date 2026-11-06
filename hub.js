@@ -95,6 +95,7 @@ const GM_ONLY = new Set(['mode', 'preset', 'opt', 'bots', 'botdiff', 'arena', 'w
 // …et parmi eux, ceux qui touchent à la mémoire DURABLE du site : réservés au détenteur de la clé admin, jamais à
 // l'hôte de repli (le premier arrivant, quand l'admin est absent, pouvait effacer le classement de Pong).
 const ADMIN_ONLY = new Set(['lbreset']);
+const EXCLU_MS = 10 * 60 * 1000, exclus = new Map();   // joueurs exclus par le game master : identité → fin de l'exclusion (ms)
 // Messages que seul le hub pousse aux jeux (pseudo-membre SYS) : refusés s'ils viennent d'un client
 // (un spectateur pouvait activer en douce le défi du jour de Tanks/Bomberman).
 const SYS_ONLY = new Set(['daily']);
@@ -397,6 +398,7 @@ function wire(member) {                          // (re)branche les handlers d'u
       if (ADMIN_ONLY.has(t) && !member.gm) { room.send(member, { t: 'denied' }); return; } // mémoire durable : clé admin seulement
       if (GM_ONLY.has(t) && member.id !== hostId()) { room.send(member, { t: 'denied' }); return; } // réglages : game master seulement
       if (PLAYER_ONLY.has(t) && member.role === 'spectator') { room.send(member, { t: 'denied', why: 'spec' }); return; } // lancer/pause/abandon : joueurs seulement
+      if (t === 'abort' && !member.gm && members.some(x => x.gm)) { room.send(member, { t: 'denied', why: 'gm' }); return; } // croix « arrêter la partie » : le game master (clé) seul, quand il est connecté (06/11)
       if (t === 'start' && tour && tour.wait > 0) return;                                  // transition de tournoi : pas de relance de l'ancien jeu
       if (t === 'start' && game.isIdle() && Date.now() - finT < GARDE_FIN) return;          // 2 s après une fin de manche : Espace encore tenu (tir, bombe), pas un « Rejouer »
       if (t === 'start' && game.isIdle() && !allReady()) {                                 // gate « Prêt » : démarrage seulement si tous les joueurs sont prêts
@@ -431,6 +433,23 @@ function wire(member) {                          // (re)branche les handlers d'u
     } else if (m.t === 'forcestart') {
       if (tour && tour.wait > 0) return;             // transition de tournoi : l'ancien jeu ne repart pas
       if (member.id === hostId()) { garde('création du jeu', ensureGame); if (game && game.isIdle()) { asseoirSpectateurs(); garde('départ forcé', () => game.onMessage(member, { t: 'start' })); } } // l'hôte force le départ malgré des joueurs pas prêts
+    } else if (m.t === 'kick') {
+      // EXCLURE un joueur (06/11, « au cas où quelqu'un bloque la partie ») : clé admin seulement. Il est prévenu, coupé
+      // SANS délai de grâce (son siège part tout de suite, comme un abandon) et ses reconnexions sont refusées 10 min.
+      if (!member.gm) { room.send(member, { t: 'denied' }); return; }
+      const cible = members.find(x => x.id === m.id);
+      if (!cible || cible === member || cible.gm) return;
+      const fin = Date.now() + EXCLU_MS;
+      for (const [k, v] of exclus) if (v < Date.now()) exclus.delete(k);
+      exclus.set(cible.ident.id, fin);
+      cible.exclu = true;
+      room.send(cible, { t: 'exclu', min: Math.round(EXCLU_MS / 60000) });
+      setTimeout(() => { try { cible.conn.socket.end(); } catch {} }, 200).unref();
+      room.broadcast({ t: 'note', m: '👢 ' + (cible.name || 'Un joueur') + ' a été exclu par le game master' });
+    } else if (m.t === 'kickbot') {
+      if (!member.gm) { room.send(member, { t: 'denied' }); return; }
+      garde('création du jeu', ensureGame);
+      if (game && game.onKick && Number.isInteger(m.seat)) garde('exclusion', () => game.onKick(m.seat));
     } else if (m.t === 'triche') {
       // MODE TRICHE (05/11) : réservé au détenteur de la clé admin (member.gm, jamais l'hôte de repli). Les jeux lisent
       // member.triche (Micro : turbo tant qu'Espace est tenu, Sumo : charges sans recharge, Tanks : tir sans délai ni limite,
@@ -468,7 +487,7 @@ function wire(member) {                          // (re)branche les handlers d'u
   member.conn.onClose(() => {
     members = members.filter(x => x !== member);
     if (members.length === 0) tour = null;             // salle vide : le tournoi tombe
-    if (game && member.role === 'player' && !game.isIdle()) {
+    if (game && member.role === 'player' && !game.isIdle() && !member.exclu) {
       // partie en cours : on garde le siège quelques secondes pour une reprise (F5) au lieu d'éliminer tout de suite
       const tok = member.token;
       const avant = pendingLeaves.get(tok);
@@ -504,6 +523,13 @@ function accueillir(member, conn) {
 
 function onConnection(conn, token) {
   if (typeof token !== 'string' || !token || token.length > 64) token = null;
+  // 0. Joueur exclu par le game master : refusé jusqu'à la fin de son exclusion (prévenu, pas de reconnexion en boucle).
+  const idExclu = token && identities.get(token), finExclu = idExclu ? exclus.get(idExclu.id) || 0 : 0;
+  if (finExclu > Date.now()) {
+    conn.send(JSON.stringify({ t: 'exclu', min: Math.max(1, Math.ceil((finExclu - Date.now()) / 60000)) }));
+    setTimeout(() => { try { conn.socket.end(); } catch {} }, 200).unref();
+    return;
+  }
   // 1. Reprise dans le délai de grâce : on réutilise le membre existant (même siège, état du jeu conservé).
   const pend = token && pendingLeaves.get(token);
   if (pend) {

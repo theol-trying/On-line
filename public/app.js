@@ -210,6 +210,16 @@ let adminKey = '';                       // clé admin = marqueur « game master
     tricheBox.checked = lireLS('pong-lan-triche', '') === '1';
     tricheBox.onchange = () => { ecrireLS('pong-lan-triche', tricheBox.checked ? '1' : '0'); send({ t: 'triche', on: tricheBox.checked }); };
   }
+  const kickList = document.getElementById('kickList');
+  if (kickList) {
+    kickList.onclick = e => {
+      const b = e.target.closest ? e.target.closest('button[data-k]') : null; if (!b) return;
+      const nom = b.getAttribute('data-n') || '';
+      if (b.getAttribute('data-k') === 'j') { if (confirm('Exclure ' + nom + ' pour 10 minutes ?')) send({ t: 'kick', id: b.getAttribute('data-id') }); }
+      else send({ t: 'kickbot', seat: +b.getAttribute('data-seat') });
+    };
+    setInterval(renderKick, 1000);                      // rafraîchie seulement quand le panneau est ouvert (renderKick vérifie)
+  }
   if (adminResetBtn) adminResetBtn.onclick = () => {
     if (!adminKey || !confirm('Réinitialiser TOUS les classements (chaque jeu + classement global) ? Action irréversible.')) return;
     send({ t: 'adminreset', key: adminKey });
@@ -217,6 +227,19 @@ let adminKey = '';                       // clé admin = marqueur « game master
     note('🗑 Classements réinitialisés');
   };
 })();
+
+// Liste « 👢 Exclure » (boîte Admin, clé seulement) : humains de la salle (sauf soi) et bots de la manche en cours.
+function renderKick() {
+  const el = document.getElementById('kickList');
+  if (!el || !adminKey || !el.offsetParent) return;
+  const st = stateCache[activeId], bots = st && Array.isArray(st.players) ? st.players.filter(p => p && p.bot && p.playing && p.alive !== false) : [];
+  const humains = roomPlayers.filter(p => p.id !== you.id);
+  const bouton = attrs => '<button class="ghostbtn" style="margin:0 0 0 8px;width:auto;padding:4px 10px" ' + attrs + '>Exclure</button>';
+  const rows = humains.map(p => '<div class="srow"><span>' + esc(p.name || 'Sans pseudo') + (p.role === 'spectator' ? ' 👁' : '') + '</span>' + bouton('data-k="j" data-id="' + esc(p.id) + '" data-n="' + esc(p.name || 'ce joueur') + '"') + '</div>')
+    .concat(bots.map(p => '<div class="srow"><span>' + esc(p.name || ('Bot ' + (p.seat + 1))) + '</span>' + bouton('data-k="b" data-seat="' + (p.seat | 0) + '"') + '</div>'));
+  const html = rows.length ? rows.join('') : '<div class="note">Personne à exclure.</div>';
+  if (el._h !== html) { el._h = html; el.innerHTML = html; }
+}
 
 /* ---------- ping ---------- */
 const pingTxt = document.getElementById('pingTxt');
@@ -635,7 +658,7 @@ document.addEventListener('visibilitychange', () => {
   if (enVeille) { enVeille = false; connect(); }
 });
 
-let coupure = '';                                            // raison d'une fermeture annoncée par le hub ('remplace' | 'plein')
+let coupure = '', exclusMin = 0;                                            // raison d'une fermeture annoncée par le hub ('remplace' | 'plein')
 function connect() {
   setStatus('Connexion…', '');
   const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';   // wss en ligne (HTTPS Render), ws en LAN local
@@ -677,7 +700,7 @@ function connect() {
       else if (m.on) { const was = tourState && tourState.on; tourState = m; renderTour(); if (!was) note('🏆 Tournoi lancé — que le meilleur gagne !'); }
       else { if (tourState) note('🏆 Tournoi annulé'); tourState = null; renderTour(); }
     } else if (m.t === 'denied') {
-      if (!window.__lastDN || performance.now() - window.__lastDN > 1500) { window.__lastDN = performance.now(); note(m.why === 'spec' ? '👁 Réservé aux joueurs — tu es spectateur' : '👑 Réservé au game master'); }
+      if (!window.__lastDN || performance.now() - window.__lastDN > 1500) { window.__lastDN = performance.now(); note(m.why === 'spec' ? '👁 Réservé aux joueurs — tu es spectateur' : m.why === 'gm' ? '👑 Seul le game master peut arrêter la partie' : '👑 Réservé au game master'); }
     } else if (m.t === 'gm') {
       // Réponse du hub à la clé admin. Avant, un échec ne disait rien : on croyait à un bug du site.
       if (m.ok) note('👑 Game master activé');
@@ -710,6 +733,8 @@ function connect() {
       coupure = 'remplace';                                  // ce joueur a été repris par un autre onglet : ne pas se reconnecter (sinon ping-pong)
     } else if (m.t === 'plein') {
       coupure = 'plein';
+    } else if (m.t === 'exclu') {
+      coupure = 'exclu'; exclusMin = m.min | 0;              // exclu par le game master : pas de reconnexion automatique
     } else if (m.t === 'state') {
       // Le hub omet les clés inchangées depuis la diffusion précédente : on les reprend de l'état
       // précédent de CE jeu. Nouvel objet à chaque fois — les instantanés déjà empilés dans le
@@ -748,6 +773,11 @@ function connect() {
       return;
     }
     if (coupure === 'plein') { coupure = ''; setStatus('Salle pleine — nouvel essai dans 30 s', 'off'); setTimeout(connect, 30000); return; }
+    if (coupure === 'exclu') {                               // exclu : on ne revient que sur demande, une fois l'exclusion finie
+      setStatus('Exclu par le game master' + (exclusMin ? ' pour ' + exclusMin + ' min' : '') + ' — touche ici pour réessayer', 'off');
+      msgTxt.onclick = () => { msgTxt.onclick = null; coupure = ''; connect(); };
+      return;
+    }
     if (enVeille) { setStatus('En veille — revenez sur l\'onglet pour reprendre', 'off'); return; }   // coupure voulue : pas de reconnexion
     setStatus('Déconnecté — reconnexion…', 'off'); setTimeout(connect, 1000);
   };

@@ -383,7 +383,15 @@ export function createSnake(room) {
   function tick_() { for (const p of players) if (p.member) p.name = p.member.name || p.name || ''; update(); return snapshot(); }
 
   fullReset();
-  return { onJoin, onLeave, onRename, onMessage, tick: tick_, isIdle: editable };
+  function onKick(seat) {                              // le game master (clé admin) exclut un BOT : sortie comme un départ, un bot de moins ensuite
+    const p = Number.isInteger(seat) ? players[seat] : null; if (!p || !p.bot) return;
+    if (botCount > 0) botCount--;
+    if (!p.playing || !(gameState === 'play' || gameState === 'countdown' || gameState === 'paused')) return;
+    if (p.alive) { p.alive = false; p.elimTick = tick; p.place = nParts - deaths; deaths++; }
+    if (gameState === 'play' && (nParts >= 2 ? aliveTeams().size <= 1 : aliveCount() === 0)) endRound(rush ? bestScoreTeam() : undefined);
+  }
+
+  return { onJoin, onLeave, onRename, onMessage, onKick, tick: tick_, isIdle: editable };
 }
 
 export default { meta: { id: GID, name: 'Snake', min: 1, max: 10, tickHz: TICK_HZ, desc: 'Serpents multijoueur — mange, grandis, évite murs et serpents ; dernier en vie gagne' }, create: createSnake };
