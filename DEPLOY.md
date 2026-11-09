@@ -1,14 +1,30 @@
 # Déployer la plateforme en ligne (Render — gratuit)
 
-> ⚠️ **Dossier unique** : ce dépôt est désormais la **seule source de vérité** (fusion des anciens `pong-lan` + `pong-line`).
-> Il contient tous les jeux (Pong, Tron, Tanks, Bomberman, **Snake**), les skins, et l'adaptation en ligne (Upstash + `wss://`).
+> ℹ️ **Le site est déjà en ligne** (https://on-line.onrender.com) et se met à jour tout seul : voir
+> « Mise en ligne au quotidien » juste ci-dessous. Le reste de ce document sert à **refaire l'installation de zéro**
+> (nouveau compte Render, nouvelle base Upstash). Revu le 10/11/2026.
+
+## Mise en ligne au quotidien (depuis le 28/10/2026)
+
+Un `git push` sur `main` lance `.github/workflows/deploy.yml` : GitHub exécute `npm test` (9 jeux, fins de manche, sons,
+12 circuits), puis appelle le **Deploy Hook** de Render. Des tests en échec = pas de mise en ligne.
+
+- Secret GitHub **`RENDER_DEPLOY_HOOK`** (dépôt → Settings → Secrets and variables → Actions) = l'URL copiée dans Render →
+  Settings → Deploy Hook.
+- Render → Settings → Build & Deploy → **Auto-Deploy : Off** (sinon double déploiement, sans attendre les tests).
+- Suivi : onglet **Actions** du dépôt, puis le site lui-même (le plan gratuit met ~1 min à redémarrer).
+- Variable facultative **`ADMIN_KEY`** (Render → Environment) : la clé du game master. Ouvrir une fois le site avec
+  `?admin=<clé>` l'enregistre sur l'appareil et fait apparaître le bouton « 👑 Game master » et la boîte Admin des Réglages.
+
+> ⚠️ **Dossier unique** : ce dépôt est la **seule source de vérité** (fusion des anciens `pong-lan` + `pong-line`).
+> Il contient les 9 jeux, les skins, et l'adaptation en ligne (Upstash + `wss://`).
 > Ne garde qu'**un seul dossier** pour éviter les divergences.
 
 ## Adaptation « en ligne » déjà intégrée
 | Fichier | Changement | Pourquoi |
 |---------|-----------|----------|
 | `public/app.js` | `ws://` → `wss://` automatique selon le protocole | Render sert en HTTPS ; un client HTTPS ne peut pas ouvrir une socket `ws://` (bloqué par le navigateur) |
-| `package.json` | `"engines": { "node": ">=18" }` | force Node récent sur Render (`fetch` natif requis) |
+| `package.json` + `.node-version` | `"engines": { "node": ">=20 <27" }`, version exacte 24 | Node récent (`fetch` natif requis), jamais une version majeure non testée |
 | `leaderboard.js` | stockage Upstash Redis en option (sinon fichier local) | classement qui **survit** aux redémarrages sur Render gratuit |
 | `render.yaml` | présent | déploiement automatique ("Blueprint") |
 
@@ -24,7 +40,7 @@ Le serveur (`server.js`) utilise **déjà** `process.env.PORT` → aucun changem
    git add .
    git commit -m "Plateforme multijeux en ligne"
    # crée un repo vide sur github.com puis :
-   git remote add origin https://github.com/<ton-pseudo>/pong-line.git
+   git remote add origin https://github.com/<ton-pseudo>/On-line.git
    git push -u origin main
    ```
 

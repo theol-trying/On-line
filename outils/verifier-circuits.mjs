@@ -18,7 +18,13 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 for (const k of ['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'LEADERBOARD_KEY', 'AVATAR_KEY', 'ADMIN_KEY', 'LEADERBOARD_FILE']) delete process.env[k];
 const S = await import(pathToFileURL(join(ROOT, 'public', 'games', 'micro', 'shared.js')).href);
-const { CIRCUITS, circuitParId, mobile, TICK_HZ, CAR_W, proche } = S;
+const { circuitParId, mobile, TICK_HZ, CAR_W, proche } = S;
+const CIRCUITS = (await import(pathToFileURL(join(ROOT, 'public', 'games', 'micro', 'circuits', 'index.js')).href)).default;   // définitions complètes (enregistrées)
+// les FICHES (ce que le navigateur charge d'abord) doivent recopier les définitions, dans le même ordre
+{ const F = S.CIRCUITS, err = [];
+  if (F.length !== CIRCUITS.length) err.push(F.length + ' fiches pour ' + CIRCUITS.length + ' circuits');
+  CIRCUITS.forEach((d, i) => { const f = F[i] || {}; for (const k of ['id', 'nom', 'emoji', 'sous']) if (f[k] !== d[k]) err.push('fiche n° ' + (i + 1) + ' (' + d.id + ') : « ' + k + ' » diffère'); if ((f.v || 1) !== (d.v || 1)) err.push('fiche ' + d.id + ' : version ' + (f.v || 1) + ' ≠ ' + (d.v || 1)); });
+  if (err.length) { console.error('❌ circuits/fiches.js ne correspond pas aux circuits :\n   ' + err.join('\n   ')); process.exit(1); } }
 
 const args = process.argv.slice(2), geoSeul = args.includes('--geo'), ids = args.filter(a => !a.startsWith('--'));
 const liste = ids.length ? CIRCUITS.filter(d => ids.includes(d.id)) : CIRCUITS;

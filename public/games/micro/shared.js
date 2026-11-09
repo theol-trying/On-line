@@ -19,7 +19,7 @@
 //   surTable(c, x, y), dansTrou(c, x, y), zoneA(c, x, y) → zone ou null, grilleDepart(c, n) → [{ x, y, a }],
 //   mobile(m, t, out) → position / cap / vitesse (u par tick) d'un obstacle mobile au temps de course t (s), est BUMPERS[type].
 
-import LISTE_CIRCUITS from './circuits/index.js';
+import FICHES from './circuits/fiches.js';
 
 export const TICK_HZ = 30;
 export const CAR_L = 34, CAR_W = 18, CAR_R = 12;        // voiture-jouet (u) ; disque d'encombrement (murs : 2 disques côté serveur)
@@ -36,7 +36,12 @@ export const ZONE_GLISSE = { lait: 1, encre: 1, huile: 1 }, ZONE_FREIN = { sucre
 const TAU = Math.PI * 2;
 const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
 
-/* ---------- définitions des circuits (un fichier par circuit : ./circuits/<id>.js, liste dans ./circuits/index.js) ----------
+/* ---------- circuits : FICHES légères (./circuits/fiches.js) + DÉFINITIONS enregistrées à la demande ----------
+   CIRCUITS = les fiches { id, nom, emoji, sous, v }, dans l'ordre du bouton « Circuit » : de quoi nommer un circuit et ranger
+   ses records sans le charger. Une définition complète (./circuits/<id>.js) doit être ENREGISTRÉE (enregistrerCircuit) avant
+   circuitParId : le serveur, la galerie et les outils les enregistrent toutes en important ./circuits/index.js ; le navigateur
+   n'enregistre que le circuit joué (import() dans client.js) — 12 circuits = 660 Ko, une course n'en utilise qu'un (10/11).
+   Une définition :
    id, nom, emoji, sous (sous-titre), v (version du tracé : les records de tour sont rangés par id@v), w, h (monde, u),
    surf (sol / nappe : choisit le dessin générique), edge ('chute' : on tombe de la table | 'mur' : bandes), table { x0, y0,
    x1, y1, r }, W (demi-largeur de piste, u), croix (le tracé se croise volontairement).
@@ -51,8 +56,13 @@ const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
           sucre/gomme/craie/sciure freinent, 'boost' accélère).
    dessin : dessins propres au circuit (sol, plateau, piste, décor, obstacles, mobiles…) — voir ../rendu.js. Ni le
           serveur ni la physique ne les lisent. */
-export const CIRCUITS = LISTE_CIRCUITS;
-for (const d of CIRCUITS) {                         // obstacles qui renvoient et zones déclarés par chaque circuit
+export const CIRCUITS = FICHES;
+const DEFS = Object.create(null);                   // id → définition complète enregistrée
+export function ficheDe(id) { for (let i = 0; i < CIRCUITS.length; i++) if (CIRCUITS[i].id === id) return CIRCUITS[i]; return null; }
+export const circuitCharge = id => typeof id === 'string' && id in DEFS;
+export function enregistrerCircuit(d) {             // + les obstacles qui renvoient et les zones que ce circuit déclare
+  if (!d || typeof d.id !== 'string' || d.id in DEFS) return;
+  DEFS[d.id] = d;
   for (const t of d.bumpers || []) BUMPERS[t] = 1;
   const zp = d.zonesPhysiques || {};
   for (const k in zp) { if (zp[k] === 'glisse') ZONE_GLISSE[k] = 1; else if (zp[k] === 'frein') ZONE_FREIN[k] = 1; }
@@ -239,9 +249,9 @@ function construire(def, inverse) {
 
 const CACHE = {};
 export function circuitParId(id, inverse) {
-  let d = null;
-  for (let i = 0; i < CIRCUITS.length; i++) if (CIRCUITS[i].id === id) d = CIRCUITS[i];
-  if (!d) d = CIRCUITS[0];
+  let d = circuitCharge(id) ? DEFS[id] : null;
+  if (!d) for (const k in DEFS) { d = DEFS[k]; break; }   // inconnu ou pas encore chargé : le premier circuit enregistré
+  if (!d) throw new Error('aucun circuit enregistré (importer ./circuits/index.js ou enregistrerCircuit)');
   const key = d.id + (inverse ? '|inv' : '');
   return CACHE[key] || (CACHE[key] = construire(d, !!inverse));
 }

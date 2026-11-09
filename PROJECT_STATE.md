@@ -459,6 +459,22 @@ peu lisible, bonus/malus et terrains à effets sélectionnables au menu.
     vérification + galerie + une course en jeu (serveur local RELANCÉ : il garde la géométrie en mémoire), commit.
   - Le vérificateur ne demande plus que TOUS les bots passent la ligne : comme en jeu, ceux encore en course 12 s après le
     premier sont classés ; seul un bot pas encore dans le dernier tour (ou le plafond de temps) fait échouer.
+- **Optimisations du 10/11** — (1) **circuits à la demande** : ouvrir Micro téléchargeait les 12 circuits (660 Ko bruts, ~180 Ko
+  compressés, 13 requêtes) ; le navigateur ne charge plus que `circuits/fiches.js`, le Petit-déjeuner (lobby) et le circuit
+  joué, par `import()` (`demanderCircuit` de client.js ; id contrôlé contre les fiches ; nouvel essai après 2 s en cas
+  d'échec ; voile « Chargement du circuit… » si la course commence avant). `shared.js` : `CIRCUITS` = les fiches, registre
+  `enregistrerCircuit` / `circuitCharge` / `ficheDe`, `circuitParId` ne connaît que les définitions enregistrées ;
+  `circuits/index.js` les enregistre toutes (serveur, galerie, vérificateur, test de fumée). Le serveur annonce le prochain
+  circuit quand il le connaît (`nx` : premier du sac en « Hasard », course suivante d'un Grand Prix, circuit choisi) : les
+  clients le PRÉCHARGENT pendant le lobby et l'écran de fin. Le sac du hasard n'est donc plus jamais vide (`remplirSac`,
+  `dernier`). Mesuré : 2 circuits téléchargés au lieu de 12 à l'ouverture.
+  (2) **bots** : en travers de la piste, nez contre un rail après une glissade, un bot recule au bout de 0,4 s au lieu de
+  1,3 s (le décalage des tirages du test avait révélé un bot bloqué 8 s sur le Circuit-jouet).
+  (3) `/circuits.html?mesure=1` : temps de dessin du décor de chaque circuit à la résolution du jeu — à ouvrir sur le
+  téléphone. Sur PC : 160 à 320 ms au premier dessin, 60 à 130 ms ensuite (les « 4 à 25 ms » relevés jusque-là par la
+  galerie étaient faux : dessin différé, image réduite). Ce temps tombe au début du décompte de départ. iPhone : à mesurer.
+  (4) `DEPLOY.md` remis à jour (mise en ligne par GitHub Actions, `ADMIN_KEY`, Node 24) ; ⚠ `render.yaml` dit encore
+  `autoDeploy: true` alors que le service réel est réglé sur Off — laissé tel quel, à trancher avec l'utilisateur.
 - **8 nouveaux objets + lancer inversé (03/11)** — proposés puis choisis par l'utilisateur (tous retenus) ; objets 6 à 13 de
   `ITEMS` (serveur), `ITEM` (client), sons `objet6`…`objet13`, `plouf`, `boum`, `gel` :
   - 🎯 **Toupie chercheuse** (`toupies`, snapshot `tp`) : vole au-dessus de tout (24 u/tick, virage 0,16 rad/tick, 0,45 de près)

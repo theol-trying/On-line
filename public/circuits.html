@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<!-- GALERIE des circuits de Micro Machines : chaque circuit dessiné en entier avec le vrai rendu du jeu
+<!-- (?mesure=1 : temps de dessin de chaque décor à la résolution du jeu — à ouvrir sur le téléphone)
+     GALERIE des circuits de Micro Machines : chaque circuit dessiné en entier avec le vrai rendu du jeu
      (public/games/micro/rendu.js) et ses obstacles mobiles animés. Non liée depuis le site : elle sert à vérifier les
      décors et à choisir ses circuits. Données : public/games/micro/circuits/<id>.js. -->
 <html lang="fr">
@@ -21,6 +22,10 @@ h1{ font-size:20px; margin:0 0 4px; }
 .carte p{ margin:0 0 8px; color:var(--muted); }
 .carte canvas{ display:block; width:100%; height:auto; border-radius:8px; background:#000; }
 .chiffres{ font-size:12px; color:var(--muted); margin-top:6px; }
+table.mes{ border-collapse:collapse; width:100%; max-width:560px; font-size:14px; }
+table.mes td, table.mes th{ padding:6px 8px; border-bottom:1px solid var(--line); text-align:right; }
+table.mes td:first-child, table.mes th:first-child{ text-align:left; }
+table.mes .lent{ color:#ff8a7a; font-weight:700; }
 body.nu{ padding:0; } body.nu h1, body.nu .sous, body.nu .carte h2, body.nu .carte p, body.nu .chiffres{ display:none; }
 body.nu .carte{ padding:0; border:0; margin:0; border-radius:0; } body.nu .carte canvas{ border-radius:0; }
 </style>
@@ -31,11 +36,40 @@ body.nu .carte{ padding:0; border:0; margin:0; border-radius:0; } body.nu .carte
 <div id="liste"></div>
 <script type="module">
 import { CIRCUITS, circuitParId, mobile } from './games/micro/shared.js';
+import './games/micro/circuits/index.js';              // la galerie montre tout : elle enregistre les 12 définitions
 import { peindreCircuit, mobileDessin } from './games/micro/rendu.js';
 const liste = document.getElementById('liste'), vues = [];
 // ?id=jardin,noel : seulement ces circuits (dessinés plus grand) ; ?inv=1 : sens inverse
 const qs = new URLSearchParams(location.search), choix = (qs.get('id') || '').split(',').filter(Boolean), inv = qs.get('inv') === '1';
 if (qs.get('nu') === '1') document.body.className = 'nu';   // ?nu=1 : le dessin seul, sans titres (captures d'écran)
+// ?mesure=1 : pas de galerie, mais le TEMPS DE DESSIN du décor de chaque circuit à la résolution que le jeu utilise
+// (même calcul que ensureDecor de client.js : 1,15 px par u au plus, 8 M pixels au plus). À ouvrir sur le téléphone : c'est
+// l'attente au moment où un circuit apparaît. Deux passes par circuit (la première paie aussi la mise en route du moteur JS).
+if (qs.get('mesure') === '1') {
+  document.querySelector('.sous').textContent = 'Temps de dessin du décor de chaque circuit, à la résolution du jeu sur cet appareil. Au-delà de 300 ms, l\'arrivée sur le circuit se voit.';
+  const t = document.createElement('table'); t.className = 'mes';
+  t.innerHTML = '<tr><th>Circuit</th><th>Image</th><th>1er dessin</th><th>2e dessin</th></tr>';
+  liste.appendChild(t);
+  const note = document.createElement('p'); note.className = 'sous'; note.style.marginTop = '12px'; liste.appendChild(note);
+  const cv = document.createElement('canvas'); let k = 0, pire = 0, somme = 0;
+  const suivant = () => {
+    if (k >= CIRCUITS.length) { note.textContent = 'Total ' + Math.round(somme) + ' ms · le plus long : ' + Math.round(pire) + ' ms · ' + navigator.userAgent.replace(/^Mozilla\/5\.0 /, ''); cv.width = cv.height = 0; return; }
+    const d = CIRCUITS[k++], c = circuitParId(d.id, false);
+    const q = Math.round(Math.min(1.15, Math.sqrt(8e6 / (c.w * c.h))) * 20) / 20;
+    const temps = [];
+    for (let p = 0; p < 2; p++) {
+      cv.width = Math.round(c.w * q); cv.height = Math.round(c.h * q);
+      const g = cv.getContext('2d'); g.setTransform(q, 0, 0, q, 0, 0);
+      const t0 = performance.now(); peindreCircuit(g, c, {}); g.getImageData(0, 0, 1, 1); temps.push(performance.now() - t0);   // getImageData : force le dessin à se terminer
+    }
+    pire = Math.max(pire, temps[0]); somme += temps[0];
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + d.emoji + ' ' + d.nom + '</td><td>' + cv.width + ' × ' + cv.height + '</td><td class="' + (temps[0] > 300 ? 'lent' : '') + '">' + Math.round(temps[0]) + ' ms</td><td>' + Math.round(temps[1]) + ' ms</td>';
+    t.appendChild(tr);
+    setTimeout(suivant, 60);
+  };
+  setTimeout(suivant, 200);
+} else {
 for (const d of CIRCUITS) {
   if (choix.length && choix.indexOf(d.id) < 0) continue;
   const c = circuitParId(d.id, inv), carte = document.createElement('section'); carte.className = 'carte';
@@ -79,6 +113,7 @@ function dessiner(now) {
 const fige = qs.get('t');
 dessiner(fige ? +fige * 1000 : performance.now());
 if (!fige) { const image = now => { dessiner(now); requestAnimationFrame(image); }; requestAnimationFrame(image); }
+}
 </script>
 </body>
 </html>

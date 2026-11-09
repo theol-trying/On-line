@@ -20,6 +20,7 @@ import { tmpdir } from 'os';
 import net from 'net';
 import http from 'http';
 import { CIRCUITS, circuitParId } from '../public/games/micro/shared.js';
+import '../public/games/micro/circuits/index.js';     // enregistre les définitions (circuitParId)
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.SMOKE_PORT || 3999);

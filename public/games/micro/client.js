@@ -4,7 +4,20 @@
 // Géométrie des circuits : ./shared.js (la même que le serveur — rien ne voyage sur le réseau que l'identifiant).
 // Structure calquée sur la Patate chaude (HUD, écran de fin, câblage unique des écouteurs, briques partagées).
 // iOS 15 : ni ?. ni ??, ni roundRect / ctx.filter / ctx.ellipse / letterSpacing / OffscreenCanvas.
-import { TICK_HZ, CAR_L, CAR_W, VIEW, CIRCUITS, BUMPERS, circuitParId, cleRecord, mobile } from './shared.js';
+import { TICK_HZ, CAR_L, CAR_W, VIEW, CIRCUITS, BUMPERS, circuitParId, cleRecord, mobile, ficheDe, circuitCharge, enregistrerCircuit } from './shared.js';
+import premierCircuit from './circuits/dejeuner.js';   // le seul chargé d'office (lobby, démo) ; les autres : import() à la demande
+enregistrerCircuit(premierCircuit);
+// CIRCUITS À LA DEMANDE (10/11) : une course n'utilise qu'un circuit sur 12 (660 Ko en tout). Le serveur annonce le circuit
+// joué (`circuit`) et, quand il le connaît, le suivant (`nx`) : on charge ./circuits/<id>.js par import(), une seule fois.
+const fiche = id => ficheDe(id) || CIRCUITS[0];
+const enRoute = Object.create(null);                   // id → promesse du chargement en cours
+function demanderCircuit(id, pret) {
+  if (!ficheDe(id)) return;                             // l'id vient du réseau : seulement un circuit connu des fiches
+  if (circuitCharge(id)) { if (pret) pret(); return; }
+  if (!enRoute[id]) enRoute[id] = import('./circuits/' + id + '.js').then(m => { enregistrerCircuit(m.default); delete enRoute[id]; },
+    () => { setTimeout(() => { delete enRoute[id]; }, 2000); });   // échec réseau : nouvel essai au prochain état, 2 s plus tard
+  if (pret) enRoute[id].then(() => { if (circuitCharge(id)) pret(); });
+}
 import { peindreCircuit, mobileDessin, couleurHors, couleurTraces, trackPath, hexRgb, rgbStr, mix, rng, oval, rr } from './rendu.js';   // dessin des circuits
 import { createMusic } from '../../music.js';
 import { creerSfx } from '../../sfx.js';
@@ -143,7 +156,7 @@ export default (function () {
         <span class="ename" style="color:${colSeat(p.seat)}">${esc(p.name || ('P' + (p.seat + 1)))}${teamMode ? ` <small>Éq.${TEAM_LETTER[p.team]}</small>` : ''}</span>
         <span class="estat" title="points de cette course">+${p.gpd | 0}</span><span class="eres"><b>${p.gpp | 0}</b> pts</span></div>`;
     }).join('');
-    const suite = !g.f && g.seq && g.seq[g.k] ? circuitParId(g.seq[g.k]) : null;
+    const suite = !g.f && g.seq && g.seq[g.k] ? ficheDe(g.seq[g.k]) : null;
     return `<div class="emeta">🏎 <b>Grand Prix</b> — ${g.f ? 'classement final' : 'après ' + g.k + ' course' + (g.k > 1 ? 's' : '') + ' sur ' + g.n}</div><div class="elist">${rows}</div>` +
       (suite ? `<div class="emeta">Prochaine course : ${suite.emoji} <b>${esc(suite.nom)}</b></div>` : '');
   }
@@ -188,7 +201,7 @@ export default (function () {
   function renderLB() {
     if (!lbBody) return;
     if (!board.length) { lbBody.innerHTML = '<div class="lbnote">Aucune course enregistrée.</div>'; return; }
-    const cr = cleRecord(cid), cd = circuitParId(cid), rec = e => (e.bl && Object.prototype.hasOwnProperty.call(e.bl, cr) && e.bl[cr] > 0 ? e.bl[cr] : 0);
+    const cr = cleRecord(cid), cd = fiche(cid), rec = e => (e.bl && Object.prototype.hasOwnProperty.call(e.bl, cr) && e.bl[cr] > 0 ? e.bl[cr] : 0);
     lbBody.innerHTML = `<div class="lbnote">⏱ record du tour sur ${cd.emoji} ${esc(cd.nom)}</div>` + board.slice().sort((a, b) => (b.wins || 0) - (a.wins || 0) || (b.podiums || 0) - (a.podiums || 0) || ((a.bestLap || 1e9) - (b.bestLap || 1e9))).map(e =>
       `<div class="lbrow"><span class="lbn">${esc(e.name)}</span><span title="courses">🎮${e.games || 0}</span><span title="victoires">🏆${e.wins || 0}</span><span title="podiums">🥉${e.podiums || 0}</span>` +
       `<span title="voitures envoyées dans le décor">💥${e.kos || 0}</span>` + (rec(e) ? `<span title="record du tour : ${esc(cd.nom)}">⏱${fmtT(rec(e))}</span>` : '') + '</div>').join('');
@@ -228,7 +241,7 @@ export default (function () {
     const title = gpFin ? (gpNom ? '🏆 ' + esc(gpNom) + ' remporte le Grand Prix !' : 'Grand Prix : égalité au sommet') : solo ? (parts[0] && parts[0].fin ? '🏁 Course bouclée en ' + fmtT(parts[0].ft) : 'Fin de la balade') :
       T.titre ? esc(T.titre) + (who ? ' — ' + who : '') : (champ ? (elim ? who + ' reste seul à l\'écran !' : '🏁 ' + who + ' remporte la course !') : (elim ? 'Égalité — personne ne décroche' : 'Égalité sur la ligne'));
     const subLine = T.titre ? `<div class="emeta">${esc(T.sous)}</div>` : '';
-    const cdef = circuitParId(m.stats.circuit);
+    const cdef = fiche(m.stats.circuit);
     const medals = ['🥇', '🥈', '🥉'];
     let best = null, ko = null;
     parts.forEach(p => {
@@ -263,10 +276,12 @@ export default (function () {
   function setCircuit(id, inv) {
     const k = id + (inv ? '|inv' : '');
     if (k === ckey && C) return;
+    if (!circuitCharge(id)) { demanderCircuit(id, () => { if (snap && snap.circuit === id) setCircuit(id, snap.inv); }); return; }   // pas encore là : on garde l'ancien décor sous un voile
     ckey = k; C = circuitParId(id, !!inv); cid = C.id; decorKey = ''; miniKey = ''; skidKey = ''; cam.init = false;
   }
   function onState(m) {
     if (m.circuit && m.circuit + (m.inv ? '|inv' : '') !== ckey) setCircuit(m.circuit, m.inv);
+    if (m.nx && typeof m.nx === 'string') demanderCircuit(m.nx);   // le prochain circuit, annoncé d'avance : préchargé
     snap = m; teamMode = m.gs === 'lobby' ? !!(m.mode && m.mode !== 'ffa') : (m.nteams > 0 && m.nteams < m.players.filter(p => p.playing).length);
     EF.suivre(m.gs);
     if (m.gs !== 'over') homeChoice = false;
@@ -323,7 +338,7 @@ export default (function () {
     modeBtn.disabled = !(idle && TEAM_TOTALS.indexOf(total) >= 0);
     modeBtn.textContent = '⚔ ' + (MODE_NAME[m.mode] || m.mode || 'FFA'); modeBtn.classList.toggle('on', teamMode);
     if (formBtn) { formBtn.disabled = !idle; formBtn.textContent = FORMULE_NAME[m.formule] || '🏁 Course'; formBtn.classList.toggle('on', m.formule === 'elim'); }
-    if (circBtn) { circBtn.disabled = !idle; const cd = circuitParId(m.circuit); circBtn.textContent = m.choix === 'hasard' ? '🎲 Circuit au hasard' : cd.emoji + ' ' + cd.nom; }
+    if (circBtn) { circBtn.disabled = !idle; const cd = fiche(m.circuit); circBtn.textContent = m.choix === 'hasard' ? '🎲 Circuit au hasard' : cd.emoji + ' ' + cd.nom; }
     if (sensBtn) { sensBtn.disabled = !idle; sensBtn.textContent = Object.prototype.hasOwnProperty.call(SENS_NAME, m.sens) ? SENS_NAME[m.sens] : SENS_NAME.normal; sensBtn.classList.toggle('on', m.sens !== 'normal'); }
     const bon = !!(m.opt && m.opt.bonus), pce = !!(m.opt && m.opt.pouce);
     if (bonusBtn) { bonusBtn.disabled = !idle; bonusBtn.textContent = '🎁 Bonus : ' + (bon ? 'oui' : 'non'); bonusBtn.classList.toggle('on', bon); }
@@ -829,9 +844,20 @@ export default (function () {
   function draw() {
     if (destroyed) return;
     const now = performance.now(), rf = A.reduceFx ? null : RL.frame(now);
-    if (!rf) { if (pendingEnd && (A.reduceFx || !RL.active(now))) finReplay(now); scene(now, null); return; }
+    if (!rf) { if (pendingEnd && (A.reduceFx || !RL.active(now))) finReplay(now); scene(now, null); voileChargement(); return; }
     const real = snap; snap = rf.u < 0.5 ? rf.a : rf.b;
     try { scene(now, rf); } finally { snap = real; }
+  }
+  function voileChargement() {                           // le circuit annoncé n'est pas encore chargé : voile + message (l'ancien décor est dessous)
+    if (!snap || !snap.circuit || snap.circuit === cid || snap.gs === 'lobby') return;
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = 'rgba(10,12,22,0.86)'; ctx.fillRect(0, 0, cv.width, cv.height);
+    const f = Math.max(14, cv.width / 26), d = fiche(snap.circuit);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffd23a'; ctx.font = 'bold ' + f.toFixed(1) + 'px system-ui, sans-serif';
+    ctx.fillText(d.emoji + ' ' + d.nom, cv.width / 2, cv.height / 2 - f * 0.8);
+    ctx.fillStyle = 'rgba(255,246,224,.8)'; ctx.font = (f * 0.7).toFixed(1) + 'px system-ui, sans-serif';
+    ctx.fillText('Chargement du circuit…', cv.width / 2, cv.height / 2 + f * 0.6);
+    ctx.restore();
   }
   function scene(now, rf) {
     const dtm = Math.min(100, Math.max(1, now - (lastFrame || now - 16.7))); lastFrame = now;
@@ -981,7 +1007,7 @@ export default (function () {
     }
   }
   function ecranTitre(now) {
-    const c = HUDW / 2, cd = circuitParId(snap ? snap.circuit : cid);
+    const c = HUDW / 2, cd = fiche(snap ? snap.circuit : cid);
     ctx.fillStyle = 'rgba(8,10,20,0.3)'; ctx.fillRect(0, 0, HUDW, HUDW);
     const f = readable(54, cv, HUDW, 22), bob = A.reduceFx ? 0 : Math.sin(now / 500) * 3;
     ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';

@@ -11,6 +11,7 @@ import { TICK_HZ, CAR_R, CAR_L, CAR_W, FALL_T, GHOST_T, LAPS, FORMULES, ELIM_HW0
 import { board, pushHistory, save, markDirty, reset, bumpDaily } from '../../leaderboard.js';
 import { classerManche } from '../fin-manche.js';
 import { creerMatch } from '../match.js';
+import '../../public/games/micro/circuits/index.js';   // enregistre les 12 définitions (le navigateur, lui, ne charge que le circuit joué)
 
 const GID = 'micro';
 // mode triche du game master (clé admin, réglage du menu ; posé par le hub, jamais par le jeu) — 05/11
@@ -108,7 +109,7 @@ export function createMicro(room) {
   let players, gameState, tick, round, countdownUntil, winner, fx, pend, mode, nteams, nParts, endTick, botCount, botDiff;
   let circuit, C, laps, formule, finCount, finDeadline, leader, leadT, cam, lastBest;
   let circChoix = 'hasard', sensChoix = 'hasard', inverse = false;   // choix du game master (« hasard » par défaut pour les deux, 05/11) / circuit et sens joués
-  let sac = [];                                          // « Hasard » : circuits pas encore tirés (tous passent avant qu'un revienne)
+  let sac = [], dernier = '';                            // « Hasard » : circuits pas encore tirés (tous passent avant qu'un revienne) ; dernier circuit couru
   let gpChoix = 0, gpSeq = [], gpFait = 0, gpGagnants = [];   // Grand Prix : réglage, circuits de la série, courses courues, sièges vainqueurs
   const MOBP = [];                                       // positions des obstacles mobiles au tick courant
   let seatByMid = {}, clk = 0;                          // clk : horloge continue (le tick repart de 0 au départ)
@@ -164,12 +165,14 @@ export function createMicro(room) {
   // circuit et sens de la manche : le choix du game master, ou un tirage quand il a choisi « 🎲 Hasard » (jamais deux fois de suite)
   function tirerCircuit() {
     let id = circChoix;
-    if (circChoix === 'hasard') {
-      if (!sac.length) { sac = melange(CIRCUITS.map(c => c.id)); if (sac.length > 1 && sac[0] === circuit) sac.push(sac.shift()); }
-      id = sac.shift();
-    }
+    if (circChoix === 'hasard') { remplirSac(); id = sac.shift(); }
+    dernier = id;
+    remplirSac();
     setCircuit(id, sensDe());
   }
+  // le sac n'est jamais vide : son premier circuit (le prochain tirage) est annoncé aux clients (nx) pour qu'ils le préchargent
+  function remplirSac() { if (!sac.length) { sac = melange(CIRCUITS.map(c => c.id)); if (sac.length > 1 && sac[0] === dernier) sac.push(sac.shift()); } }
+  const prochain = () => (gpChoix ? (gpEnCours() ? gpSeq[gpFait] : '') : circChoix === 'hasard' ? sac[0] || '' : circChoix);
   /* ---------- Grand Prix ---------- */
   const gpTotal = () => Math.min(CIRCUITS.length, gpChoix < 0 ? CIRCUITS.length : gpChoix);
   const gpEnCours = () => gpChoix !== 0 && gpSeq.length > 0 && gpFait < gpSeq.length;
@@ -203,7 +206,7 @@ export function createMicro(room) {
     gameState = 'lobby'; tick = 0; round = 0; winner = null; fx = []; pend = [];
     mode = 'ffa'; nteams = 0; nParts = 0; endTick = 0; botCount = 0; botDiff = 1; seatByMid = {};
     circChoix = 'hasard'; sensChoix = 'hasard'; setCircuit(CIRCUITS[0].id, false); laps = 3; formule = 'course';
-    sac = []; gpChoix = 0; gpSeq = []; gpFait = 0; gpGagnants = [];
+    sac = []; dernier = ''; remplirSac(); gpChoix = 0; gpSeq = []; gpFait = 0; gpGagnants = [];
     finCount = 0; finDeadline = 0; leader = -1; leadT = -1e9; cam = null; lastBest = null;
   }
 
@@ -379,7 +382,10 @@ export function createMicro(room) {
     p.thr = sp < vt - 0.3 ? 1 : sp > vt + 0.7 ? -1 : 0.25;
     if (Math.abs(d) > 1.1 && sp > 5) p.thr = Math.min(p.thr, 0);
     // coincé (contre un mur, un bol…) : marche arrière en contre-braquant
-    if (p.thr > 0 && sp < 0.7) { if (++p.stuck > 40) { p.stuck = 0; p.rev = 22; p.steer = -p.steer || 1; } } else p.stuck = 0;
+    // (10/11) en travers de la piste, nez contre un rail après une glissade : à l'arrêt le volant ne fait rien — on recule au
+    // bout de 0,4 s au lieu de 1,3 s, et une vitesse qui tremblote entre 0 et 1 ne remet plus le compteur à zéro
+    const travers = Math.abs(Math.cos(p.a - ta)) < 0.5;
+    if (p.thr > 0 && sp < (travers ? 1.6 : 0.7)) { if (++p.stuck > (travers ? 12 : 40)) { p.stuck = 0; p.rev = 22; p.steer = -p.steer || 1; } } else p.stuck = 0;
   }
 
   /* ---------- physique ---------- */
@@ -937,6 +943,7 @@ export function createMicro(room) {
       round, winner, fx, connected: connectedCount(), botCount, bots: botCount, maxBots: maxBots(), botDiff, nteams,
       mode: gameState === 'lobby' && !validModes(Math.max(1, partCount())).includes(mode) ? 'ffa' : mode,
       circuit, inv: inverse, choix: circChoix, sens: sensChoix, laps, formule, K: C.gates.length,
+      nx: editable() ? prochain() : '',                    // prochain circuit s'il est déjà connu : les clients le préchargent (sinon chargé au décompte)
       rt: live || gameState === 'over' ? r2((gameState === 'over' ? endTick : tick) / TICK_HZ) : 0,   // chrono de course (s) — surtout pas « t » : le hub l'utilise pour le type du message
       lead: leader, finT: formule === 'course' && finDeadline && live ? Math.max(0, Math.ceil((finDeadline - tick) / TICK_HZ)) : null,
       cam: cam && gameState !== 'lobby' ? [r1(cam.x), r1(cam.y), Math.round(cam.hw)] : null,
@@ -1019,7 +1026,7 @@ export function createMicro(room) {
       if (editable()) {
         const ids = CIRCUITS.map(c => c.id).concat(['hasard']);
         circChoix = typeof m.id === 'string' && ids.includes(m.id) ? m.id : cycle(ids, circChoix);
-        gpAnnuler(); sac = [];                           // la série du Grand Prix est tirée à nouveau avec ce choix
+        gpAnnuler(); sac = []; remplirSac();             // la série du Grand Prix est tirée à nouveau avec ce choix
         if (circChoix !== 'hasard') setCircuit(circChoix, sensChoix === 'hasard' ? inverse : sensChoix === 'inverse');
       }
     }
