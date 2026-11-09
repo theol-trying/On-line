@@ -256,7 +256,7 @@ const SCENES = {
         c.fillStyle = '#e8413a'; disque(c, ax, ay, r);
         c.fillStyle = 'rgba(255,255,255,.55)'; disque(c, ax - r * 0.35, ay - r * 0.35, r * 0.28);
         c.strokeStyle = '#6b3d1a'; c.lineWidth = Math.max(1, u); c.beginPath(); c.moveTo(ax, ay - r * 0.8); c.lineTo(ax + r * 0.2, ay - r * 1.35); c.stroke();
-        c.fillStyle = '#6fd05a'; c.beginPath(); c.ellipse(ax + r * 0.55, ay - r * 1.2, r * 0.42, r * 0.2, -0.5, 0, TAU); c.fill();
+        c.fillStyle = '#6fd05a'; c.beginPath(); c.save(); c.translate(ax + r * 0.55, ay - r * 1.2); c.rotate(-0.5); c.scale(r * 0.42, r * 0.2); c.arc(0, 0, 1, 0, TAU); c.restore(); c.fill();   // feuille : cercle étiré (pas de ctx.ellipse, cf. iOS 15)
       } else if (hx < ax + 14 * u) {                                              // « miam » : éclats autour du point mangé
         const k = (hx - ax) / (14 * u); c.globalAlpha = 1 - k; c.fillStyle = '#fff6a8';
         for (let i = 0; i < 6; i++) { const a = i * TAU / 6; disque(c, ax + Math.cos(a) * (4 + 8 * k) * u, ay + Math.sin(a) * (4 + 8 * k) * u, 1.2 * u); }
