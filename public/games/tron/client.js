@@ -662,25 +662,41 @@ export default (function () {
     const pad = C * 0.9, x0 = -2.25 * C - pad, x1 = 0.62 * C + pad, hw = 0.42 * C + pad, W = x1 - x0, H = hw * 2;
     const c = mkCanvas(W * ps, H * ps), g = c.getContext('2d'), u = C;
     g.setTransform(ps, 0, 0, ps, -x0 * ps, hw * ps);
-    const base = hexRgb(col), dk = rgbStr(mix(base, [0, 0, 0], 0.55)), lt = rgbStr(mix(base, [255, 255, 255], 0.55));
-    const body = () => { g.beginPath(); g.moveTo(0.42 * u, 0); g.bezierCurveTo(0.36 * u, -0.3 * u, 0.05 * u, -0.4 * u, -0.5 * u, -0.4 * u); g.lineTo(-1.5 * u, -0.38 * u); g.bezierCurveTo(-1.85 * u, -0.36 * u, -2.0 * u, -0.3 * u, -2.02 * u, -0.22 * u); g.lineTo(-2.02 * u, 0.22 * u); g.bezierCurveTo(-2.0 * u, 0.3 * u, -1.85 * u, 0.36 * u, -1.5 * u, 0.38 * u); g.lineTo(-0.5 * u, 0.4 * u); g.bezierCurveTo(0.05 * u, 0.4 * u, 0.36 * u, 0.3 * u, 0.42 * u, 0); g.closePath(); };
+    const base = hexRgb(col), dk = rgbStr(mix(base, [0, 0, 0], 0.55)), lt = rgbStr(mix(base, [255, 255, 255], 0.55)), neon = hexToLight(base);
+    const oval = (x, y, rx, ry) => { g.save(); g.translate(x * u, y * u); g.scale(rx * u, ry * u); g.moveTo(1, 0); g.arc(0, 0, 1, 0, Math.PI * 2); g.restore(); };   // ellipse maison
+    // silhouette d'une moto de lumière : roue avant carénée et nez arrondi, taille étroite (le pilote), roue arrière carénée
+    const body = () => { g.beginPath(); g.moveTo(0.6 * u, 0);
+      g.bezierCurveTo(0.6 * u, -0.24 * u, 0.42 * u, -0.38 * u, 0.12 * u, -0.38 * u); g.lineTo(-0.28 * u, -0.38 * u);
+      g.bezierCurveTo(-0.4 * u, -0.38 * u, -0.44 * u, -0.28 * u, -0.58 * u, -0.28 * u); g.lineTo(-1.22 * u, -0.28 * u);
+      g.bezierCurveTo(-1.36 * u, -0.28 * u, -1.4 * u, -0.4 * u, -1.54 * u, -0.4 * u); g.lineTo(-1.98 * u, -0.4 * u);
+      g.bezierCurveTo(-2.16 * u, -0.4 * u, -2.22 * u, -0.3 * u, -2.22 * u, -0.16 * u); g.lineTo(-2.22 * u, 0.16 * u);
+      g.bezierCurveTo(-2.22 * u, 0.3 * u, -2.16 * u, 0.4 * u, -1.98 * u, 0.4 * u); g.lineTo(-1.54 * u, 0.4 * u);
+      g.bezierCurveTo(-1.4 * u, 0.4 * u, -1.36 * u, 0.28 * u, -1.22 * u, 0.28 * u); g.lineTo(-0.58 * u, 0.28 * u);
+      g.bezierCurveTo(-0.44 * u, 0.28 * u, -0.4 * u, 0.38 * u, -0.28 * u, 0.38 * u); g.lineTo(0.12 * u, 0.38 * u);
+      g.bezierCurveTo(0.42 * u, 0.38 * u, 0.6 * u, 0.24 * u, 0.6 * u, 0); g.closePath(); };
     if (TH.glow) { g.save(); g.shadowColor = col; g.shadowBlur = u * 1.1 * ps; g.fillStyle = col; g.globalAlpha = 0.85; body(); g.fill(); g.restore(); }   // lueur, cuite une fois
-    g.fillStyle = '#05070d';                                                                        // pneus
-    rrect(g, -2.2 * u, -0.34 * u, 0.82 * u, 0.68 * u, 0.3 * u); g.fill(); rrect(g, -0.28 * u, -0.3 * u, 0.86 * u, 0.6 * u, 0.28 * u); g.fill();
-    g.strokeStyle = lt; g.lineWidth = 0.07 * u; rrect(g, -2.2 * u, -0.34 * u, 0.82 * u, 0.68 * u, 0.3 * u); g.stroke(); rrect(g, -0.28 * u, -0.3 * u, 0.86 * u, 0.6 * u, 0.28 * u); g.stroke();
-    const bg = g.createLinearGradient(0, -0.4 * u, 0, 0.4 * u);                                     // carénage : bords sombres, arête claire
+    const bg = g.createLinearGradient(0, -0.4 * u, 0, 0.4 * u);                                     // carénage : bords sombres, dos clair
     bg.addColorStop(0, dk); bg.addColorStop(0.5, rgbStr(mix(base, [255, 255, 255], 0.18))); bg.addColorStop(1, dk);
     body(); g.fillStyle = bg; g.fill();
     const pat = seatPattern(g, seat, { size: Math.max(4, u * 1.3), res: Math.round(ps * 100) / 100 }); if (pat) { g.fillStyle = pat; g.fill(); }
-    g.strokeStyle = hexToLight(base); g.lineWidth = 0.07 * u; g.lineCap = 'round';                   // liserés néon latéraux
-    g.beginPath(); g.moveTo(-1.8 * u, -0.29 * u); g.lineTo(0.05 * u, -0.31 * u); g.moveTo(-1.8 * u, 0.29 * u); g.lineTo(0.05 * u, 0.31 * u); g.stroke();
-    g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 0.1 * u; g.beginPath(); g.moveTo(-1.9 * u, 0); g.lineTo(-0.8 * u, 0); g.stroke();   // arête dorsale
-    g.save(); g.translate(-0.3 * u, 0); g.scale(0.38 * u, 0.2 * u); g.beginPath(); g.arc(0, 0, 1, 0, Math.PI * 2); g.restore();   // verrière (ellipse maison)
-    g.fillStyle = 'rgba(8,14,28,0.92)'; g.fill();
-    g.save(); g.translate(-0.15 * u, -0.07 * u); g.scale(0.15 * u, 0.05 * u); g.beginPath(); g.arc(0, 0, 1, 0, Math.PI * 2); g.restore();
-    g.fillStyle = 'rgba(255,255,255,0.6)'; g.fill();
-    g.fillStyle = '#ffffff'; g.beginPath(); g.arc(0.42 * u, 0, 0.09 * u, 0, Math.PI * 2); g.fill();   // phare
-    g.fillStyle = lt; g.fillRect(-2.06 * u, -0.16 * u, 0.08 * u, 0.32 * u);                          // feu arrière
+    g.save(); body(); g.clip(); body(); g.strokeStyle = neon; g.lineWidth = 0.13 * u; g.stroke(); g.restore();   // liseré néon intérieur, tout le tour
+    g.lineJoin = 'round'; g.lineCap = 'round';
+    for (const w of [[-0.16, 0.36, 0.12], [-2.02, -1.5, 0.15]]) {                                    // roues vues à travers le carénage : fente sombre, jante et moyeu lumineux
+      rrect(g, w[0] * u, -w[2] * u, (w[1] - w[0]) * u, 2 * w[2] * u, w[2] * u); g.fillStyle = '#070b16'; g.fill();
+      g.strokeStyle = neon; g.lineWidth = 0.05 * u; g.stroke();
+      g.strokeStyle = '#ffffff'; g.lineWidth = 0.05 * u; g.beginPath(); g.moveTo((w[0] + 0.08) * u, 0); g.lineTo((w[1] - 0.08) * u, 0); g.stroke();
+    }
+    g.fillStyle = rgbStr(mix(base, [0, 0, 0], 0.62)); g.beginPath(); oval(-0.94, 0, 0.36, 0.22); g.fill();   // pilote : dos (combinaison, liseré lumineux)
+    g.strokeStyle = neon; g.lineWidth = 0.06 * u; g.beginPath(); oval(-0.94, 0, 0.3, 0.16); g.stroke();
+    g.beginPath(); g.moveTo(-1.22 * u, 0); g.lineTo(-0.72 * u, 0); g.stroke();
+    g.strokeStyle = rgbStr(mix(base, [0, 0, 0], 0.55)); g.lineWidth = 0.09 * u; g.beginPath();                // bras tendus vers le guidon
+    g.moveTo(-0.8 * u, -0.17 * u); g.lineTo(-0.3 * u, -0.27 * u); g.moveTo(-0.8 * u, 0.17 * u); g.lineTo(-0.3 * u, 0.27 * u); g.stroke();
+    g.fillStyle = neon; g.beginPath(); g.arc(-0.28 * u, -0.27 * u, 0.05 * u, 0, Math.PI * 2); g.arc(-0.28 * u, 0.27 * u, 0.05 * u, 0, Math.PI * 2); g.fill();   // gants
+    g.fillStyle = '#0b0f1a'; g.beginPath(); g.arc(-0.52 * u, 0, 0.19 * u, 0, Math.PI * 2); g.fill();        // casque
+    g.strokeStyle = neon; g.lineWidth = 0.07 * u; g.beginPath(); g.arc(-0.52 * u, 0, 0.14 * u, -1, 1); g.stroke();   // visière
+    g.fillStyle = 'rgba(255,255,255,0.6)'; g.beginPath(); oval(-0.58, -0.07, 0.08, 0.045); g.fill();         // reflet du casque
+    g.fillStyle = '#ffffff'; g.beginPath(); g.arc(0.54 * u, 0, 0.08 * u, 0, Math.PI * 2); g.fill();          // phare
+    g.fillStyle = lt; g.fillRect(-2.24 * u, -0.18 * u, 0.07 * u, 0.36 * u);                                 // feu arrière
     body(); g.strokeStyle = A.contrast ? '#ffffff' : 'rgba(0,0,0,0.55)'; g.lineWidth = (A.contrast ? 0.12 : 0.06) * u; g.stroke();
     s = { cv: c, x: x0, y: -hw, w: W, h: H };
     return (motoCache[key] = s);
@@ -705,11 +721,12 @@ export default (function () {
     picto(g, t, 0, 0, r * 0.6, d.c);
     return (puCache[key] = { cv: c, half, S });
   }
-  // Traînées : teintes dérivées de la couleur du siège (bord sombre, cœur clair, version « dérésolue »)
+  // Traînées : teintes dérivées de la couleur du siège (bord sombre, cœur clair, flanc en deux tons, version « dérésolue »)
   let tsCache = {};
   function tstyle(col) {
-    let s = tsCache[col]; if (s) return s; const c = hexRgb(col), f = hexRgb(TH.field);
-    s = { edge: rgbStr(mix(c, [0, 0, 0], TH.glow ? 0.5 : 0.58)), core: rgbStr(mix(c, [255, 255, 255], 0.72)), dead: rgbStr(mix(c, f, 0.55)), deadEdge: rgbStr(mix(mix(c, [0, 0, 0], 0.5), f, TH.glow ? 0.4 : 0.25)) };
+    let s = tsCache[col]; if (s) return s; const c = hexRgb(col), f = hexRgb(TH.field), k = [0, 0, 0];
+    s = { edge: rgbStr(mix(c, k, TH.glow ? 0.5 : 0.58)), core: rgbStr(mix(c, [255, 255, 255], 0.72)), dead: rgbStr(mix(c, f, 0.55)), deadEdge: rgbStr(mix(mix(c, k, 0.5), f, TH.glow ? 0.4 : 0.25)),
+      side: rgbStr(mix(c, k, TH.glow ? 0.46 : 0.38)), sideHi: rgbStr(mix(c, k, TH.glow ? 0.2 : 0.16)), deadSide: rgbStr(mix(mix(c, k, 0.66), f, TH.glow ? 0.3 : 0.2)) };
     return (tsCache[col] = s);
   }
   let coneG = null, coneC = 0;
@@ -720,7 +737,12 @@ export default (function () {
     return coneG;
   }
 
-  // ───────────────────────── traînées (rubans lumineux) ─────────────────────────
+  // ───────────────────────── traînées : murs de lumière ─────────────────────────
+  // Vue oblique : chaque traînée est un mur de WALL_H case de haut, posé sur ses cases (c'est là qu'est la collision),
+  // son sommet décalé vers le haut de l'écran. Dans l'ordre : reflet sur le sol lustré (néon), halo, pied sombre, flanc
+  // en deux tons (plus clair vers le haut), puis le sommet : liseré, couleur du siège, motif, arête lumineuse, impulsions.
+  // Le chemin est reconstruit à chaque hauteur (pas de Path2D, comme ailleurs dans le projet) : ~5 chemins, ~12 traits.
+  const WALL_H = 0.4;
   function buildPath(pts, hx, hy) { ctx.beginPath(); ctx.moveTo(px(pts[0][0]), px(pts[0][1])); for (let i = 1; i < pts.length; i++) ctx.lineTo(px(pts[i][0]), px(pts[i][1])); if (hx != null) ctx.lineTo(hx, hy); }
   const HOT = [];
   function hotSeg(pts, hx, hy, len) {                      // les `len` dernières unités de traînée derrière la tête (réutilise HOT)
@@ -736,29 +758,42 @@ export default (function () {
   function drawTrail(p, v, now, dead) {
     const pts = (v && v.path && v.path.length) ? v.path : (p.path || []); if (!pts.length) return;
     const C = CELL, col = colSeat(p.seat), st = tstyle(col), hx = v && !dead ? px(v.x) : null, hy = v && !dead ? px(v.y) : null;
+    const H = C * WALL_H, glow = TH.glow;
+    let oy = 0;
+    const at = y => { if (y !== oy) { ctx.translate(0, y - oy); oy = y; } buildPath(pts, hx, hy); };   // chemin du mur à la hauteur y
+    const sk = (style, w) => { ctx.strokeStyle = style; ctx.lineWidth = w; ctx.stroke(); };
     ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    if (!TH.glow) { ctx.translate(0.9, 1.4); buildPath(pts, hx, hy); ctx.strokeStyle = 'rgba(20,30,60,0.2)'; ctx.lineWidth = C * 0.86; ctx.stroke(); ctx.translate(-0.9, -1.4); }   // ombre portée
-    buildPath(pts, hx, hy);
+    if (!glow) { ctx.translate(0.6 + H * 0.9, 1.2); buildPath(pts, hx, hy); sk('rgba(20,30,60,0.18)', C * 0.8); ctx.translate(-0.6 - H * 0.9, -1.2); }   // ombre portée (le mur a de la hauteur)
     const pat = seatPattern(ctx, p.seat, { size: C * 1.6, res: Math.round(cv.width / ARENA * 100) / 100 });
-    if (dead) {                                                 // traînée d'un pilote éliminé : reste un MUR, bien visible, mais éteinte
-      if (A.contrast) { ctx.strokeStyle = TH.glow ? '#000000' : '#1a2238'; ctx.lineWidth = C * 0.98; ctx.stroke(); }
-      ctx.strokeStyle = st.deadEdge; ctx.lineWidth = C * 0.84; ctx.stroke();
-      ctx.strokeStyle = st.dead; ctx.lineWidth = C * 0.56; ctx.stroke();
-      if (pat) { ctx.strokeStyle = pat; ctx.lineWidth = C * 0.84; ctx.stroke(); }
-      ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = Math.max(0.6, C * 0.12); ctx.stroke();
+    const hk = A.contrast ? (glow ? '#000000' : (dead ? '#1a2238' : '#0b1830')) : null;   // contraste élevé : silhouette pleine
+    if (dead) {                                                 // traînée d'un pilote éliminé : reste un MUR, bien visible, mais éteint
+      if (hk) { at(0); sk(hk, C * 0.92); at(-H); sk(hk, C * 0.92); }
+      at(0); sk(st.deadEdge, C * 0.72); sk(st.deadSide, C * 0.56);
+      at(-H * 0.5); sk(st.deadSide, C * 0.56);
+      at(-H); sk(st.deadEdge, C * 0.66); sk(st.dead, C * 0.46);
+      if (pat) sk(pat, C * 0.66);
+      sk('rgba(0,0,0,0.3)', Math.max(0.6, C * 0.12));
       const t0 = deadAt[p.seat], age = t0 && !rpOn ? now - t0 : 1e9;   // rejeu : pas d'éclair de dérésolution rejoué
-      if (age < 900 && FX) {                                    // onde de dérésolution : éclair blanc qui s'éteint
-        ctx.globalAlpha = 1 - age / 900; if (TH.glow) ctx.globalCompositeOperation = 'lighter';
-        ctx.strokeStyle = TH.glow ? col : '#ffffff'; ctx.lineWidth = C * 0.9; ctx.stroke(); ctx.globalCompositeOperation = 'source-over';
+      if (age < 900 && FX) {                                    // onde de dérésolution : éclair qui s'éteint sur toute la hauteur du mur
+        at(-H * 0.5); ctx.globalAlpha = 1 - age / 900; if (glow) ctx.globalCompositeOperation = 'lighter';
+        sk(glow ? col : '#ffffff', C * 0.9 + H); ctx.globalCompositeOperation = 'source-over';
       }
       ctx.restore(); return;
     }
-    if (TH.glow && FX) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = p.speed || p.boosting ? 0.24 : 0.16; ctx.strokeStyle = col; ctx.lineWidth = C * 1.9; ctx.stroke(); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; }   // halo (sans shadowBlur)
-    if (A.contrast) { ctx.strokeStyle = TH.glow ? '#000000' : '#0b1830'; ctx.lineWidth = C * 0.98; ctx.stroke(); }
-    ctx.strokeStyle = st.edge; ctx.lineWidth = C * 0.84; ctx.stroke();                                  // ruban : bords sombres
-    ctx.strokeStyle = col; ctx.lineWidth = C * 0.6; ctx.stroke();                                       // corps à la couleur du siège
-    if (pat) { ctx.strokeStyle = pat; ctx.lineWidth = C * 0.84; ctx.stroke(); }                         // motif du siège
-    ctx.strokeStyle = st.core; ctx.lineWidth = Math.max(0.8, C * 0.18); ctx.stroke();                   // cœur lumineux
+    if (glow && FX) {
+      ctx.globalCompositeOperation = 'lighter';
+      at(C * 0.5); ctx.globalAlpha = 0.13; sk(col, C * 0.44);                          // reflet du mur sur le sol lustré
+      at(C * 0.82); ctx.globalAlpha = 0.06; sk(col, C * 0.34);
+      at(-H * 0.5); ctx.globalAlpha = p.speed || p.boosting ? 0.24 : 0.16; sk(col, C * 1.9);   // halo (sans shadowBlur)
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    }
+    if (hk) { at(0); sk(hk, C * 0.92); at(-H); sk(hk, C * 0.92); }
+    at(0); sk(st.edge, C * 0.72); sk(st.side, C * 0.56);                               // pied : empreinte sombre, bas du flanc
+    at(-H * 0.5); sk(st.sideHi, C * 0.56);                                             // haut du flanc, plus clair
+    if (glow) { at(C * 0.22); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55; sk(col, Math.max(0.6, C * 0.08)); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; }   // filet de lumière au pied du mur
+    at(-H); sk(st.edge, C * 0.66); sk(col, C * 0.48);                                  // sommet : liseré, couleur du siège
+    if (pat) sk(pat, C * 0.66);                                                        // motif du siège
+    sk(st.core, Math.max(0.8, C * 0.16));                                              // arête lumineuse
     if (FX) {                                                                                           // impulsions d'énergie qui filent vers la moto
       ctx.setLineDash([C * 1.4, C * 10]); ctx.lineDashOffset = -(now / 1000) * C * 14;
       if (TH.glow) ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.5; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = C * 0.32; ctx.stroke();
