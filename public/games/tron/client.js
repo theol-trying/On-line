@@ -428,10 +428,10 @@ export default (function () {
 
   // ───────────────────────── effets ponctuels ─────────────────────────
   const capPush = (arr, o, max) => { arr.push(o); if (arr.length > max) arr.splice(0, arr.length - max); };
-  function spawnVoxels(x, y, ang, col, n, spread) {       // éclats voxel : petits cubes (face haute claire, face avant sombre)
+  function spawnVoxels(x, y, ang, col, n, spread, len) {  // éclats voxel : petits cubes (face haute claire, face avant sombre) ; len = longueur de moto (cases) où ils naissent
     if (A.reduceFx) return; const now = performance.now(), base = hexRgb(col), top = rgbStr(mix(base, [255, 255, 255], 0.35)), side = rgbStr(mix(base, [0, 0, 0], 0.45));
     for (let k = 0; k < n; k++) {
-      const along = -Math.random() * 2 * CELL, a = Math.random() * Math.PI * 2, sp = 0.5 + Math.random() * 2.2 * spread;
+      const along = -Math.random() * (len == null ? 2 : len) * CELL, a = Math.random() * Math.PI * 2, sp = 0.5 + Math.random() * 2.2 * spread;
       voxels.push({ x: x + Math.cos(ang) * along, y: y + Math.sin(ang) * along, z: 1 + Math.random() * 3, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, vz: 1 + Math.random() * 2.4, s: Math.max(1.6, CELL * (0.26 + Math.random() * 0.3)), top, side, born: now, life: 800 + Math.random() * 700 });
     }
     if (voxels.length > 360) voxels.splice(0, voxels.length - 360);
@@ -515,7 +515,12 @@ export default (function () {
       LUM.ajouter(x, y, CELL * 7.5, col, 760, 0.95 * lk());       // la dérésolution éclaire la grille alentour
       LUM.ajouter(x, y, CELL * 3.6, '#ffffff', 300, 0.7 * lk());
       shakeMag = Math.max(shakeMag, f.seat === mySeat ? 9 : 3.5);
-      spawnVoxels(x, y, a, col, 24, 1);
+      spawnVoxels(x, y, a, col, 30, 1); spawnVoxels(x, y, a, '#ffffff', 8, 1.3);   // éclats de pixels : couleur du pilote + quelques blancs
+      const pp = snap && snap.players[f.seat];
+      if (pp && pp.path && pp.path.length) {                   // le bout du mur s'effrite en pixels sur 4 cases
+        const h = hotSeg(pp.path, x, y, CELL * 4);
+        for (let i = 2; i < h.length; i += 2) for (let s = 0; s < 3; s++) { const u = (s + Math.random()) / 3; spawnVoxels(h[i - 2] + (h[i] - h[i - 2]) * u, h[i - 1] + (h[i + 1] - h[i - 1]) * u - CELL * WALL_H * 0.5, 0, col, 1, 0.45, 0); }
+      }
       spawnSparks(px(cx), px(cy), 12, col, 3);
       ring(x, y, CELL * 0.6, CELL * 5, col, 2.6, 520, 'sq');
       ring(x, y, CELL * 0.4, CELL * 3, '#ffffff', 1.6, 360, 'sq', 60);
@@ -953,15 +958,25 @@ export default (function () {
       ctx.strokeStyle = '#ffffff'; ctx.lineWidth = CELL * 0.2; ctx.stroke(); ctx.setLineDash([]);
     }
     ctx.globalAlpha = 1;
-    // motos qui se dérésolvent : le sprite se découpe en tranches qui glissent (glitch) puis s'efface
+    // motos qui se dérésolvent : le sprite éclate en carreaux de pixels (grille 8×4) qui partent en tournoyant, rapetissent
+    // et s'éteignent ; un bref glitch de tranches au tout début. Trajectoires tirées de hash2 : stables d'une image à l'autre.
     for (let i = derez.length - 1; i >= 0; i--) {
-      const q = derez[i], D = FX ? 700 : 400, t = (now - q.born) / D; if (t >= 1) { derez.splice(i, 1); continue; }
+      const q = derez[i], D = FX ? 820 : 400, t = (now - q.born) / D; if (t >= 1) { derez.splice(i, 1); continue; }
       const spr = motoSprite(q.seat, q.col, CELL);
-      ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.a); ctx.globalAlpha = 1 - t;
-      if (!FX) ctx.drawImage(spr.cv, spr.x, spr.y, spr.w, spr.h);
-      else for (let j = 0; j < 5; j++) {
-        const sh = spr.cv.height / 5, off = (hash2(j, q.born % 997) - 0.5) * CELL * 3.2 * t;
-        ctx.drawImage(spr.cv, 0, sh * j, spr.cv.width, sh, spr.x + off, spr.y + spr.h * j / 5, spr.w, spr.h / 5);
+      ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.a);
+      if (!FX) { ctx.globalAlpha = 1 - t; ctx.drawImage(spr.cv, spr.x, spr.y, spr.w, spr.h); }
+      else if (t < 0.12) {
+        ctx.globalAlpha = 1;
+        for (let j = 0; j < 5; j++) { const sh = spr.cv.height / 5, off = (hash2(j, q.born % 997) - 0.5) * CELL * 1.4; ctx.drawImage(spr.cv, 0, sh * j, spr.cv.width, sh, spr.x + off, spr.y + spr.h * j / 5, spr.w, spr.h / 5); }
+      } else {
+        const u = (t - 0.12) / 0.88, e = 1 - (1 - u) * (1 - u), NX = 8, NY = 4, sw = spr.cv.width / NX, shh = spr.cv.height / NY, dw = spr.w / NX, dh = spr.h / NY, k = 1 - 0.6 * u;
+        ctx.globalAlpha = u > 0.5 ? (1 - u) * 2 : 1;
+        for (let j = 0; j < NY; j++) for (let m = 0; m < NX; m++) {
+          const cx0 = spr.x + dw * (m + 0.5), cy0 = spr.y + dh * (j + 0.5), h1 = hash2(m + 11 * j, q.born % 997), h2 = hash2(j + 5 * m, q.born % 991);
+          const an = Math.atan2(cy0, cx0 + 0.9 * CELL) + (h1 - 0.5) * 1.3, d = CELL * (0.6 + 3.4 * h2) * e;
+          ctx.save(); ctx.translate(cx0 + Math.cos(an) * d, cy0 + Math.sin(an) * d); ctx.rotate((h1 - 0.5) * 7 * e);
+          ctx.drawImage(spr.cv, sw * m, shh * j, sw, shh, -dw * k / 2, -dh * k / 2, dw * k, dh * k); ctx.restore();
+        }
       }
       ctx.restore();
     }
