@@ -212,7 +212,7 @@ export default (function () {
   let mySeat = -1, maxLives = 5, snap = null, prevGs = 'lobby', teamMode = false;
   let board = [], history = [], endShown = false, inGamePrev = false;
   let buf = [], trails = [];
-  const rings = [], sparks = [], dots = [], shards = [], pops = [], texts = [], breaks = [], bumpHits = [];
+  const rings = [], sparks = [], dots = [], shards = [], pops = [], texts = [], breaks = [], bumpHits = [], shocks = [];
   const edgeFlash = {}, barrierFlash = {}, wallFlash = {};
   const blockSeen = new Map();                             // plots bloqueurs : instant d'apparition (animation d'entrée)
   let actx = null, sndPan = 0;
@@ -634,7 +634,7 @@ export default (function () {
     ballPopUntil = now + 90;
     if (f.type === 'hit') {                                  // renvoi : flash du tube, onde, gerbe vers le terrain
       const col = colSeat(f.side); edgeFlash[f.side] = now;
-      ring(f.x, f.y, 4, 24, 320, col, 2.5, 0, now);
+      ring(f.x, f.y, 4, 24, 320, col, 2.5, 0, now); push(shocks, 8, { x: f.x, y: f.y, born: now, col, big: false });   // onde de choc dans la grille du sol
       burst(f.x, f.y, 7, inA, 1.9, 2, 5.5, col, '#ffffff', 280, now);
       return;
     }
@@ -653,13 +653,13 @@ export default (function () {
     }
     if (f.type === 'bump') {                                 // bumper : flash du plot, étoile d'étincelles
       push(bumpHits, 24, { x: f.x, y: f.y, born: now });
-      ring(f.x, f.y, 10, 34, 300, '#b8c2ff', 2.5, 0, now);
+      ring(f.x, f.y, 10, 34, 300, '#b8c2ff', 2.5, 0, now); push(shocks, 8, { x: f.x, y: f.y, born: now, col: '#b8c2ff', big: false });
       burst(f.x, f.y, 6, 0, Math.PI * 2, 2, 4, '#b8c2ff', '#ffffff', 240, now);
       return;
     }
     if (f.type === 'wallboost') {                            // mur d'éliminé : relance ambrée, le mur s'illumine
       const ei = nearestEdge(f.x, f.y), we = ei >= 0 ? snap.geo.edges[ei] : null; if (ei >= 0) wallFlash[ei] = now;
-      ring(f.x, f.y, 5, 30, 320, '#ffb545', 3, 0, now);
+      ring(f.x, f.y, 5, 30, 320, '#ffb545', 3, 0, now); push(shocks, 8, { x: f.x, y: f.y, born: now, col: '#ffb545', big: false });
       burst(f.x, f.y, 9, we ? Math.atan2(we.ny, we.nx) : 0, 1.3, 3, 7, '#ffb545', '#fff1c9', 300, now);
       return;
     }
@@ -673,7 +673,7 @@ export default (function () {
       const col = colSeat(f.side), mine = f.side === mySeat;
       shakeMag = Math.max(shakeMag, f.elim ? (mine ? 12 : 7) : (mine ? 9 : 4.5));
       if (f.elim) { hitStop.trigger(now); push(elimFl, 6, { x: f.x, y: f.y, born: now + 60 }); }   // arrêt sur image 60 ms, puis éclat blanc qui s'estompe
-      ring(f.x, f.y, 6, 66, 650, col, 5, 0, now); ring(f.x, f.y, 4, 40, 380, '#ffffff', 2, 0, now, 40);
+      ring(f.x, f.y, 6, 66, 650, col, 5, 0, now); ring(f.x, f.y, 4, 40, 380, '#ffffff', 2, 0, now, 40); push(shocks, 8, { x: f.x, y: f.y, born: now, col, big: true });
       motes(f.x, f.y, 14, 0.6, 2.6, col, 600, 2.4, now);
       const pl = snap.players[f.side];
       if (e && pl) {
@@ -887,7 +887,7 @@ export default (function () {
 
   // 2) sol du terrain (repère du TERRAIN, sur la boîte figée par geoFit) : pris dans le polygone à chaque image
   //    par un clip — le rétrécissement de mort subite découvre donc le sol sans jamais le redessiner.
-  let fieldCv = null, fglowCv = null, fieldKey = '', fbox = null;
+  let fieldCv = null, fglowCv = null, fshockCv = null, fieldKey = '', fbox = null;
   function ensureField(E, fit) {
     const x0 = fit.x0 != null ? fit.x0 : 0, y0 = fit.y0 != null ? fit.y0 : 0, bw = fit.bw != null ? fit.bw : W, bh = fit.bh != null ? fit.bh : H;
     const key = cv.width + '|' + W + '|' + TH.key + '|' + (A.contrast ? 1 : 0) + '|' + E.length + '|' + fit.s.toFixed(3) + '|' + Math.round(x0) + '|' + Math.round(y0);
@@ -925,6 +925,12 @@ export default (function () {
     q.shadowColor = TH.hot; q.shadowBlur = 4; q.strokeStyle = rgba(TH.hot, TH.add ? 0.9 : 0.5); q.lineWidth = 2.2;
     const L2 = (step) => { q.beginPath(); for (let x = cx - Math.ceil((cx - bx) / step) * step; x <= bx + fw; x += step) { q.moveTo(x, by); q.lineTo(x, by + fh); } for (let y = cy - Math.ceil((cy - by) / step) * step; y <= by + fh; y += step) { q.moveTo(bx, y); q.lineTo(bx + fw, y); } };
     L2(100 * u); q.stroke(); emb(q, 2.2);
+    // grille complète allumée (demi-résolution) : l'onde de choc d'un renvoi la révèle dans un anneau qui s'élargit
+    fshockCv = mkCanvas(fw * dpu / 2, fh * dpu / 2);
+    const z = fshockCv.getContext('2d'); z.setTransform(dpu / 2, 0, 0, dpu / 2, -bx * dpu / 2, -by * dpu / 2);
+    const L3 = (step) => { z.beginPath(); for (let x = cx - Math.ceil((cx - bx) / step) * step; x <= bx + fw; x += step) { z.moveTo(x, by); z.lineTo(x, by + fh); } for (let y = cy - Math.ceil((cy - by) / step) * step; y <= by + fh; y += step) { z.moveTo(bx, y); z.lineTo(bx + fw, y); } };
+    z.strokeStyle = rgba(TH.B, TH.add ? 0.7 : 0.45); z.lineWidth = 1.4; L3(25 * u); z.stroke();
+    z.strokeStyle = rgba(TH.hot, TH.add ? 1 : 0.6); z.lineWidth = 2.4; L3(100 * u); z.stroke();
   }
 
   // 3) sprites cachés : lueurs, jetons de bonus, bumpers, nœuds de coin, vignettes colorées
@@ -1081,6 +1087,19 @@ export default (function () {
       const b = beat(now), a = (gs === 'play' ? 0.1 + 0.5 * b : 0.08 + 0.14 * b) * (A.music ? 1 : 0.45) * (A.contrast ? 0.6 : 1);
       ctx.globalCompositeOperation = ADD(); ctx.globalAlpha = TH.add ? a : a * 0.6; ctx.drawImage(fglowCv, fbox.x, fbox.y, fbox.w, fbox.h);
       if (gs === 'play') { const heat = musicIntensity(); if (heat > 0.15) { ctx.globalAlpha = 0.42 * heat; ctx.drawImage(edgeVig('#ff5a28'), fbox.x, fbox.y, fbox.w, fbox.h); } }   // le terrain « chauffe » avec la vitesse des échanges
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    if (!A.reduceFx && fshockCv) {                                       // ondes de choc : la grille du sol s'allume dans un anneau qui s'élargit
+      const u = W / 500;
+      for (let i = shocks.length - 1; i >= 0; i--) {
+        const q = shocks[i], t = (now - q.born) / (q.big ? 950 : 560); if (t >= 1) { shocks.splice(i, 1); continue; } if (t < 0) continue;
+        const e = 1 - (1 - t) * (1 - t), R = 6 + (q.big ? 260 : 130) * u * e, w = (q.big ? 40 : 24) * u * (1 - 0.5 * t);
+        ctx.save(); ctx.beginPath(); ctx.arc(q.x, q.y, R + w / 2, 0, Math.PI * 2); ctx.arc(q.x, q.y, Math.max(0.1, R - w / 2), 0, Math.PI * 2, true); ctx.clip();
+        ctx.globalCompositeOperation = ADD(); ctx.globalAlpha = (1 - t) * (q.big ? 0.9 : 0.7) * (TH.add ? 1 : 0.7);
+        ctx.drawImage(fshockCv, fbox.x, fbox.y, fbox.w, fbox.h);
+        ctx.globalAlpha = (1 - t) * 0.1; ctx.fillStyle = q.col; ctx.fillRect(q.x - R - w, q.y - R - w, (R + w) * 2, (R + w) * 2);   // voile coloré du front d'onde
+        ctx.restore();
+      }
       ctx.globalCompositeOperation = 'source-over';
     }
     if (snap.sd && gs === 'play') { ctx.globalAlpha = A.reduceFx ? 0.3 : 0.24 + 0.2 * Math.sin(now / 160); ctx.drawImage(edgeVig('#ff2850'), fbox.x, fbox.y, fbox.w, fbox.h); }   // mort subite : alarme rouge
@@ -1289,6 +1308,8 @@ export default (function () {
         ctx.globalCompositeOperation = ADD(); ctx.strokeStyle = tcol;
         for (let j = s0 + 1; j < tr.n; j++) { const f = (j - s0) / k; ctx.globalAlpha = 0.5 * f; ctx.lineWidth = BALL_R * 1.8 * f; seg(tr.x[j - 1], tr.y[j - 1], tr.x[j], tr.y[j]); }
         if (hot > 0.4) { ctx.strokeStyle = '#ffffff'; for (let j = Math.max(s0 + 1, tr.n - 5); j < tr.n; j++) { const f = (j - tr.n + 6) / 6; ctx.globalAlpha = 0.5 * f * hot; ctx.lineWidth = BALL_R * 0.7 * f; seg(tr.x[j - 1], tr.y[j - 1], tr.x[j], tr.y[j]); } }   // cœur chauffé à blanc
+        ctx.fillStyle = tcol;                                            // images rémanentes : 3 balles fantômes égrenées sur la traînée
+        for (let g = 1; g <= 3; g++) { const j = tr.n - 1 - g * 3; if (j < s0) break; ctx.globalAlpha = (0.32 - g * 0.08) * (0.6 + 0.6 * hot); ctx.beginPath(); ctx.arc(tr.x[j], tr.y[j], BALL_R * (1 - g * 0.16), 0, Math.PI * 2); ctx.fill(); }
         ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
         if (hot > 0.55 && !rpl && Math.random() < 0.3 * kdt) { const a = Math.random() * Math.PI * 2; push(sparks, CAP.sparks, { x: b.x, y: b.y, vx: Math.cos(a) * 1.2, vy: Math.sin(a) * 1.2, born: now, life: 220, col: tcol, w: 1.2 }); }   // étincelles perdues à haute vitesse
       }
@@ -1312,7 +1333,7 @@ export default (function () {
     }
   }
   function drawFx(now, kdt) {
-    if (A.reduceFx) { rings.length = 0; sparks.length = 0; dots.length = 0; shards.length = 0; pops.length = 0; texts.length = 0; elimFl.length = 0; return; }
+    if (A.reduceFx) { rings.length = 0; sparks.length = 0; dots.length = 0; shards.length = 0; pops.length = 0; texts.length = 0; elimFl.length = 0; shocks.length = 0; return; }
     ctx.lineCap = 'round';
     for (let i = rings.length - 1; i >= 0; i--) {                        // ondes : pleine, pointillée (fantôme), dentelée (malus), hexagonale (bouclier)
       const q = rings[i], t = (now - q.born) / q.life; if (t >= 1) { rings.splice(i, 1); continue; } if (t < 0) continue;
@@ -1494,6 +1515,40 @@ export default (function () {
   /* ---- éclairage dynamique et crépuscule (couche commune, par-dessus la refonte) ---- */
   // Lumière tombée sur le SOL : après drawField, avant les bords et les pièces, prise dans le polygone
   // (hors terrain le canvas est transparent en plein écran : une lueur additive y ferait une tache).
+  // Sol réfléchissant : le néon se mire dans le sol lustré, comme sur un bitume mouillé — chaque pièce lumineuse est
+  // recopiée vers le BAS de l'écran (caméra légèrement inclinée), en 3 copies de plus en plus pâles : bords, raquettes,
+  // balles. Plus un reflet de lumière qui balaie le sol en diagonale toutes les 11 s. Sous les pièces, pris dans le terrain.
+  const REFL = [[6, 0.16], [12, 0.09], [19, 0.045]];                     // [décalage (u), opacité]
+  function drawReflections(E, vballs, vpos, now, live) {
+    if (A.reduceFx || !fbox) return;
+    const u = W / 500, k = (TH.add ? 1 : 0.5) * (A.contrast ? 0.6 : 1);
+    ctx.save(); polyPath(E); ctx.clip();
+    const L = fbox.w + fbox.h, s = (((now / 11000) % 1) * 1.6 - 0.3) * L / 2, cx = fbox.x + s, cy = fbox.y + s, wb = L * 0.07;   // balayage
+    const gg = ctx.createLinearGradient(cx - wb, cy - wb, cx + wb, cy + wb);
+    gg.addColorStop(0, 'rgba(255,255,255,0)'); gg.addColorStop(0.5, 'rgba(255,255,255,' + (0.05 * k) + ')'); gg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.globalCompositeOperation = ADD(); ctx.globalAlpha = 1; ctx.fillStyle = gg; ctx.fillRect(fbox.x, fbox.y, fbox.w, fbox.h);
+    ctx.lineCap = 'round';
+    for (const e of E) {                                                 // bords : murs et lignes de but
+      const q = e.owner >= 0 ? snap.players[e.owner] : null, vivant = !!(q && (!q.playing || q.alive));
+      const col = vivant ? colSeat(e.owner) : TH.wall, a0 = vivant ? (e.owner === mySeat ? 1 : 0.75) : 0.5;
+      ctx.strokeStyle = col; ctx.lineWidth = 4 * u;
+      for (const r of REFL) { ctx.globalAlpha = r[1] * a0 * k; seg(e.ax, e.ay + r[0] * u, e.bx, e.by + r[0] * u); }
+    }
+    for (const p of snap.players) {                                      // raquettes
+      if (p.edge < 0 || (p.playing && !p.alive)) continue;
+      const e = E[p.edge]; if (!e) continue;
+      const hz = e.ny * e.ny; if (hz < 0.25) continue;                   // bord presque vertical : le reflet prolongerait la raquette (trompeur), on s'en passe
+      const r = PAD_W / 2, hl = Math.max(0.5, (p.len || 0) / 2 - r), m = pt(e, vpos(p.seat), PAD_OFF + r);
+      ctx.strokeStyle = colOf(p); ctx.lineWidth = PAD_W * 0.9;
+      for (const q of REFL) { const dy = q[0] * 0.8 * u; ctx.globalAlpha = q[1] * 1.5 * k * hz; seg(m[0] - e.tx * hl, m[1] - e.ty * hl + dy, m[0] + e.tx * hl, m[1] + e.ty * hl + dy); }
+    }
+    if (live) for (const b of vballs) {                                  // balles : traînée de lumière étirée sous elles
+      if (b.iv) continue;
+      const sp = glowSprite(b.gh ? '#cbb3ff' : b.o >= 0 ? colSeat(b.o) : (TH.add ? '#ffffff' : TH.A)), R = BALL_R * 1.7;
+      for (const q of REFL) { ctx.globalAlpha = q[1] * 2.4 * k; ctx.drawImage(sp, b.x - R, b.y + q[0] * 1.4 * u - R * 1.5, R * 2, R * 3); }
+    }
+    ctx.restore(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  }
   function drawLights(E, vballs, now, live) {
     if (A.reduceFx) return;
     const k = lightK();
@@ -1592,6 +1647,7 @@ export default (function () {
       const E = geo.edges, gs = snap.gs, over = gs === 'over';
       drawField(E, fit, now);
       drawLights(E, vballs, now, gs === 'play' || gs === 'paused' || gs === 'countdown');
+      drawReflections(E, vballs, vpos, now, gs === 'play' || gs === 'paused' || gs === 'countdown' || !!rf);
       let nP = 0; for (const q of snap.players) if (q.playing && q.edge >= 0) nP++;
       const chips = nP >= 7 || gs === 'countdown' || (gs === 'play' && now - countT < 2000);   // pastilles n° : toujours à 7+ (les teintes ne suffisent plus), sinon au décompte et 2 s après le coup d'envoi
       drawEdges(E, now, (gs === 'play' || gs === 'paused') ? vballs : null);
