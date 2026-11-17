@@ -1309,7 +1309,7 @@ export default (function () {
         for (let j = s0 + 1; j < tr.n; j++) { const f = (j - s0) / k; ctx.globalAlpha = 0.5 * f; ctx.lineWidth = BALL_R * 1.8 * f; seg(tr.x[j - 1], tr.y[j - 1], tr.x[j], tr.y[j]); }
         if (hot > 0.4) { ctx.strokeStyle = '#ffffff'; for (let j = Math.max(s0 + 1, tr.n - 5); j < tr.n; j++) { const f = (j - tr.n + 6) / 6; ctx.globalAlpha = 0.5 * f * hot; ctx.lineWidth = BALL_R * 0.7 * f; seg(tr.x[j - 1], tr.y[j - 1], tr.x[j], tr.y[j]); } }   // cœur chauffé à blanc
         ctx.fillStyle = tcol;                                            // images rémanentes : 3 balles fantômes égrenées sur la traînée
-        for (let g = 1; g <= 3; g++) { const j = tr.n - 1 - g * 3; if (j < s0) break; ctx.globalAlpha = (0.32 - g * 0.08) * (0.6 + 0.6 * hot); ctx.beginPath(); ctx.arc(tr.x[j], tr.y[j], BALL_R * (1 - g * 0.16), 0, Math.PI * 2); ctx.fill(); }
+        for (let g = 1; g <= 3; g++) { const j = tr.n - 1 - g * 3; if (j < s0) break; ctx.globalAlpha = (0.32 - g * 0.08) * (0.6 + 0.6 * hot) * (TH.add ? 1 : 0.45); ctx.beginPath(); ctx.arc(tr.x[j], tr.y[j], BALL_R * (1 - g * 0.16), 0, Math.PI * 2); ctx.fill(); }
         ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
         if (hot > 0.55 && !rpl && Math.random() < 0.3 * kdt) { const a = Math.random() * Math.PI * 2; push(sparks, CAP.sparks, { x: b.x, y: b.y, vx: Math.cos(a) * 1.2, vy: Math.sin(a) * 1.2, born: now, life: 220, col: tcol, w: 1.2 }); }   // étincelles perdues à haute vitesse
       }
