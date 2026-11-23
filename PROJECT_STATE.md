@@ -1523,6 +1523,29 @@ directement sur la sortie, sans espace ni variation ; le moteur de Micro était 
 - Fait par un workflow (9 agents, un par jeu, puis relecture croisée) ; calage des niveaux après mesure.
 - **Non vérifiable ici** : l'écoute réelle (agrément, réalisme). Retours attendus de l'utilisateur via /sons.html.
 
+## Rafraîchissement graphique de Snake, Tron et Pong (16-18/11/2026)
+Demande : remettre les trois plus anciens jeux au niveau de finition des circuits de Micro Machines ; une direction choisie
+par l'utilisateur pour chacun, chaque jeu validé sur captures avant sa mise en ligne. **Graphismes seulement : aucune règle,
+aucune collision, aucune taille de pièce n'a changé.** Tout l'animé est coupé en « Réduire les effets ».
+- **Snake — « Jardin vivant »** (`public/games/snake/client.js`) : pelouse claire en damier avec bandes de tonte et
+  pâquerettes, haie de buis fleurie et pots aux angles, fruits variés (pomme, poire, cerises, prune) ; serpents épais à
+  écailles en losange, ombre douce, queue effilée, tête à gros yeux qui suivent la nourriture, narines, langue fourchue.
+- **Tron — « Murs de lumière »** (`public/games/tron/client.js`, `style.css`) : chaque traînée est un mur vu en oblique
+  (`WALL_H` = 0,4 case : pied sombre sur les cases réelles, flanc en deux tons, sommet à arête lumineuse, reflet au sol) ;
+  moto de lumière avec pilote (casque, visière, bras), roues carénées à jante lumineuse, même encombrement qu'avant ;
+  dérésolution = la moto éclate en carreaux de pixels (8×4) et le bout du mur s'effrite ; ville-circuit en SVG posée sur
+  l'horizon du fond de page (Néon cyan, CRT vert).
+- **Pong — « Néon enrichi »** (`public/games/pong/client.js`, `style.css`) : sol réfléchissant (`drawReflections` : bords,
+  raquettes des bords horizontaux, balles, recopiés vers le bas de l'écran ; pas de reflet de raquette sur un bord vertical,
+  il la ferait paraître plus longue) et reflet qui balaie le terrain ; onde de choc (`shocks`) qui allume la grille complète
+  du sol (`fshockCv`) dans un anneau qui s'élargit à chaque renvoi, bumper, relance ou vie perdue ; 3 images rémanentes sur
+  la traînée de la balle ; ville synthwave devant le soleil de la page (variable CSS `--ville`, creux au centre pour le
+  soleil) et, en partie sur grand écran, la même scène dans la colonne de jeu (`.stage::before` ville + lueur,
+  `.stage::after` sol quadrillé qui défile, transformation seule).
+- Les villes sont des SVG **générés** (immeubles, fenêtres, toits néon, antennes, pistes) puis écrits en data URI dans
+  `style.css` : du texte, aucun fichier binaire.
+- **Non vérifié** : iPhone, option « contraste élevé ».
+
 ## Limites connues (assumées)
 - ~~Prédiction locale de sa raquette~~ **FAIT (23/09)** — voir « Prédiction locale (Pong) ».
 - Hébergement Render en **Europe (Frankfurt)** — confirmé par l'utilisateur, donc ~15-25 ms de ping : le ping
